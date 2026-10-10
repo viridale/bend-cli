@@ -1,5 +1,5 @@
-# Purpose: the pure grep example app; M0 module scaffold.
-# Expected output: ALL PROOFS CHECK (no definitions yet).
+# Purpose: the pure grep example app.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend examples/grep/app.bend --check-only
 
 import Base

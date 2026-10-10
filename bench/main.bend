@@ -1,5 +1,5 @@
-# Purpose: CLI benchmark; M0 module scaffold.
-# Expected output: ALL PROOFS CHECK (no benchmark yet).
+# Purpose: CLI benchmark.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend bench/main.bend --check-only
 
 import Base

@@ -1,5 +1,5 @@
-# Purpose: the pkg reference app shell; M0 module scaffold.
-# Expected output: ALL PROOFS CHECK (no executable main yet).
+# Purpose: the pkg reference app shell.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend main.bend --check-only
 
 import Base

@@ -1,1 +1,1 @@
-# M0 placeholder. M7 records per-def FID term_keep ctr_take rfc_seal counts.
+# FID term_keep ctr_take rfc_seal

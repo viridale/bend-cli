@@ -1,5 +1,5 @@
-# Purpose: proofs of the grep example laws; M0 scaffold.
-# Expected output: ALL PROOFS CHECK (no laws stated yet).
+# Purpose: proofs of the grep example laws.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend examples/grep/PROOF.bend --check-only
 
 import Base

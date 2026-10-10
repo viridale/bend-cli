@@ -1,5 +1,5 @@
-# Purpose: laws for the hello example; M0 scaffold.
-# Expected output: ALL PROOFS CHECK (no laws stated yet).
+# Purpose: laws for the hello example.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend examples/hello/LAWS.bend --check-only
 
 import Base

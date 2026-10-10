@@ -27,15 +27,28 @@ law p2:
     == Cli.emit(False{}, segments) : String}
 
 # P13: each wrapped line fits visibly, or has at most one space-delimited word.
+type P13Line is Data:
+  P13Line{text: String, cols: Nat}
+
+def p13_lines(lines: List<&2, String>, +cols: Nat) -> List<&2, P13Line>:
+  match lines:
+    case Nil{}: Nil{}
+    case text <> tail:
+      P13Line{text, cols} <> p13_lines(tail, cols)
+
+def p13_entry_good(entry: P13Line) -> Bool:
+  match entry:
+    case P13Line{+text, cols}:
+      Bool.or(Nat.is_le(Cli.width(Cli.strip(text)), cols),
+        Nat.is_le(List.length(&2, String,
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+            String.split(text, ' '))), 1n))
+
 law p13:
   for s: String
   for +cols: Nat
-  {List.all(~&2, ~String, ~(+line => Bool.or(
-    Nat.is_le(Cli.width(Cli.strip(line)), cols),
-    Nat.is_le(List.length(&2, String,
-      List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
-        String.split(line, ' '))), 1n))),
-    String.lines(Cli.wrap(s, cols))) == True{} : Bool}
+  {List.all(~&2, ~P13Line, ~p13_entry_good,
+    p13_lines(String.lines(Cli.wrap(s, cols)), cols)) == True{} : Bool}
 
 # G-TEXT: U+31EF changes from width 1 to 2 in Unicode 15.1.
 law g_text_width:

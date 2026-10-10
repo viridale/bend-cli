@@ -1,5 +1,5 @@
-# Purpose: the pkg reference app; M0 module scaffold.
-# Expected output: ALL PROOFS CHECK (no definitions yet).
+# Purpose: the pkg reference app.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend demo.bend --check-only
 
 import Base

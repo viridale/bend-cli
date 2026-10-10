@@ -40,5 +40,12 @@ jobs:
             while IFS= read -r file; do
               bend "$file" --check-only
             done
+      - name: Check proofs
+        run: |
+          bend PROOF.bend
+          find examples -name PROOF.bend -print | sort |
+            while IFS= read -r file; do
+              bend "$file"
+            done
 
-  # Add G3-G8 in milestone order as their implementations become runnable.
+  # Add G4-G8 in milestone order as their implementations become runnable.

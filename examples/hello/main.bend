@@ -1,5 +1,5 @@
-# Purpose: the hello example shell; M0 module scaffold.
-# Expected output: ALL PROOFS CHECK (no executable main yet).
+# Purpose: the hello example shell.
+# Expected output: ALL PROOFS CHECK.
 # Run: bend examples/hello/main.bend --check-only
 
 import Base
