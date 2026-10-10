@@ -1,0 +1,12 @@
+
+- Before writing Bend, run `bend version` and read all of `bend guide`; read `bend guide shaders` before parallel or graphical work.
+- State each requirement as a law in `LAWS.bend` before writing its code, and put the law diff up for review before proving it.
+- Never delete or weaken an accepted law to pass a check; prove every law in `PROOF.bend` and require `bend PROOF.bend` to pass.
+- Lay out `main.bend`, `LAWS.bend`, and `PROOF.bend` as Bend's demos do: a header comment with purpose, expected output, and run command; laws through an import alias; one proof def per law.
+- Keep decisions in pure functions over `Data` with the IO in a thin shell; match every `Result`, close every handle on every branch, bound loops with `Nat` fuel, and keep `@unsafe` out of anything a law depends on.
+- Define a def above its first caller, put the shrinking argument first, match only parameters and pattern-bound variables, and annotate every operator and every `<-` bind; check with `--check-only` after each def.
+- Fork with `a b = f(x) g(y)` over halves of equal work, splitting on a `Nat` depth with the midpoint at `i + (1 << p)`; leaves run a tail loop over 8 to 64 items, and a head-and-tail recursion runs on one core.
+- Use `Array` for data that is indexed or updated in place, a tree for data a fork splits, and a list for data a leaf walks once.
+- Write `+` only for a second use and `Array.clone` only for a second array; count `term_keep`, `ctr_take`, and `rfc_seal` inside your defs in the emitted C, and treat a new one as a regression.
+- Build the deployment target; run it with `--threads 1` and with all cores, confirm equal output, and report the speedup.
+- Run `bend PROOF.bend --verdict` last; report commands, outputs, and open holes, since a passing proof covers only its stated laws.

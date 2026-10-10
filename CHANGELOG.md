@@ -1,0 +1,17 @@
+# Changelog
+
+## 1.0.0.0
+
+### Added
+
+- Pure command definitions, parsing, typed decoding, validation, and source
+  tracking.
+- Summary and full help, usage errors with suggestions, color, and version
+  output.
+- Bash, zsh, and fish completions and man pages.
+- IO shell for native and compiled-JavaScript applications.
+- Example applications, laws, end-to-end cases, and a benchmark.
+
+### Output changes
+
+- Initial release; there is no prior output contract.

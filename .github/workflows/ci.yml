@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  m0:
+    name: M0 baseline (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Bend
+        run: |
+          curl -fsSL https://bend-lang.com/install.sh -o /tmp/bend-install.sh
+          sh /tmp/bend-install.sh
+          echo "$HOME/.bend/bin" >> "$GITHUB_PATH"
+      - name: Check Bend version
+        run: |
+          bend version
+          version="$(bend version | awk '{print $2}')"
+          IFS=. read -r major minor patch <<< "$version"
+          if (( major < 2 || (major == 2 && minor == 0 && patch < 36) )); then
+            echo "Bend 2.0.36 or newer is required" >&2
+            exit 1
+          fi
+      - name: Check scaffold modules
+        run: |
+          find . -name '*.bend' -not -path './tmp/*' -print | sort |
+            while IFS= read -r file; do
+              bend "$file" --check-only
+            done
+
+  # Add G3-G8 in milestone order as their implementations become runnable.
