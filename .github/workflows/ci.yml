@@ -8,8 +8,8 @@ permissions:
   contents: read
 
 jobs:
-  m0:
-    name: M0 baseline (${{ matrix.os }})
+  source_checks:
+    name: Bend source checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,9 +33,10 @@ jobs:
             echo "Bend 2.0.36 or newer is required" >&2
             exit 1
           fi
-      - name: Check scaffold modules
+      - name: Check source modules
         run: |
-          find . -name '*.bend' -not -path './tmp/*' -print | sort |
+          find . -name '*.bend' -not -path './tmp/*' \
+            -not -path './LAWS.bend' -not -path './PROOF.bend' -print | sort |
             while IFS= read -r file; do
               bend "$file" --check-only
             done
