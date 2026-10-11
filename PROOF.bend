@@ -45,6 +45,9 @@ def Laws.g_lint_dup_repeat():
 def Laws.g_lint_dup_id():
   {==}
 
+def Laws.g_lint_dup_global():
+  {==}
+
 def Laws.g_lint_dup_sub():
   {==}
 
@@ -190,24 +193,6 @@ def free_of_contains(s: String,
         head_free => tail_prem =>
           (head_free, free_of_contains(tail, tail_prem)))
 
-def free_append_left(a: String, b: String,
-    free: EscFree(String.append(a, b))) -> EscFree(a):
-  match a:
-    case SNil{}:
-      Unit{}
-    case SCon{head, tail}:
-      (head_free, rest_free) = free
-      (head_free, free_append_left(tail, b, rest_free))
-
-def free_append_right(a: String, b: String,
-    free: EscFree(String.append(a, b))) -> EscFree(b):
-  match a:
-    case SNil{}:
-      free
-    case SCon{head, tail}:
-      (head_free, rest_free) = free
-      free_append_right(tail, b, rest_free)
-
 def free_append_parts(a: String, b: String,
     free: EscFree(String.append(a, b))) ->
     (EscFree(a) & EscFree(b)):
@@ -221,18 +206,6 @@ def free_append_parts(a: String, b: String,
         free_append_parts(tail, b, rest_free),
         left_free => right_free =>
           ((head_free, left_free), right_free))
-
-def append_char_cons(out: String, h: Char, tail: String) ->
-    {String.append(String.append(out, Char.show(h)), tail)
-      == String.append(out, SCon{h, tail}) : String}:
-  match out:
-    case SNil{}:
-      {==}
-    case SCon{head, rest}:
-      %append_char_cons(rest, h, tail) :
-        {SCon{head, String.append(String.append(rest, Char.show(h)), tail)}
-          == SCon{head, _} : String}
-      {==}
 
 def append_nil(s: String) -> {String.append(s, "") == s : String}:
   match s:
@@ -284,320 +257,230 @@ def paint_append_shape(+codes: String, +text: String, +suffix: String) ->
       == String.append("\u{1B}[", _) : String}
   {==}
 
-def strip_reset_free(s: String, +out: String, free: EscFree(s)) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(String.append(s, "\u{1B}[0m"))),
-      Cli.StripPlain{out}, String.append(s, "\u{1B}[0m"))
-      == String.append(out, s) : String}:
-  match s:
-    case SNil{}:
-      Equal.sym(String, String.append(out, ""), out, append_nil(out))
-    case SCon{+head, +tail}:
-      (not_esc, free_tail) = free
-      +rest = String.append(tail, "\u{1B}[0m")
-      +next_out = String.append(out, Char.show(head))
-      step = Equal.cong(Bool, String,
-        b => Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-          Bool.pick(Cli.StripState, b, Cli.StripEsc{out},
-            Cli.StripPlain{next_out}), rest),
-        Char.is_eq(head, '\u{1B}'), False{}, not_esc)
-      Equal.trans(String,
-        Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-          Bool.pick(Cli.StripState, Char.is_eq(head, '\u{1B}'),
-            Cli.StripEsc{out}, Cli.StripPlain{next_out}), rest),
-        Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-          Cli.StripPlain{next_out}, rest),
-        String.append(out, SCon{head, tail}), step,
-        Equal.trans(String,
-          Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-            Cli.StripPlain{next_out}, rest),
-          String.append(next_out, tail),
-          String.append(out, SCon{head, tail}),
-          strip_reset_free(tail, next_out, free_tail),
-          append_char_cons(out, head, tail)))
-
-def plain_skip_free(s: String, +suffix: String, +out: String,
+def plain_skip_free(s: String, +suffix: String,
     free: EscFree(s)) ->
-    {Cli.strip_fuel(Nat.add(1n,
-        String.length(String.append(s, suffix))), Cli.StripPlain{out},
-      String.append(s, suffix))
-      == Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{String.append(out, s)}, suffix) : String}:
+    {Cli.strip_go(String.append(s, suffix), Cli.StripPlain{})
+      == String.append(s, Cli.strip_go(suffix, Cli.StripPlain{})) : String}:
   match s:
     case SNil{}:
-      Equal.cong(String, String,
-        x => Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-          Cli.StripPlain{x}, suffix),
-        out, String.append(out, ""),
-        Equal.sym(String, String.append(out, ""), out, append_nil(out)))
+      {==}
     case SCon{+head, +tail}:
-      (not_esc, free_tail) = free
+      (free_head, free_tail) = free
       +rest = String.append(tail, suffix)
-      +next_out = String.append(out, Char.show(head))
+      +next = Cli.strip_go(rest, Cli.StripPlain{})
       step = Equal.cong(Bool, String,
-        b => Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-          Bool.pick(Cli.StripState, b, Cli.StripEsc{out},
-            Cli.StripPlain{next_out}), rest),
-        Char.is_eq(head, '\u{1B}'), False{}, not_esc)
+        b => String.append(Bool.pick(String, b, "", Char.show(head)),
+          Cli.strip_go(rest, Bool.pick(Cli.StripState, b,
+            Cli.StripEsc{}, Cli.StripPlain{}))),
+        Char.is_eq(head, '\u{1B}'), False{}, free_head)
       Equal.trans(String,
-        Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-          Bool.pick(Cli.StripState, Char.is_eq(head, '\u{1B}'),
-            Cli.StripEsc{out}, Cli.StripPlain{next_out}), rest),
-        Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-          Cli.StripPlain{next_out}, rest),
-        Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-          Cli.StripPlain{String.append(out, SCon{head, tail})}, suffix),
+        Cli.strip_go(String.append(SCon{head, tail}, suffix),
+          Cli.StripPlain{}),
+        String.append(Char.show(head), next),
+        String.append(SCon{head, tail},
+          Cli.strip_go(suffix, Cli.StripPlain{})),
         step,
-        Equal.trans(String,
-          Cli.strip_fuel(Nat.add(1n, String.length(rest)),
-            Cli.StripPlain{next_out}, rest),
-          Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-            Cli.StripPlain{String.append(next_out, tail)}, suffix),
-          Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-            Cli.StripPlain{String.append(out, SCon{head, tail})}, suffix),
-          plain_skip_free(tail, suffix, next_out, free_tail),
-          Equal.cong(String, String,
-            x => Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-              Cli.StripPlain{x}, suffix),
-            String.append(next_out, tail),
-            String.append(out, SCon{head, tail}),
-            append_char_cons(out, head, tail))))
+        Equal.cong(String, String,
+          x => String.append(Char.show(head), x),
+          next, String.append(tail,
+            Cli.strip_go(suffix, Cli.StripPlain{})),
+          plain_skip_free(tail, suffix, free_tail)))
 
-def reset_skip(suffix: String, out: String) ->
-    {Cli.strip_fuel(Nat.add(1n,
-        String.length(String.append("\u{1B}[0m", suffix))),
-      Cli.StripPlain{out}, String.append("\u{1B}[0m", suffix))
-      == Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{out}, suffix) : String}:
+def reset_skip(suffix: String) ->
+    {Cli.strip_go(String.append("\u{1B}[0m", suffix), Cli.StripPlain{})
+      == Cli.strip_go(suffix, Cli.StripPlain{}) : String}:
   {==}
 
-def scan_string_cong(a: String, b: String, state: Cli.StripState,
-    e: {a == b : String}) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(a)), state, a)
-      == Cli.strip_fuel(Nat.add(1n, String.length(b)), state, b)
-      : String}:
-  Equal.cong(String, String,
-    x => Cli.strip_fuel(Nat.add(1n, String.length(x)), state, x),
-    a, b, e)
-
 def body_skip_tail(styles: List<&2, Cli.Style>, +suffix: String,
-    +out: String, pending: String) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(
-        String.append(Cli.style_codes_tail(styles),
-          String.append("m", suffix)))),
-      Cli.StripBody{out, pending},
-      String.append(Cli.style_codes_tail(styles),
-        String.append("m", suffix)))
-      == Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{out}, suffix) : String}:
+    pending: String) ->
+    {Cli.strip_go(String.append(Cli.style_codes_tail(styles),
+        String.append("m", suffix)), Cli.StripBody{pending})
+      == Cli.strip_go(suffix, Cli.StripPlain{}) : String}:
   match styles:
     case Nil{}:
       {==}
     case head <> tail:
       match head:
         case Cli.Bold{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(pending, ";"), "1"))
         case Cli.Dim{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(pending, ";"), "2"))
         case Cli.Under{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(pending, ";"), "4"))
         case Cli.Red{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(String.append(pending, ";"), "3"), "1"))
         case Cli.Green{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(String.append(pending, ";"), "3"), "2"))
         case Cli.Yellow{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(String.append(pending, ";"), "3"), "3"))
         case Cli.Blue{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(String.append(pending, ";"), "3"), "4"))
         case Cli.Magenta{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(String.append(pending, ";"), "3"), "5"))
         case Cli.Cyan{}:
-          body_skip_tail(tail, suffix, out,
+          body_skip_tail(tail, suffix,
             String.append(String.append(String.append(pending, ";"), "3"), "6"))
 
 def body_skip_first(style: Cli.Style, tail: List<&2, Cli.Style>,
-    +suffix: String, +out: String, pending: String) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(
-        String.append(String.append(Cli.style_code(style),
-          Cli.style_codes_tail(tail)), String.append("m", suffix)))),
-      Cli.StripBody{out, pending},
-      String.append(String.append(Cli.style_code(style),
-        Cli.style_codes_tail(tail)), String.append("m", suffix)))
-      == Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{out}, suffix) : String}:
+    +suffix: String, pending: String) ->
+    {Cli.strip_go(String.append(String.append(Cli.style_code(style),
+        Cli.style_codes_tail(tail)), String.append("m", suffix)),
+      Cli.StripBody{pending})
+      == Cli.strip_go(suffix, Cli.StripPlain{}) : String}:
   match style:
     case Cli.Bold{}:
-      body_skip_tail(tail, suffix, out, String.append(pending, "1"))
+      body_skip_tail(tail, suffix, String.append(pending, "1"))
     case Cli.Dim{}:
-      body_skip_tail(tail, suffix, out, String.append(pending, "2"))
+      body_skip_tail(tail, suffix, String.append(pending, "2"))
     case Cli.Under{}:
-      body_skip_tail(tail, suffix, out, String.append(pending, "4"))
+      body_skip_tail(tail, suffix, String.append(pending, "4"))
     case Cli.Red{}:
-      body_skip_tail(tail, suffix, out,
+      body_skip_tail(tail, suffix,
         String.append(String.append(pending, "3"), "1"))
     case Cli.Green{}:
-      body_skip_tail(tail, suffix, out,
+      body_skip_tail(tail, suffix,
         String.append(String.append(pending, "3"), "2"))
     case Cli.Yellow{}:
-      body_skip_tail(tail, suffix, out,
+      body_skip_tail(tail, suffix,
         String.append(String.append(pending, "3"), "3"))
     case Cli.Blue{}:
-      body_skip_tail(tail, suffix, out,
+      body_skip_tail(tail, suffix,
         String.append(String.append(pending, "3"), "4"))
     case Cli.Magenta{}:
-      body_skip_tail(tail, suffix, out,
+      body_skip_tail(tail, suffix,
         String.append(String.append(pending, "3"), "5"))
     case Cli.Cyan{}:
-      body_skip_tail(tail, suffix, out,
+      body_skip_tail(tail, suffix,
         String.append(String.append(pending, "3"), "6"))
 
 def paint_skip_colored(+style: Cli.Style, +styles: List<&2, Cli.Style>,
-    +source: String, +suffix: String, +out: String,
-    free: EscFree(source)) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(
-        String.append(Cli.paint(True{}, style <> styles, source), suffix))),
-      Cli.StripPlain{out},
-      String.append(Cli.paint(True{}, style <> styles, source), suffix))
-      == Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{String.append(out, source)}, suffix) : String}:
+    +source: String, +suffix: String, free: EscFree(source)) ->
+    {Cli.strip_go(String.append(Cli.paint(True{}, style <> styles, source),
+      suffix), Cli.StripPlain{})
+      == String.append(source, Cli.strip_go(suffix, Cli.StripPlain{})) : String}:
   +codes = Cli.style_codes(style <> styles)
   +raw = String.append(Cli.paint(True{}, style <> styles, source), suffix)
   +after_reset = String.append("\u{1B}[0m", suffix)
   +after_text = String.append(source, after_reset)
   +shaped = String.append("\u{1B}[",
     String.append(codes, String.append("m", after_text)))
-  +next_out = String.append(out, source)
-  step_shape = scan_string_cong(raw, shaped, Cli.StripPlain{out},
+  step_shape = Equal.cong(String, String,
+    x => Cli.strip_go(x, Cli.StripPlain{}), raw, shaped,
     paint_append_shape(codes, source, suffix))
-  step_styles = body_skip_first(style, styles, after_text, out,
-    "\u{1B}[")
-  step_text = plain_skip_free(source, after_reset, out, free)
-  step_reset = reset_skip(suffix, next_out)
+  step_styles = body_skip_first(style, styles, after_text, "\u{1B}[")
+  step_text = plain_skip_free(source, after_reset, free)
+  step_reset = reset_skip(suffix)
   Equal.trans(String,
-    Cli.strip_fuel(Nat.add(1n, String.length(raw)),
-      Cli.StripPlain{out}, raw),
-    Cli.strip_fuel(Nat.add(1n, String.length(shaped)),
-      Cli.StripPlain{out}, shaped),
-    Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-      Cli.StripPlain{next_out}, suffix),
+    Cli.strip_go(raw, Cli.StripPlain{}),
+    Cli.strip_go(shaped, Cli.StripPlain{}),
+    String.append(source, Cli.strip_go(suffix, Cli.StripPlain{})),
     step_shape,
     Equal.trans(String,
-      Cli.strip_fuel(Nat.add(1n, String.length(shaped)),
-        Cli.StripPlain{out}, shaped),
-      Cli.strip_fuel(Nat.add(1n, String.length(after_text)),
-        Cli.StripPlain{out}, after_text),
-      Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{next_out}, suffix),
+      Cli.strip_go(shaped, Cli.StripPlain{}),
+      Cli.strip_go(after_text, Cli.StripPlain{}),
+      String.append(source, Cli.strip_go(suffix, Cli.StripPlain{})),
       step_styles,
       Equal.trans(String,
-        Cli.strip_fuel(Nat.add(1n, String.length(after_text)),
-          Cli.StripPlain{out}, after_text),
-        Cli.strip_fuel(Nat.add(1n, String.length(after_reset)),
-          Cli.StripPlain{next_out}, after_reset),
-        Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-          Cli.StripPlain{next_out}, suffix),
-        step_text, step_reset)))
+        Cli.strip_go(after_text, Cli.StripPlain{}),
+        String.append(source, Cli.strip_go(after_reset, Cli.StripPlain{})),
+        String.append(source, Cli.strip_go(suffix, Cli.StripPlain{})),
+        step_text,
+        Equal.cong(String, String,
+          x => String.append(source, x),
+          Cli.strip_go(after_reset, Cli.StripPlain{}),
+          Cli.strip_go(suffix, Cli.StripPlain{}), step_reset))))
 
 def paint_skip(styles: List<&2, Cli.Style>, +source: String,
-    +suffix: String, +out: String, free: EscFree(source)) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(
-        String.append(Cli.paint(True{}, styles, source), suffix))),
-      Cli.StripPlain{out},
-      String.append(Cli.paint(True{}, styles, source), suffix))
-      == Cli.strip_fuel(Nat.add(1n, String.length(suffix)),
-        Cli.StripPlain{String.append(out, source)}, suffix) : String}:
+    +suffix: String, free: EscFree(source)) ->
+    {Cli.strip_go(String.append(Cli.paint(True{}, styles, source), suffix),
+      Cli.StripPlain{})
+      == String.append(source, Cli.strip_go(suffix, Cli.StripPlain{})) : String}:
   match styles:
     case Nil{}:
-      plain_skip_free(source, suffix, out, free)
+      plain_skip_free(source, suffix, free)
     case head <> tail:
-      paint_skip_colored(head, tail, source, suffix, out, free)
+      paint_skip_colored(head, tail, source, suffix, free)
 
-def emit_strip_free(segments: List<&2, Cli.Segment>, +out: String,
+def emit_strip_free(segments: List<&2, Cli.Segment>,
     free: EscFree(Cli.emit(False{}, segments))) ->
-    {Cli.strip_fuel(Nat.add(1n, String.length(Cli.emit(True{}, segments))),
-      Cli.StripPlain{out}, Cli.emit(True{}, segments))
-      == String.append(out, Cli.emit(False{}, segments)) : String}:
+    {Cli.strip_go(Cli.emit(True{}, segments), Cli.StripPlain{})
+      == Cli.emit(False{}, segments) : String}:
   match segments:
     case Nil{}:
-      Equal.sym(String, String.append(out, ""), out, append_nil(out))
+      {==}
     case Cli.Segment{+source, styles} <> +rest:
       +styled_tail = Cli.emit(True{}, rest)
       +plain_tail = Cli.emit(False{}, rest)
-      +next_out = String.append(out, source)
       pair_elim(EscFree(source), EscFree(plain_tail),
-        {Cli.strip_fuel(Nat.add(1n, String.length(
-            String.append(Cli.paint(True{}, styles, source), styled_tail))),
-          Cli.StripPlain{out},
-          String.append(Cli.paint(True{}, styles, source), styled_tail))
-          == String.append(out, String.append(source, plain_tail)) : String},
+        {Cli.strip_go(String.append(Cli.paint(True{}, styles, source),
+          styled_tail), Cli.StripPlain{})
+          == String.append(source, plain_tail) : String},
         free_append_parts(source, plain_tail, free),
         source_free => rest_free =>
           Equal.trans(String,
-            Cli.strip_fuel(Nat.add(1n, String.length(
-                String.append(Cli.paint(True{}, styles, source), styled_tail))),
-              Cli.StripPlain{out},
-              String.append(Cli.paint(True{}, styles, source), styled_tail)),
-            Cli.strip_fuel(Nat.add(1n, String.length(styled_tail)),
-              Cli.StripPlain{next_out}, styled_tail),
-            String.append(out, String.append(source, plain_tail)),
-            paint_skip(styles, source, styled_tail, out, source_free),
-            Equal.trans(String,
-              Cli.strip_fuel(Nat.add(1n, String.length(styled_tail)),
-                Cli.StripPlain{next_out}, styled_tail),
-              String.append(next_out, plain_tail),
-              String.append(out, String.append(source, plain_tail)),
-              emit_strip_free(rest, next_out, rest_free),
-              append_assoc(out, source, plain_tail))))
+            Cli.strip_go(String.append(Cli.paint(True{}, styles, source),
+              styled_tail), Cli.StripPlain{}),
+            String.append(source, Cli.strip_go(styled_tail,
+              Cli.StripPlain{})),
+            String.append(source, plain_tail),
+            paint_skip(styles, source, styled_tail, source_free),
+            Equal.cong(String, String,
+              x => String.append(source, x),
+              Cli.strip_go(styled_tail, Cli.StripPlain{}), plain_tail,
+              emit_strip_free(rest, rest_free))))
 
-def strip_no_esc(+s: String,
-    prem: {String.contains(s, "\u{1B}") == False{} : Bool}) ->
-    {Cli.strip(s) == s : String}:
+def strip_no_esc(+s: String, free: EscFree(s)) ->
+    {Cli.strip_go(s, Cli.StripPlain{}) == s : String}:
   Equal.trans(String,
-    Cli.strip(s),
-    Cli.strip_fuel(Nat.add(1n, String.length(String.append(s, ""))),
-      Cli.StripPlain{""}, String.append(s, "")),
-    s,
-    scan_string_cong(s, String.append(s, ""), Cli.StripPlain{""},
+    Cli.strip_go(s, Cli.StripPlain{}),
+    Cli.strip_go(String.append(s, ""), Cli.StripPlain{}), s,
+    Equal.cong(String, String,
+      x => Cli.strip_go(x, Cli.StripPlain{}),
+      s, String.append(s, ""),
       Equal.sym(String, String.append(s, ""), s, append_nil(s))),
-    plain_skip_free(s, "", "", free_of_contains(s, prem)))
+    Equal.trans(String,
+      Cli.strip_go(String.append(s, ""), Cli.StripPlain{}),
+      String.append(s, Cli.strip_go("", Cli.StripPlain{})), s,
+      plain_skip_free(s, "", free), append_nil(s)))
 
 def paint_strip_no_esc(on: Bool, styles: List<&2, Cli.Style>, +s: String,
-    prem: {String.contains(s, "\u{1B}") == False{} : Bool}) ->
+    free: EscFree(s)) ->
     {Cli.strip(Cli.paint(on, styles, s)) == s : String}:
   match on styles:
     case False{} _:
-      strip_no_esc(s, prem)
+      strip_no_esc(s, free)
     case True{} Nil{}:
-      strip_no_esc(s, prem)
+      strip_no_esc(s, free)
     case True{} +h <> +t:
+      +painted = Cli.paint(True{}, h <> t, s)
       Equal.trans(String,
-        Cli.strip_fuel(Nat.add(1n, String.length(
-          String.append(String.append(Cli.style_code(h),
-            Cli.style_codes_tail(t)),
-            String.append("m", String.append(s, "\u{1B}[0m"))))),
-          Cli.StripBody{"", "\u{1B}["},
-          String.append(String.append(Cli.style_code(h),
-            Cli.style_codes_tail(t)),
-            String.append("m", String.append(s, "\u{1B}[0m")))),
-        Cli.strip_fuel(Nat.add(1n, String.length(
-          String.append(s, "\u{1B}[0m"))), Cli.StripPlain{""},
-          String.append(s, "\u{1B}[0m")), s,
-        body_skip_first(h, t, String.append(s, "\u{1B}[0m"),
-          "", "\u{1B}["),
-        strip_reset_free(s, "", free_of_contains(s, prem)))
+        Cli.strip_go(painted, Cli.StripPlain{}),
+        Cli.strip_go(String.append(painted, ""), Cli.StripPlain{}),
+        s,
+        Equal.cong(String, String,
+          x => Cli.strip_go(x, Cli.StripPlain{}), painted,
+          String.append(painted, ""),
+          Equal.sym(String, String.append(painted, ""), painted,
+            append_nil(painted))),
+        Equal.trans(String,
+          Cli.strip_go(String.append(painted, ""), Cli.StripPlain{}),
+          String.append(s, Cli.strip_go("", Cli.StripPlain{})), s,
+          paint_skip(h <> t, s, "", free), append_nil(s)))
 
 def Laws.p1(on, styles, s):
-  ({==}, (prem => paint_strip_no_esc(on, styles, s, prem)))
+  ({==}, (prem => paint_strip_no_esc(on, styles, s,
+    free_of_contains(s, prem))))
 
 def Laws.p2(segments):
-  prem => emit_strip_free(segments, "",
+  prem => emit_strip_free(segments,
     free_of_contains(Cli.emit(False{}, segments), prem))
 
 def split_fin_append(c: Char, head: String,
@@ -746,21 +629,6 @@ def LineGood(cols: Nat, +line: String) -> Bool:
     Nat.is_le(List.length(&2, String,
       List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
         String.split(line, ' '))), 1n))
-
-def and_true_parts(a: Bool, b: Bool,
-    e: {Bool.and(a, b) == True{} : Bool}) ->
-    ({a == True{} : Bool} & {b == True{} : Bool}):
-  match a b:
-    case False{} _:
-      Empty.absurd({False{} == True{} : Bool} &
-        {b == True{} : Bool}, true_false_absurd(
-          Equal.sym(Bool, False{}, True{}, e)))
-    case True{} False{}:
-      Empty.absurd({True{} == True{} : Bool} &
-        {False{} == True{} : Bool}, true_false_absurd(
-          Equal.sym(Bool, False{}, True{}, e)))
-    case True{} True{}:
-      ({==}, {==})
 
 def and_true(a: Bool, b: Bool,
     ea: {a == True{} : Bool}, eb: {b == True{} : Bool}) ->
@@ -1201,21 +1069,18 @@ def allgood_to_p13_bool(+cols: Nat, xs: List<&2, String>,
         eh => et => and_true(LineGood(cols, head), p13_bool(cols, tail),
           eh, allgood_to_p13_bool(cols, tail, et)))
 
-def join_safe_p13(+cols: Nat, xs: List<&2, String>,
+def join_safe_good(+cols: Nat, xs: List<&2, String>,
     non: NonEmpty(xs), safe: SafeLines(cols, xs)) ->
-    {p13_bool(cols, String.lines(String.join(xs, "\n")))
-      == True{} : Bool}:
+    AllGood(cols, String.lines(String.join(xs, "\n"))):
   match xs:
     case Nil{}:
-      Empty.absurd({p13_bool(cols,
-        String.lines(String.join(Nil{}, "\n"))) == True{} : Bool}, non)
+      Empty.absurd(AllGood(cols, String.lines(String.join(Nil{}, "\n"))), non)
     case +head <> +tail:
       %Equal.sym(List<&2, String>,
         String.lines(String.join(head <> tail, "\n")),
         flatten_lines(head <> tail), join_lines_nonempty(head, tail))
-        : {p13_bool(cols, _) == True{} : Bool}
-      allgood_to_p13_bool(cols, flatten_lines(head <> tail),
-        safe_flatten_good(cols, head <> tail, safe))
+        : AllGood(cols, _)
+      safe_flatten_good(cols, head <> tail, safe)
 
 def ChunkGood(cols: Nat, xs: List<&2, String>) -> Type:
   match xs:
@@ -1248,16 +1113,6 @@ def join_chunks_p13(+cols: Nat, xs: List<&2, String>,
         : {p13_bool(cols, _) == True{} : Bool}
       allgood_to_p13_bool(cols, flatten_lines(head <> tail),
         good_flatten_chunks(cols, head <> tail, chunks))
-
-def p13_bool_to_allgood(+cols: Nat, xs: List<&2, String>,
-    good: {p13_bool(cols, xs) == True{} : Bool}) -> AllGood(cols, xs):
-  match xs:
-    case Nil{}: Unit{}
-    case +head <> +tail:
-      pair_elim({LineGood(cols, head) == True{} : Bool},
-        {p13_bool(cols, tail) == True{} : Bool}, AllGood(cols, head <> tail),
-        and_true_parts(LineGood(cols, head), p13_bool(cols, tail), good),
-        eh => et => (eh, p13_bool_to_allgood(cols, tail, et)))
 
 def allgood_transport(cols: Nat, xs: List<&2, String>,
     ys: List<&2, String>, eq: {xs == ys : List<&2, String>},
@@ -1294,17 +1149,12 @@ def wrap_base_all(+cols: Nat, +line: String, started: Bool,
       String.join(List.reverse(&2, String, line <> done), "\n"), ""))):
   match started:
     case False{}:
-      p13_bool_to_allgood(cols, String.lines(""),
-        join_safe_p13(cols, [""], Unit{},
-          ((empty_good(cols), Unit{}), Unit{})))
+      (empty_good(cols), Unit{})
     case True{}:
-      p13_bool_to_allgood(cols,
-        String.lines(String.join(List.reverse(&2, String,
-          line <> done), "\n")),
-        join_safe_p13(cols, List.reverse(&2, String, line <> done),
-          reverse_nonempty(line, done),
-          safe_reverse_go(cols, line <> done, Nil{},
-            ((line_if, line_no), done_safe), Unit{})))
+      join_safe_good(cols, List.reverse(&2, String, line <> done),
+        reverse_nonempty(line, done),
+        safe_reverse_go(cols, line <> done, Nil{},
+          ((line_if, line_no), done_safe), Unit{}))
 
 def wrap_false_step_all(cols: Nat, word: String,
     rest: List<&2, String>, indent: String, line: String,
@@ -1479,28 +1329,840 @@ def p13_boolean_full(+cols: Nat, +s: String) ->
     wrap_lines_nonempty(String.lines(s), cols, split_nonempty(s, '\n')),
     wrap_lines_chunkgood(cols, String.lines(s), lines_all_nonl(s)))
 
-def p13_alt_equiv(cols: Nat, xs: List<&2, String>) ->
-    {List.all(~&2, ~Laws.P13Line, ~Laws.p13_entry_good,
-      Laws.p13_lines(xs, cols)) == p13_bool(cols, xs) : Bool}:
+def p13_good_equiv(cols: Nat, xs: List<&2, String>) ->
+    {Laws.p13_good(cols, xs) == p13_bool(cols, xs) : Bool}:
   match xs:
     case Nil{}: {==}
     case head <> tail:
       Equal.cong(Bool, Bool,
         b => Bool.and(LineGood(cols, head), b),
-        List.all(~&2, ~Laws.P13Line, ~Laws.p13_entry_good,
-          Laws.p13_lines(tail, cols)),
-        p13_bool(cols, tail), p13_alt_equiv(cols, tail))
+        Laws.p13_good(cols, tail), p13_bool(cols, tail),
+        p13_good_equiv(cols, tail))
 
-def p13_alt_finish(+s: String, +cols: Nat) ->
-    {List.all(~&2, ~Laws.P13Line, ~Laws.p13_entry_good,
-      Laws.p13_lines(String.lines(Cli.wrap(s, cols)), cols))
+def p13_finish(+s: String, +cols: Nat) ->
+    {Laws.p13_good(cols, String.lines(Cli.wrap(s, cols)))
       == True{} : Bool}:
   Equal.trans(Bool,
-    List.all(~&2, ~Laws.P13Line, ~Laws.p13_entry_good,
-      Laws.p13_lines(String.lines(Cli.wrap(s, cols)), cols)),
+    Laws.p13_good(cols, String.lines(Cli.wrap(s, cols))),
     p13_bool(cols, String.lines(Cli.wrap(s, cols))), True{},
-    p13_alt_equiv(cols, String.lines(Cli.wrap(s, cols))),
+    p13_good_equiv(cols, String.lines(Cli.wrap(s, cols))),
     p13_boolean_full(cols, s))
 
 def Laws.p13(s, cols):
-  p13_alt_finish(s, cols)
+  p13_finish(s, cols)
+
+def list_append_assoc(+xs: List<&2, String>, +ys: List<&2, String>,
+    +zs: List<&2, String>) ->
+    {List.append(&2, String, List.append(&2, String, xs, ys), zs)
+      == List.append(&2, String, xs, List.append(&2, String, ys, zs))
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case head <> tail:
+      %list_append_assoc(tail, ys, zs) :
+        {head <> List.append(&2, String,
+          List.append(&2, String, tail, ys), zs) == head <> _
+          : List<&2, String>}
+      {==}
+
+def all_words_append(xs: List<&2, String>, +ys: List<&2, String>) ->
+    {Laws.all_words(List.append(&2, String, xs, ys))
+      == List.append(&2, String, Laws.all_words(xs), Laws.all_words(ys))
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case +head <> +tail:
+      Equal.trans(List<&2, String>,
+        List.append(&2, String, Cli.words(head),
+          Laws.all_words(List.append(&2, String, tail, ys))),
+        List.append(&2, String, Cli.words(head),
+          List.append(&2, String, Laws.all_words(tail),
+            Laws.all_words(ys))),
+        List.append(&2, String,
+          List.append(&2, String, Cli.words(head), Laws.all_words(tail)),
+          Laws.all_words(ys)),
+        Equal.cong(List<&2, String>, List<&2, String>,
+          rest => List.append(&2, String, Cli.words(head), rest),
+          Laws.all_words(List.append(&2, String, tail, ys)),
+          List.append(&2, String, Laws.all_words(tail),
+            Laws.all_words(ys)), all_words_append(tail, ys)),
+        Equal.sym(List<&2, String>,
+          List.append(&2, String,
+            List.append(&2, String, Cli.words(head), Laws.all_words(tail)),
+            Laws.all_words(ys)),
+          List.append(&2, String, Cli.words(head),
+            List.append(&2, String, Laws.all_words(tail),
+              Laws.all_words(ys))),
+          list_append_assoc(Cli.words(head), Laws.all_words(tail),
+            Laws.all_words(ys))))
+
+def chunk_words(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}: Nil{}
+    case head <> tail:
+      List.append(&2, String, Laws.all_words(String.lines(head)),
+        chunk_words(tail))
+
+def all_words_flatten(xs: List<&2, String>) ->
+    {Laws.all_words(flatten_lines(xs)) == chunk_words(xs)
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case +head <> +tail:
+      Equal.trans(List<&2, String>,
+        Laws.all_words(List.append(&2, String, String.lines(head),
+          flatten_lines(tail))),
+        List.append(&2, String,
+          Laws.all_words(String.lines(head)),
+          Laws.all_words(flatten_lines(tail))),
+        chunk_words(head <> tail),
+        all_words_append(String.lines(head), flatten_lines(tail)),
+        Equal.cong(List<&2, String>, List<&2, String>,
+          rest => List.append(&2, String,
+            Laws.all_words(String.lines(head)), rest),
+          Laws.all_words(flatten_lines(tail)), chunk_words(tail),
+          all_words_flatten(tail)))
+
+def join_words_nonempty(+head: String, +tail: List<&2, String>) ->
+    {Laws.all_words(String.lines(String.join(head <> tail, "\n")))
+      == chunk_words(head <> tail) : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    Laws.all_words(String.lines(String.join(head <> tail, "\n"))),
+    Laws.all_words(flatten_lines(head <> tail)),
+    chunk_words(head <> tail),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => Laws.all_words(xs),
+      String.lines(String.join(head <> tail, "\n")),
+      flatten_lines(head <> tail),
+    join_lines_nonempty(head, tail)),
+    all_words_flatten(head <> tail))
+
+def split_append_space(s: String, +t: String) ->
+    {String.split(String.append(s, String.append(" ", t)), ' ')
+      == List.append(&2, String, String.split(s, ' '), String.split(t, ' '))
+      : List<&2, String>}:
+  match s:
+    case SNil{}: {==}
+    case SCon{+head, +tail}:
+      Equal.trans(List<&2, String>,
+        String.split.fin(head,
+          String.split(String.append(tail, String.append(" ", t)), ' '),
+          Char.is_eq(head, ' ')),
+        String.split.fin(head,
+          List.append(&2, String, String.split(tail, ' '),
+            String.split(t, ' ')), Char.is_eq(head, ' ')),
+        List.append(&2, String,
+          String.split.fin(head, String.split(tail, ' '),
+            Char.is_eq(head, ' ')), String.split(t, ' ')),
+        Equal.cong(List<&2, String>, List<&2, String>,
+          xs => String.split.fin(head, xs, Char.is_eq(head, ' ')),
+          String.split(String.append(tail, String.append(" ", t)), ' '),
+          List.append(&2, String, String.split(tail, ' '),
+            String.split(t, ' ')), split_append_space(tail, t)),
+        split_fin_append_nonempty(head, String.split(tail, ' '),
+          String.split(t, ' '), Char.is_eq(head, ' '),
+          split_nonempty(tail, ' ')))
+
+def filter_put_append(head: String, xs: List<&2, String>,
+    ys: List<&2, String>, keep: Bool) ->
+    {List.filter.put(String, head, List.append(&2, String, xs, ys), keep)
+      == List.append(&2, String, List.filter.put(String, head, xs, keep), ys)
+      : List<&2, String>}:
+  match keep:
+    case False{}: {==}
+    case True{}: {==}
+
+def filter_words_append(xs: List<&2, String>, +ys: List<&2, String>) ->
+    {List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+        List.append(&2, String, xs, ys))
+      == List.append(&2, String,
+        List.filter(~String, ~(w => Bool.not(String.is_empty(w))), xs),
+        List.filter(~String, ~(w => Bool.not(String.is_empty(w))), ys))
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case +head <> +tail:
+      Equal.trans(List<&2, String>,
+        List.filter.put(String, head,
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+            List.append(&2, String, tail, ys)),
+          Bool.not(String.is_empty(head))),
+        List.filter.put(String, head,
+          List.append(&2, String,
+            List.filter(~String, ~(w => Bool.not(String.is_empty(w))), tail),
+            List.filter(~String, ~(w => Bool.not(String.is_empty(w))), ys)),
+          Bool.not(String.is_empty(head))),
+        List.append(&2, String,
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+            head <> tail),
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))), ys)),
+        Equal.cong(List<&2, String>, List<&2, String>,
+          zs => List.filter.put(String, head, zs,
+            Bool.not(String.is_empty(head))),
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+            List.append(&2, String, tail, ys)),
+          List.append(&2, String,
+            List.filter(~String, ~(w => Bool.not(String.is_empty(w))), tail),
+            List.filter(~String, ~(w => Bool.not(String.is_empty(w))), ys)),
+          filter_words_append(tail, ys)),
+        filter_put_append(head,
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))), tail),
+          List.filter(~String, ~(w => Bool.not(String.is_empty(w))), ys),
+          Bool.not(String.is_empty(head))))
+
+def words_append_space(+a: String, +b: String) ->
+    {Cli.words(String.append(a, String.append(" ", b)))
+      == List.append(&2, String, Cli.words(a), Cli.words(b))
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    Cli.words(String.append(a, String.append(" ", b))),
+    List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+      List.append(&2, String, String.split(a, ' '), String.split(b, ' '))),
+    List.append(&2, String, Cli.words(a), Cli.words(b)),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.filter(~String, ~(w => Bool.not(String.is_empty(w))), xs),
+      String.split(String.append(a, String.append(" ", b)), ' '),
+      List.append(&2, String, String.split(a, ' '), String.split(b, ' ')),
+      split_append_space(a, b)),
+    filter_words_append(String.split(a, ' '), String.split(b, ' ')))
+
+def words_spaced_prefix(+indent: String, +s: String,
+    spaces: Spaces(indent)) ->
+    {Cli.words(String.append(indent, s)) == Cli.words(s)
+      : List<&2, String>}:
+  match indent:
+    case SNil{}: {==}
+    case SCon{+head, +tail}:
+      pair_elim({Char.is_eq(head, ' ') == True{} : Bool}, Spaces(tail),
+        {Cli.words(String.append(SCon{head, tail}, s)) == Cli.words(s)
+          : List<&2, String>}, spaces,
+        eh => et =>
+          Equal.trans(List<&2, String>,
+            Cli.words(String.append(SCon{head, tail}, s)),
+            Cli.words(String.append(tail, s)), Cli.words(s),
+            Equal.cong(Bool, List<&2, String>,
+              cut => List.filter(~String,
+                ~(w => Bool.not(String.is_empty(w))),
+                String.split.fin(head,
+                  String.split(String.append(tail, s), ' '), cut)),
+              Char.is_eq(head, ' '), True{}, eh),
+            words_spaced_prefix(tail, s, et)))
+
+def words_single(+s: String, clean: NoSpace(s),
+    non: {String.is_empty(s) == False{} : Bool}) ->
+    {Cli.words(s) == [s] : List<&2, String>}:
+  Equal.trans(List<&2, String>, Cli.words(s),
+    List.filter(~String, ~(w => Bool.not(String.is_empty(w))), [s]),
+    [s],
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.filter(~String, ~(w => Bool.not(String.is_empty(w))), xs),
+      String.split(s, ' '), [s], split_nospace(s, clean)),
+    Equal.cong(Bool, List<&2, String>,
+      b => List.filter.put(String, s, Nil{}, Bool.not(b)),
+      String.is_empty(s), False{}, non))
+
+def reverse_go_append(xs: List<&2, String>, +ys: List<&2, String>,
+    +zs: List<&2, String>) ->
+    {List.reverse.go(&2, String, xs,
+        List.append(&2, String, ys, zs))
+      == List.append(&2, String,
+        List.reverse.go(&2, String, xs, ys), zs)
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case head <> tail:
+      reverse_go_append(tail, head <> ys, zs)
+
+def reverse_cons(+head: String, +tail: List<&2, String>) ->
+    {List.reverse(&2, String, head <> tail)
+      == List.append(&2, String, List.reverse(&2, String, tail), [head])
+      : List<&2, String>}:
+  reverse_go_append(tail, Nil{}, [head])
+
+def chunk_words_append(xs: List<&2, String>, +ys: List<&2, String>) ->
+    {chunk_words(List.append(&2, String, xs, ys))
+      == List.append(&2, String, chunk_words(xs), chunk_words(ys))
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case +head <> +tail:
+      Equal.trans(List<&2, String>,
+        List.append(&2, String, Laws.all_words(String.lines(head)),
+          chunk_words(List.append(&2, String, tail, ys))),
+        List.append(&2, String, Laws.all_words(String.lines(head)),
+          List.append(&2, String, chunk_words(tail), chunk_words(ys))),
+        List.append(&2, String,
+          List.append(&2, String, Laws.all_words(String.lines(head)),
+            chunk_words(tail)), chunk_words(ys)),
+        Equal.cong(List<&2, String>, List<&2, String>,
+          rest => List.append(&2, String,
+            Laws.all_words(String.lines(head)), rest),
+          chunk_words(List.append(&2, String, tail, ys)),
+          List.append(&2, String, chunk_words(tail), chunk_words(ys)),
+          chunk_words_append(tail, ys)),
+        Equal.sym(List<&2, String>,
+          List.append(&2, String,
+            List.append(&2, String, Laws.all_words(String.lines(head)),
+              chunk_words(tail)), chunk_words(ys)),
+          List.append(&2, String, Laws.all_words(String.lines(head)),
+            List.append(&2, String, chunk_words(tail), chunk_words(ys))),
+          list_append_assoc(Laws.all_words(String.lines(head)),
+            chunk_words(tail), chunk_words(ys))))
+
+def rev_chunk_step(+line: String, +done: List<&2, String>) ->
+    {chunk_words(List.reverse(&2, String, line <> done))
+      == List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)),
+        Laws.all_words(String.lines(line)))
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    chunk_words(List.reverse(&2, String, line <> done)),
+    chunk_words(List.append(&2, String,
+      List.reverse(&2, String, done), [line])),
+    List.append(&2, String,
+      chunk_words(List.reverse(&2, String, done)),
+      Laws.all_words(String.lines(line))),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => chunk_words(xs),
+      List.reverse(&2, String, line <> done),
+      List.append(&2, String, List.reverse(&2, String, done), [line]),
+      reverse_cons(line, done)),
+    Equal.trans(List<&2, String>,
+      chunk_words(List.append(&2, String,
+        List.reverse(&2, String, done), [line])),
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)),
+        List.append(&2, String, Laws.all_words(String.lines(line)), Nil{})),
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)),
+        Laws.all_words(String.lines(line))),
+      chunk_words_append(List.reverse(&2, String, done), [line]),
+      Equal.cong(List<&2, String>, List<&2, String>,
+        xs => List.append(&2, String,
+          chunk_words(List.reverse(&2, String, done)), xs),
+        List.append(&2, String, Laws.all_words(String.lines(line)), Nil{}),
+        Laws.all_words(String.lines(line)),
+        list_append_nil(Laws.all_words(String.lines(line))))))
+
+def all_words_single(+line: String, clean: NoNL(line)) ->
+    {Laws.all_words(String.lines(line)) == Cli.words(line)
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    Laws.all_words(String.lines(line)), Laws.all_words([line]),
+    Cli.words(line),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => Laws.all_words(xs), String.lines(line), [line],
+      lines_nolf(line, clean)),
+    list_append_nil(Cli.words(line)))
+
+def rev_chunk_clean(+line: String, +done: List<&2, String>,
+    clean: NoNL(line)) ->
+    {chunk_words(List.reverse(&2, String, line <> done))
+      == List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)), Cli.words(line))
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    chunk_words(List.reverse(&2, String, line <> done)),
+    List.append(&2, String,
+      chunk_words(List.reverse(&2, String, done)),
+      Laws.all_words(String.lines(line))),
+    List.append(&2, String,
+      chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+    rev_chunk_step(line, done),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)), xs),
+      Laws.all_words(String.lines(line)), Cli.words(line),
+      all_words_single(line, clean)))
+
+def AllNonEmpty(xs: List<&2, String>) -> Type:
+  match xs:
+    case Nil{}: Unit
+    case head <> tail:
+      {String.is_empty(head) == False{} : Bool} & AllNonEmpty(tail)
+
+def filter_all_nonempty(xs: List<&2, String>) ->
+    AllNonEmpty(List.filter(~String,
+      ~(w => Bool.not(String.is_empty(w))), xs)):
+  match xs:
+    case Nil{}: Unit{}
+    case head <> tail:
+      match head:
+        case SNil{}:
+          filter_all_nonempty(tail)
+        case SCon{head, rest}:
+          ({==}, filter_all_nonempty(tail))
+
+def list_append_one(+xs: List<&2, String>, +word: String,
+    +rest: List<&2, String>) ->
+    {List.append(&2, String,
+        List.append(&2, String, xs, [word]), rest)
+      == List.append(&2, String, xs, word <> rest)
+      : List<&2, String>}:
+  list_append_assoc(xs, [word], rest)
+
+def WrapGoalWords(words: List<&2, String>, indent: String, cols: Nat,
+    line: String, done: List<&2, String>) -> Type:
+  {Laws.all_words(String.lines(Cli.wrap_words(words,
+      Cli.WrapState{indent, cols, line, True{}, done})))
+    == List.append(&2, String,
+      chunk_words(List.reverse(&2, String, done)),
+      List.append(&2, String, Cli.words(line), words))
+    : List<&2, String>}
+
+def join_words_any(xs: List<&2, String>, non: NonEmpty(xs)) ->
+    {Laws.all_words(String.lines(String.join(xs, "\n")))
+      == chunk_words(xs) : List<&2, String>}:
+  match xs:
+    case Nil{}:
+      Empty.absurd({Laws.all_words(String.lines(String.join(Nil{}, "\n")))
+        == chunk_words(Nil{}) : List<&2, String>}, non)
+    case head <> tail:
+      join_words_nonempty(head, tail)
+
+def wrap_words_base_preserve(+indent: String, +cols: Nat,
+    +line: String, +done: List<&2, String>, clean: NoNL(line)) ->
+    WrapGoalWords(Nil{}, indent, cols, line, done):
+  Equal.trans(List<&2, String>,
+    Laws.all_words(String.lines(String.join(
+      List.reverse(&2, String, line <> done), "\n"))),
+    chunk_words(List.reverse(&2, String, line <> done)),
+    List.append(&2, String,
+      chunk_words(List.reverse(&2, String, done)),
+      List.append(&2, String, Cli.words(line), Nil{})),
+    join_words_any(List.reverse(&2, String, line <> done),
+      reverse_nonempty(line, done)),
+    Equal.trans(List<&2, String>,
+      chunk_words(List.reverse(&2, String, line <> done)),
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)),
+        List.append(&2, String, Cli.words(line), Nil{})),
+      rev_chunk_clean(line, done, clean),
+      Equal.cong(List<&2, String>, List<&2, String>,
+        xs => List.append(&2, String,
+          chunk_words(List.reverse(&2, String, done)), xs),
+        Cli.words(line), List.append(&2, String, Cli.words(line), Nil{}),
+        Equal.sym(List<&2, String>,
+          List.append(&2, String, Cli.words(line), Nil{}),
+          Cli.words(line), list_append_nil(Cli.words(line))))))
+
+def words_candidate(+line: String, +word: String,
+    clean: NoSpace(word), non: {String.is_empty(word) == False{} : Bool}) ->
+    {Cli.words(String.append(line, String.append(" ", word)))
+      == List.append(&2, String, Cli.words(line), [word])
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    Cli.words(String.append(line, String.append(" ", word))),
+    List.append(&2, String, Cli.words(line), Cli.words(word)),
+    List.append(&2, String, Cli.words(line), [word]),
+    words_append_space(line, word),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.append(&2, String, Cli.words(line), xs),
+      Cli.words(word), [word], words_single(word, clean, non)))
+
+def fit_words_target(+line: String, +word: String,
+    +rest: List<&2, String>, +rev: List<&2, String>,
+    clean: NoSpace(word), non: {String.is_empty(word) == False{} : Bool}) ->
+    {List.append(&2, String, rev,
+        List.append(&2, String,
+          Cli.words(String.append(line, String.append(" ", word))), rest))
+      == List.append(&2, String, rev,
+        List.append(&2, String, Cli.words(line), word <> rest))
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    List.append(&2, String, rev,
+      List.append(&2, String,
+        Cli.words(String.append(line, String.append(" ", word))), rest)),
+    List.append(&2, String, rev,
+      List.append(&2, String,
+        List.append(&2, String, Cli.words(line), [word]), rest)),
+    List.append(&2, String, rev,
+      List.append(&2, String, Cli.words(line), word <> rest)),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.append(&2, String, rev,
+        List.append(&2, String, xs, rest)),
+      Cli.words(String.append(line, String.append(" ", word))),
+      List.append(&2, String, Cli.words(line), [word]),
+      words_candidate(line, word, clean, non)),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.append(&2, String, rev, xs),
+      List.append(&2, String,
+        List.append(&2, String, Cli.words(line), [word]), rest),
+      List.append(&2, String, Cli.words(line), word <> rest),
+      list_append_one(Cli.words(line), word, rest)))
+
+def words_indent_word(+indent: String, +word: String,
+    spaces: Spaces(indent), clean: NoSpace(word),
+    non: {String.is_empty(word) == False{} : Bool}) ->
+    {Cli.words(String.append(indent, word)) == [word]
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    Cli.words(String.append(indent, word)), Cli.words(word), [word],
+    words_spaced_prefix(indent, word, spaces),
+    words_single(word, clean, non))
+
+def break_words_target(+line: String, +done: List<&2, String>,
+    +indent: String, +word: String, +rest: List<&2, String>,
+    line_no: NoNL(line), spaces: Spaces(indent),
+    clean: NoSpace(word), non: {String.is_empty(word) == False{} : Bool}) ->
+    {List.append(&2, String,
+        chunk_words(List.reverse(&2, String, line <> done)),
+        List.append(&2, String,
+          Cli.words(String.append(indent, word)), rest))
+      == List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)),
+        List.append(&2, String, Cli.words(line), word <> rest))
+      : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    List.append(&2, String,
+      chunk_words(List.reverse(&2, String, line <> done)),
+      List.append(&2, String, Cli.words(String.append(indent, word)), rest)),
+    List.append(&2, String,
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+      List.append(&2, String,
+        Cli.words(String.append(indent, word)), rest)),
+    List.append(&2, String,
+      chunk_words(List.reverse(&2, String, done)),
+      List.append(&2, String, Cli.words(line), word <> rest)),
+    Equal.cong(List<&2, String>, List<&2, String>,
+      xs => List.append(&2, String, xs,
+        List.append(&2, String,
+          Cli.words(String.append(indent, word)), rest)),
+      chunk_words(List.reverse(&2, String, line <> done)),
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+      rev_chunk_clean(line, done, line_no)),
+    Equal.trans(List<&2, String>,
+      List.append(&2, String,
+        List.append(&2, String,
+          chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+        List.append(&2, String,
+          Cli.words(String.append(indent, word)), rest)),
+      List.append(&2, String,
+        List.append(&2, String,
+          chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+        word <> rest),
+      List.append(&2, String,
+        chunk_words(List.reverse(&2, String, done)),
+        List.append(&2, String, Cli.words(line), word <> rest)),
+      Equal.cong(List<&2, String>, List<&2, String>,
+        xs => List.append(&2, String,
+          List.append(&2, String,
+            chunk_words(List.reverse(&2, String, done)), Cli.words(line)),
+          List.append(&2, String, xs, rest)),
+        Cli.words(String.append(indent, word)), [word],
+        words_indent_word(indent, word, spaces, clean, non)),
+      list_append_assoc(
+        chunk_words(List.reverse(&2, String, done)),
+        Cli.words(line), word <> rest)))
+
+def WrapRecWords(+rest: List<&2, String>, +indent: String,
+    +cols: Nat) -> Type:
+  @next_line:String -> @next_done:List<&2, String> ->
+    Spaces(indent) -> NoNL(indent) -> NoNL(next_line) ->
+    WrapGoalWords(rest, indent, cols, next_line, next_done)
+
+def wrap_words_true_preserve(+word: String, +rest: List<&2, String>,
+    +indent: String, +cols: Nat, +line: String,
+    +done: List<&2, String>, fit: Bool,
+    eq: {fit == Nat.is_le(Cli.width(Cli.strip(
+      String.append(line, String.append(" ", word)))), cols) : Bool},
+    spaces: Spaces(indent), indent_no: NoNL(indent),
+    line_no: NoNL(line), clean: NoSpace(word),
+    word_no: NoNL(word), non: {String.is_empty(word) == False{} : Bool},
+    rec: WrapRecWords(rest, indent, cols)) ->
+    WrapGoalWords(word <> rest, indent, cols, line, done):
+  match fit:
+    case True{}:
+      Equal.trans(List<&2, String>,
+        Laws.all_words(String.lines(Cli.wrap_words(word <> rest,
+          Cli.WrapState{indent, cols, line, True{}, done}))),
+        Laws.all_words(String.lines(Cli.wrap_words(rest,
+          Cli.WrapState{indent, cols,
+            String.append(line, String.append(" ", word)), True{}, done}))),
+        List.append(&2, String,
+          chunk_words(List.reverse(&2, String, done)),
+          List.append(&2, String, Cli.words(line), word <> rest)),
+        Equal.cong(Bool, List<&2, String>,
+          cut => Laws.all_words(String.lines(Cli.wrap_words(rest,
+            Bool.pick(Cli.WrapState, cut,
+              Cli.WrapState{indent, cols,
+                String.append(line, String.append(" ", word)), True{}, done},
+              Cli.WrapState{indent, cols, String.append(indent, word),
+                True{}, line <> done})))),
+          Nat.is_le(Cli.width(Cli.strip(
+            String.append(line, String.append(" ", word)))), cols),
+          True{}, Equal.sym(Bool, True{},
+            Nat.is_le(Cli.width(Cli.strip(
+              String.append(line, String.append(" ", word)))), cols), eq)),
+        Equal.trans(List<&2, String>,
+          Laws.all_words(String.lines(Cli.wrap_words(rest,
+            Cli.WrapState{indent, cols,
+              String.append(line, String.append(" ", word)), True{}, done}))),
+          List.append(&2, String,
+            chunk_words(List.reverse(&2, String, done)),
+            List.append(&2, String,
+              Cli.words(String.append(line, String.append(" ", word))), rest)),
+          List.append(&2, String,
+            chunk_words(List.reverse(&2, String, done)),
+            List.append(&2, String, Cli.words(line), word <> rest)),
+          rec(String.append(line, String.append(" ", word)))(done)(spaces)(
+            indent_no)(append_nonl(line, String.append(" ", word), line_no,
+              append_nonl(" ", word, ({==}, Unit{}), word_no))),
+          fit_words_target(line, word, rest,
+            chunk_words(List.reverse(&2, String, done)), clean, non)))
+    case False{}:
+      pair_elim(Spaces(indent), Spaces(indent),
+        WrapGoalWords(word <> rest, indent, cols, line, done),
+        copy_spaces(indent, spaces), spaces_1 => spaces_2 =>
+          pair_elim(NoNL(indent), NoNL(indent),
+            WrapGoalWords(word <> rest, indent, cols, line, done),
+            copy_nonl(indent, indent_no), indent_no_1 => indent_no_2 =>
+              Equal.trans(List<&2, String>,
+                Laws.all_words(String.lines(Cli.wrap_words(word <> rest,
+                  Cli.WrapState{indent, cols, line, True{}, done}))),
+                Laws.all_words(String.lines(Cli.wrap_words(rest,
+                  Cli.WrapState{indent, cols, String.append(indent, word),
+                    True{}, line <> done}))),
+                List.append(&2, String,
+                  chunk_words(List.reverse(&2, String, done)),
+                  List.append(&2, String, Cli.words(line), word <> rest)),
+                Equal.cong(Bool, List<&2, String>,
+                  cut => Laws.all_words(String.lines(Cli.wrap_words(rest,
+                    Bool.pick(Cli.WrapState, cut,
+                      Cli.WrapState{indent, cols,
+                        String.append(line, String.append(" ", word)),
+                        True{}, done},
+                      Cli.WrapState{indent, cols,
+                        String.append(indent, word), True{}, line <> done})))),
+                  Nat.is_le(Cli.width(Cli.strip(
+                    String.append(line, String.append(" ", word)))), cols),
+                  False{}, Equal.sym(Bool, False{},
+                    Nat.is_le(Cli.width(Cli.strip(
+                      String.append(line, String.append(" ", word)))), cols),
+                    eq)),
+                Equal.trans(List<&2, String>,
+                  Laws.all_words(String.lines(Cli.wrap_words(rest,
+                    Cli.WrapState{indent, cols,
+                      String.append(indent, word), True{}, line <> done}))),
+                  List.append(&2, String,
+                    chunk_words(List.reverse(&2, String, line <> done)),
+                    List.append(&2, String,
+                      Cli.words(String.append(indent, word)), rest)),
+                  List.append(&2, String,
+                    chunk_words(List.reverse(&2, String, done)),
+                    List.append(&2, String, Cli.words(line), word <> rest)),
+                  rec(String.append(indent, word))(line <> done)(spaces_1)(
+                    indent_no_1)(append_nonl(indent, word,
+                      indent_no_2, word_no)),
+                  break_words_target(line, done, indent, word, rest,
+                    line_no, spaces_2, clean, non)))))
+
+def wrap_words_preserve(words: List<&2, String>, +indent: String,
+    +cols: Nat, +line: String, +done: List<&2, String>,
+    spaces: Spaces(indent), indent_no: NoNL(indent),
+    line_no: NoNL(line), clean: AllNoSpace(words),
+    nonl: AllNoNL(words), nonempty: AllNonEmpty(words)) ->
+    WrapGoalWords(words, indent, cols, line, done):
+  match words:
+    case Nil{}:
+      wrap_words_base_preserve(indent, cols, line, done, line_no)
+    case +word <> +rest:
+      (word_clean, rest_clean) = clean
+      (word_no, rest_no) = nonl
+      (word_non, rest_non) = nonempty
+      wrap_words_true_preserve(word, rest, indent, cols, line, done,
+        Nat.is_le(Cli.width(Cli.strip(
+          String.append(line, String.append(" ", word)))), cols), {==},
+        spaces, indent_no, line_no, word_clean, word_no, word_non,
+        next_line => next_done => next_spaces => next_indent_no =>
+          next_line_no =>
+            wrap_words_preserve(rest, indent, cols, next_line, next_done,
+              next_spaces, next_indent_no, next_line_no,
+              rest_clean, rest_no, rest_non))
+
+def wrap_words_initial(words: List<&2, String>, +indent: String,
+    +cols: Nat, spaces: Spaces(indent), indent_no: NoNL(indent),
+    clean: AllNoSpace(words), nonl: AllNoNL(words),
+    nonempty: AllNonEmpty(words)) ->
+    {Laws.all_words(String.lines(Cli.wrap_words(words,
+      Cli.WrapState{indent, cols, indent, False{}, Nil{}})))
+      == words : List<&2, String>}:
+  match words:
+    case Nil{}:
+      {==}
+    case +word <> +rest:
+      (word_clean, rest_clean) = clean
+      (word_no, rest_no) = nonl
+      (word_non, rest_non) = nonempty
+      pair_elim(Spaces(indent), Spaces(indent),
+        {Laws.all_words(String.lines(Cli.wrap_words(word <> rest,
+          Cli.WrapState{indent, cols, indent, False{}, Nil{}})))
+          == word <> rest : List<&2, String>},
+        copy_spaces(indent, spaces), spaces_1 => spaces_2 =>
+          pair_elim(NoNL(indent), NoNL(indent),
+            {Laws.all_words(String.lines(Cli.wrap_words(word <> rest,
+              Cli.WrapState{indent, cols, indent, False{}, Nil{}})))
+              == word <> rest : List<&2, String>},
+            copy_nonl(indent, indent_no), indent_no_1 => indent_no_2 =>
+              Equal.trans(List<&2, String>,
+                Laws.all_words(String.lines(Cli.wrap_words(word <> rest,
+                  Cli.WrapState{indent, cols, indent, False{}, Nil{}}))),
+                List.append(&2, String,
+                  Cli.words(String.append(indent, word)), rest),
+                word <> rest,
+                wrap_words_preserve(rest, indent, cols,
+                  String.append(indent, word), Nil{}, spaces_1,
+                  indent_no_1, append_nonl(indent, word,
+                    indent_no_2, word_no), rest_clean, rest_no, rest_non),
+                Equal.cong(List<&2, String>, List<&2, String>,
+                  xs => List.append(&2, String, xs, rest),
+                  Cli.words(String.append(indent, word)), [word],
+                  words_indent_word(indent, word,
+                    spaces_2, word_clean, word_non)))))
+
+def words_space_head(+head: Char, +tail: String,
+    space: {Char.is_eq(head, ' ') == True{} : Bool}) ->
+    {Cli.words(SCon{head, tail}) == Cli.words(tail)
+      : List<&2, String>}:
+  Equal.cong(Bool, List<&2, String>,
+    cut => List.filter(~String,
+      ~(w => Bool.not(String.is_empty(w))),
+      String.split.fin(head, String.split(tail, ' '), cut)),
+    Char.is_eq(head, ' '), True{}, space)
+
+def words_drop_indent_fin(+head: Char, +tail: String, cut: Bool,
+    +eq: {cut == Char.is_eq(head, ' ') : Bool},
+    rec: {Cli.words(tail) == Cli.words(String.drop(tail,
+      String.length(Cli.leading_indent(tail)))) : List<&2, String>}) ->
+    {Cli.words(SCon{head, tail})
+      == Cli.words(String.drop(SCon{head, tail},
+        String.length(Cli.leading_indent(SCon{head, tail}))))
+      : List<&2, String>}:
+  match cut:
+    case False{}:
+      Equal.sym(List<&2, String>,
+        Cli.words(String.drop(SCon{head, tail},
+          String.length(Cli.leading_indent(SCon{head, tail})))),
+        Cli.words(SCon{head, tail}),
+        Equal.cong(Bool, List<&2, String>,
+          b => Cli.words(String.drop(SCon{head, tail},
+            String.length(Bool.pick(String, b,
+              SCon{head, Cli.leading_indent(tail)}, "")))),
+          Char.is_eq(head, ' '), False{},
+          Equal.sym(Bool, False{}, Char.is_eq(head, ' '), eq)))
+    case True{}:
+      Equal.trans(List<&2, String>,
+        Cli.words(SCon{head, tail}), Cli.words(tail),
+        Cli.words(String.drop(SCon{head, tail},
+          String.length(Cli.leading_indent(SCon{head, tail})))),
+        words_space_head(head, tail,
+          Equal.sym(Bool, True{}, Char.is_eq(head, ' '), eq)),
+        Equal.trans(List<&2, String>,
+          Cli.words(tail), Cli.words(String.drop(tail,
+            String.length(Cli.leading_indent(tail)))),
+          Cli.words(String.drop(SCon{head, tail},
+            String.length(Cli.leading_indent(SCon{head, tail})))),
+          rec,
+          Equal.sym(List<&2, String>,
+            Cli.words(String.drop(SCon{head, tail},
+              String.length(Cli.leading_indent(SCon{head, tail})))),
+            Cli.words(String.drop(tail,
+              String.length(Cli.leading_indent(tail)))),
+            Equal.cong(Bool, List<&2, String>,
+              b => Cli.words(String.drop(SCon{head, tail},
+                String.length(Bool.pick(String, b,
+                  SCon{head, Cli.leading_indent(tail)}, "")))),
+              Char.is_eq(head, ' '), True{},
+              Equal.sym(Bool, True{}, Char.is_eq(head, ' '), eq)))))
+
+def words_drop_indent(line: String) ->
+    {Cli.words(line) == Cli.words(String.drop(line,
+      String.length(Cli.leading_indent(line))))
+      : List<&2, String>}:
+  match line:
+    case SNil{}: {==}
+    case SCon{+head, +tail}:
+      words_drop_indent_fin(head, tail, Char.is_eq(head, ' '), {==},
+        words_drop_indent(tail))
+
+def wrap_line_words(+line: String, +cols: Nat,
+    clean: NoNL(line)) ->
+    {Laws.all_words(String.lines(Cli.wrap_line(line, cols)))
+      == Cli.words(line) : List<&2, String>}:
+  pair_elim(NoNL(line), NoNL(line),
+    {Laws.all_words(String.lines(Cli.wrap_line(line, cols)))
+      == Cli.words(line) : List<&2, String>},
+    copy_nonl(line, clean), line_no_1 => line_no_2 =>
+      Equal.trans(List<&2, String>,
+        Laws.all_words(String.lines(Cli.wrap_line(line, cols))),
+        Cli.words(String.drop(line,
+          String.length(Cli.leading_indent(line)))),
+        Cli.words(line),
+        wrap_words_initial(
+          Cli.words(String.drop(line,
+            String.length(Cli.leading_indent(line)))),
+          Cli.leading_indent(line), cols, indent_spaces(line),
+          indent_nonl(line, line_no_1),
+          filter_all_nospace(String.split(String.drop(line,
+            String.length(Cli.leading_indent(line))), ' '),
+            split_all_nospace(String.drop(line,
+              String.length(Cli.leading_indent(line))))),
+          filter_all_nonl(String.split(String.drop(line,
+            String.length(Cli.leading_indent(line))), ' '),
+            split_space_nonl(String.drop(line,
+              String.length(Cli.leading_indent(line))),
+              drop_nonl(line, String.length(Cli.leading_indent(line)),
+                line_no_2))),
+          filter_all_nonempty(String.split(String.drop(line,
+            String.length(Cli.leading_indent(line))), ' '))),
+        Equal.sym(List<&2, String>,
+          Cli.words(line),
+          Cli.words(String.drop(line,
+            String.length(Cli.leading_indent(line)))),
+          words_drop_indent(line))))
+
+def wrap_lines_words(lines: List<&2, String>, +cols: Nat,
+    clean: AllNoNL(lines)) ->
+    {chunk_words(Cli.wrap_lines(lines, cols))
+      == Laws.all_words(lines) : List<&2, String>}:
+  match lines:
+    case Nil{}: {==}
+    case +head <> +tail:
+      pair_elim(NoNL(head), AllNoNL(tail),
+        {chunk_words(Cli.wrap_lines(head <> tail, cols))
+          == Laws.all_words(head <> tail) : List<&2, String>},
+        clean, head_no => tail_no =>
+          Equal.trans(List<&2, String>,
+            chunk_words(Cli.wrap_lines(head <> tail, cols)),
+            List.append(&2, String, Cli.words(head),
+              chunk_words(Cli.wrap_lines(tail, cols))),
+            Laws.all_words(head <> tail),
+            Equal.cong(List<&2, String>, List<&2, String>,
+              xs => List.append(&2, String, xs,
+                chunk_words(Cli.wrap_lines(tail, cols))),
+              Laws.all_words(String.lines(Cli.wrap_line(head, cols))),
+              Cli.words(head), wrap_line_words(head, cols, head_no)),
+            Equal.cong(List<&2, String>, List<&2, String>,
+              xs => List.append(&2, String, Cli.words(head), xs),
+              chunk_words(Cli.wrap_lines(tail, cols)),
+              Laws.all_words(tail),
+              wrap_lines_words(tail, cols, tail_no))))
+
+def p14_finish(+s: String, +cols: Nat) ->
+    {Laws.all_words(String.lines(Cli.wrap(s, cols)))
+      == Laws.all_words(String.lines(s)) : List<&2, String>}:
+  Equal.trans(List<&2, String>,
+    Laws.all_words(String.lines(Cli.wrap(s, cols))),
+    chunk_words(Cli.wrap_lines(String.lines(s), cols)),
+    Laws.all_words(String.lines(s)),
+    join_words_any(Cli.wrap_lines(String.lines(s), cols),
+      wrap_lines_nonempty(String.lines(s), cols,
+        split_nonempty(s, '\n'))),
+    wrap_lines_words(String.lines(s), cols, lines_all_nonl(s)))
+
+def Laws.p14(s, cols):
+  p14_finish(s, cols)

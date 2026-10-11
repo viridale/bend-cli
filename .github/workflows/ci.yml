@@ -42,10 +42,10 @@ jobs:
             done
       - name: Check proofs
         run: |
-          bend PROOF.bend
+          bend PROOF.bend --verdict
           find examples -name PROOF.bend -print | sort |
             while IFS= read -r file; do
-              bend "$file"
+              bend "$file" --verdict
             done
 
   # Add G4-G8 in milestone order as their implementations become runnable.

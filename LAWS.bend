@@ -1,8 +1,8 @@
 # Purpose: laws for the pure CLI library and pkg demo.
 # Expected output: ALL PROOFS CHECK.
 # Run: bend PROOF.bend --verdict
-# Scope: P13 bounds visible line widths; it does not prove word preservation
-# or whitespace normalization. G-TEXT pins representative wrapped content.
+# Scope: P13 bounds visible line widths; P14 preserves words in order. Neither
+# pins whitespace normalization; G-TEXT pins representative wrapped content.
 
 import Base
 import ./cli.bend as Cli
@@ -27,28 +27,31 @@ law p2:
     == Cli.emit(False{}, segments) : String}
 
 # P13: each wrapped line fits visibly, or has at most one space-delimited word.
-type P13Line is Data:
-  P13Line{text: String, cols: Nat}
-
-def p13_lines(lines: List<&2, String>, +cols: Nat) -> List<&2, P13Line>:
+def p13_good(+cols: Nat, lines: List<&2, String>) -> Bool:
   match lines:
-    case Nil{}: Nil{}
-    case text <> tail:
-      P13Line{text, cols} <> p13_lines(tail, cols)
-
-def p13_entry_good(entry: P13Line) -> Bool:
-  match entry:
-    case P13Line{+text, cols}:
-      Bool.or(Nat.is_le(Cli.width(Cli.strip(text)), cols),
-        Nat.is_le(List.length(&2, String,
-          List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
-            String.split(text, ' '))), 1n))
+    case Nil{}: True{}
+    case +line <> tail:
+      Bool.and(Bool.or(Nat.is_le(Cli.width(Cli.strip(line)), cols),
+        Nat.is_le(List.length(&2, String, Cli.words(line)), 1n)),
+        p13_good(cols, tail))
 
 law p13:
   for s: String
   for +cols: Nat
-  {List.all(~&2, ~P13Line, ~p13_entry_good,
-    p13_lines(String.lines(Cli.wrap(s, cols)), cols)) == True{} : Bool}
+  {p13_good(cols, String.lines(Cli.wrap(s, cols))) == True{} : Bool}
+
+# P14: wrapping preserves every space-delimited word in its original order.
+def all_words(lines: List<&2, String>) -> List<&2, String>:
+  match lines:
+    case Nil{}: Nil{}
+    case line <> tail:
+      List.append(&2, String, Cli.words(line), all_words(tail))
+
+law p14:
+  for +s: String
+  for cols: Nat
+  {all_words(String.lines(Cli.wrap(s, cols)))
+    == all_words(String.lines(s)) : List<&2, String>}
 
 # G-TEXT: U+31EF changes from width 1 to 2 in Unicode 15.1.
 law g_text_width:
@@ -167,6 +170,13 @@ law g_lint_dup_id:
     Cli.arg("<FILE>", "File operand", []),
   ])) == [Cli.Dup{"tool", "file"}]
     : List<&2, Cli.Problem>}
+
+# G-LINT: descendant options cannot shadow an ancestor global option.
+law g_lint_dup_global:
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("-v, --verbose", "Verbose", [Cli.global()]),
+    Cli.sub("run", "Run", [Cli.arg("-v, --verify", "Verify", [])]),
+  ])) == [Cli.Dup{"tool run", "-v"}] : List<&2, Cli.Problem>}
 
 # G-LINT Dup: a repeated subcommand name is reported at the parent path.
 law g_lint_dup_sub:

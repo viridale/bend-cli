@@ -69,55 +69,47 @@ def sgr_body_char(+c: Char) -> Bool:
   Bool.or(Char.is_digit(c), Char.is_eq(c, ';'))
 
 type StripState is Data:
-  StripPlain{out: String}
-  StripEsc{out: String}
-  StripBody{out: String, pending: String}
+  StripPlain{}
+  StripEsc{}
+  StripBody{pending: String}
 
-def strip_fuel(fuel: Nat, state: StripState, s: String) -> String:
-  match fuel:
-    case 0n:
-      s
-    case 1n+p:
+def strip_go(s: String, state: StripState) -> String:
+  match s:
+    case SNil{}:
       match state:
-        case StripPlain{+out}:
-          match s:
-            case SNil{}:
-              out
-            case SCon{+head, tail}:
-              strip_fuel(p, Bool.pick(StripState,
-                Char.is_eq(head, '\u{1B}'), StripEsc{out},
-                StripPlain{String.append(out, Char.show(head))}), tail)
-        case StripEsc{+out}:
-          match s:
-            case SNil{}:
-              String.append(out, "\u{1B}")
-            case SCon{head, tail}:
-              match head:
-                case Chr{91}:
-                  strip_fuel(p, StripBody{out, "\u{1B}["}, tail)
-                case Chr{27}:
-                  strip_fuel(p, StripEsc{String.append(out, "\u{1B}")}, tail)
-                case _:
-                  strip_fuel(p, StripPlain{String.append(out,
-                    String.append("\u{1B}", Char.show(head)))}, tail)
-        case StripBody{+out, +pending}:
-          match s:
-            case SNil{}:
-              String.append(out, pending)
-            case SCon{+head, tail}:
-              match head:
-                case Chr{109}:
-                  strip_fuel(p, StripPlain{out}, tail)
-                case Chr{27}:
-                  strip_fuel(p, StripEsc{String.append(out, pending)}, tail)
-                case _:
-                  strip_fuel(p, Bool.pick(StripState, sgr_body_char(head),
-                    StripBody{out, String.append(pending, Char.show(head))},
-                    StripPlain{String.append(out,
-                      String.append(pending, Char.show(head)))}), tail)
+        case StripPlain{}: ""
+        case StripEsc{}: "\u{1B}"
+        case StripBody{pending}: pending
+    case SCon{+h, t}:
+      match state:
+        case StripPlain{}:
+          +esc = Char.is_eq(h, '\u{1B}')
+          String.append(Bool.pick(String, esc, "", Char.show(h)),
+            strip_go(t, Bool.pick(StripState, esc, StripEsc{}, StripPlain{})))
+        case StripEsc{}:
+          +bracket = Char.is_eq(h, '[')
+          +esc = Char.is_eq(h, '\u{1B}')
+          +prefix = Bool.pick(String, bracket, "",
+            Bool.pick(String, esc, "\u{1B}",
+              String.append("\u{1B}", Char.show(h))))
+          +next = Bool.pick(StripState, bracket, StripBody{"\u{1B}["},
+            Bool.pick(StripState, esc, StripEsc{}, StripPlain{}))
+          String.append(prefix, strip_go(t, next))
+        case StripBody{+pending}:
+          +end = Char.is_eq(h, 'm')
+          +esc = Char.is_eq(h, '\u{1B}')
+          +ok = sgr_body_char(h)
+          +grown = String.append(pending, Char.show(h))
+          +prefix = Bool.pick(String, end, "",
+            Bool.pick(String, esc, pending,
+              Bool.pick(String, ok, "", grown)))
+          +next = Bool.pick(StripState, end, StripPlain{},
+            Bool.pick(StripState, esc, StripEsc{},
+              Bool.pick(StripState, ok, StripBody{grown}, StripPlain{})))
+          String.append(prefix, strip_go(t, next))
 
-def strip(+s: String) -> String:
-  strip_fuel(Nat.add(1n, String.length(s)), StripPlain{""}, s)
+def strip(s: String) -> String:
+  strip_go(s, StripPlain{})
 
 type CodeRange is Data:
   CodeRange{lo: U32, hi: U32}
@@ -605,17 +597,18 @@ def unicode_is_zero_mark(code: U32) -> Bool:
     CodeRange{917760, 917999},
   ], code)
 
-def is_zero_code(+code: U32) -> Bool:
-  Bool.or(U32.is_le(code, 31), Bool.or(
-    Bool.and(U32.is_ge(code, 127), U32.is_le(code, 159)), Bool.or(
-    unicode_is_zero_mark(code), Bool.or(
-    Bool.and(U32.is_ge(code, 8203), U32.is_le(code, 8207)), Bool.or(
-    Bool.and(U32.is_ge(code, 65024), U32.is_le(code, 65039)),
-    Bool.and(U32.is_ge(code, 917760), U32.is_le(code, 917999)))))))
+def code_width_by(small: Bool, +code: U32) -> Nat:
+  match small:
+    case True{}:
+      Bool.pick(Nat, Bool.or(U32.is_le(code, 31),
+        Bool.and(U32.is_ge(code, 127), U32.is_le(code, 159))), 0n, 1n)
+    case False{}:
+      Bool.pick(Nat, Bool.or(unicode_is_zero_mark(code),
+        Bool.and(U32.is_ge(code, 8203), U32.is_le(code, 8207))), 0n,
+        Bool.pick(Nat, unicode_is_wide(code), 2n, 1n))
 
 def code_width(+code: U32) -> Nat:
-  Bool.pick(Nat, is_zero_code(code), 0n,
-    Bool.pick(Nat, unicode_is_wide(code), 2n, 1n))
+  code_width_by(U32.is_lt(code, 768), code)
 
 def width(s: String) -> Nat:
   match s:
@@ -651,12 +644,15 @@ def wrap_words(words: List<&2, String>, state: WrapState) -> String:
         WrapState{indent, cols, String.append(indent, word), True{}, line <> done})
       wrap_words(rest, next)
 
+def words(s: String) -> List<&2, String>:
+  List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
+    String.split(s, ' '))
+
 def wrap_line(+line: String, cols: Nat) -> String:
   +indent = leading_indent(line)
   body = String.drop(line, String.length(indent))
-  words = List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
-    String.split(body, ' '))
-  wrap_words(words, WrapState{indent, cols, indent, False{}, Nil{}})
+  parts = words(body)
+  wrap_words(parts, WrapState{indent, cols, indent, False{}, Nil{}})
 
 def wrap_lines(lines: List<&2, String>, +cols: Nat) -> List<&2, String>:
   match lines:
@@ -667,6 +663,23 @@ def wrap_lines(lines: List<&2, String>, +cols: Nat) -> List<&2, String>:
 
 def wrap(text: String, cols: Nat) -> String:
   String.join(wrap_lines(String.lines(text), cols), "\n")
+
+type ValueType is Data:
+  TNat{}
+  TU32{}
+  TF32{}
+  TBool{}
+  TFile{}
+  TDir{}
+
+def type_name(t: ValueType) -> String:
+  match t:
+    case TNat{}: "as_nat"
+    case TU32{}: "as_u32"
+    case TF32{}: "as_f32"
+    case TBool{}: "as_bool"
+    case TFile{}: "as_file"
+    case TDir{}: "as_dir"
 
 type Item is Data:
   Arg{usage: String, help: String, items: List<&2, Item>}
@@ -686,12 +699,7 @@ type Item is Data:
   Env{name: String}
   Global{}
   Heading{title: String}
-  AsNat{}
-  AsU32{}
-  AsF32{}
-  AsBool{}
-  AsFile{}
-  AsDir{}
+  As{t: ValueType}
   OneOf{values: List<&2, String>}
   Delim{sep: Char}
   Hyphen{}
@@ -774,22 +782,22 @@ def heading(title: String) -> Item:
   Heading{title}
 
 def as_nat() -> Item:
-  AsNat{}
+  As{TNat{}}
 
 def as_u32() -> Item:
-  AsU32{}
+  As{TU32{}}
 
 def as_f32() -> Item:
-  AsF32{}
+  As{TF32{}}
 
 def as_bool() -> Item:
-  AsBool{}
+  As{TBool{}}
 
 def as_file() -> Item:
-  AsFile{}
+  As{TFile{}}
 
 def as_dir() -> Item:
-  AsDir{}
+  As{TDir{}}
 
 def one_of(values: List<&2, String>) -> Item:
   OneOf{values}
@@ -828,13 +836,9 @@ type UsageKind is Data:
   FlagKind{}
   CountKind{}
   NegatableKind{}
-  OptionKind{}
-  ListOptionKind{}
+  OptionKind{many: Bool}
   BareOptionKind{}
-  RequiredPosKind{}
-  OptionalPosKind{}
-  RequiredManyKind{}
-  OptionalManyKind{}
+  PosKind{required: Bool, many: Bool}
 
 type Usage is Data:
   Parsed{id: String, short: String, long: String, kind: UsageKind}
@@ -908,10 +912,10 @@ def parse_pos(s: String, +repeat: Bool) -> Usage:
   match s:
     case SCon{Chr{60}, tail}:
       finish_pos(scan_ph(tail, 1n, "", '>'),
-        Bool.pick(UsageKind, repeat, RequiredManyKind{}, RequiredPosKind{}))
+        PosKind{True{}, repeat})
     case SCon{Chr{91}, tail}:
       finish_pos(scan_ph(tail, 1n, "", ']'),
-        Bool.pick(UsageKind, repeat, OptionalManyKind{}, OptionalPosKind{}))
+        PosKind{False{}, repeat})
     case _:
       Invalid{0n}
 
@@ -948,7 +952,7 @@ def finish_long(found: NameScan, short: String,
       Bool.pick(Usage, negatable, Invalid{next},
         finish_required_value(scan_ph(tail, Nat.add(next, 2n), "", '>'),
           name, short, String.append("--", name),
-          Bool.pick(UsageKind, repeat, ListOptionKind{}, OptionKind{})))
+          OptionKind{repeat}))
     case NameOK{+name, SCon{Chr{91}, SCon{Chr{61}, SCon{Chr{60}, tail}}}, +next}:
       Bool.pick(Usage, Bool.or(negatable, repeat), Invalid{next},
         finish_optional_value(scan_ph(tail, Nat.add(next, 3n), "", '>'),
@@ -976,7 +980,7 @@ def parse_short_tail(tail: String, +short: String, +repeat: Bool) -> Usage:
     case SCon{Chr{32}, SCon{Chr{60}, ph_rest}}:
       finish_required_value(scan_ph(ph_rest, 4n, "", '>'),
         String.drop(short, 1n), short, "",
-        Bool.pick(UsageKind, repeat, ListOptionKind{}, OptionKind{}))
+        OptionKind{repeat})
     case SCon{Chr{91}, SCon{Chr{61}, SCon{Chr{60}, ph_rest}}}:
       finish_optional_value(scan_ph(ph_rest, 5n, "", '>'),
         String.drop(short, 1n), short, "")
@@ -1022,39 +1026,29 @@ def valid_arg_alias(+raw: String) -> Bool:
 
 def kind_pos(kind: UsageKind) -> Bool:
   match kind:
-    case RequiredPosKind{}: True{}
-    case OptionalPosKind{}: True{}
-    case RequiredManyKind{}: True{}
-    case OptionalManyKind{}: True{}
+    case PosKind{required, many}: True{}
     case _: False{}
 
 def kind_optional_pos(kind: UsageKind) -> Bool:
   match kind:
-    case OptionalPosKind{}: True{}
-    case OptionalManyKind{}: True{}
+    case PosKind{required, many}: Bool.not(required)
     case _: False{}
 
 def kind_variadic_pos(kind: UsageKind) -> Bool:
   match kind:
-    case RequiredManyKind{}: True{}
-    case OptionalManyKind{}: True{}
+    case PosKind{required, many}: many
     case _: False{}
 
 def kind_required_pos(kind: UsageKind) -> Bool:
   match kind:
-    case RequiredPosKind{}: True{}
-    case RequiredManyKind{}: True{}
+    case PosKind{required, many}: required
     case _: False{}
 
 def kind_valued(kind: UsageKind) -> Bool:
   match kind:
-    case OptionKind{}: True{}
-    case ListOptionKind{}: True{}
+    case OptionKind{many}: True{}
     case BareOptionKind{}: True{}
-    case RequiredPosKind{}: True{}
-    case OptionalPosKind{}: True{}
-    case RequiredManyKind{}: True{}
-    case OptionalManyKind{}: True{}
+    case PosKind{required, many}: True{}
     case _: False{}
 
 def kind_bare(kind: UsageKind) -> Bool:
@@ -1064,25 +1058,21 @@ def kind_bare(kind: UsageKind) -> Bool:
 
 def kind_default_allowed(kind: UsageKind) -> Bool:
   match kind:
-    case OptionKind{}: True{}
-    case ListOptionKind{}: True{}
+    case OptionKind{many}: True{}
     case BareOptionKind{}: True{}
-    case OptionalPosKind{}: True{}
-    case OptionalManyKind{}: True{}
+    case PosKind{required, many}: Bool.not(required)
     case NegatableKind{}: True{}
     case _: False{}
 
 def kind_required_allowed(kind: UsageKind) -> Bool:
   match kind:
-    case OptionKind{}: True{}
-    case ListOptionKind{}: True{}
+    case OptionKind{many}: True{}
     case _: False{}
 
 def kind_delim_allowed(kind: UsageKind) -> Bool:
   match kind:
-    case ListOptionKind{}: True{}
-    case RequiredManyKind{}: True{}
-    case OptionalManyKind{}: True{}
+    case OptionKind{many}: many
+    case PosKind{required, many}: many
     case _: False{}
 
 def bad_attr(cond: Bool, name: String) -> Maybe<&2, String>:
@@ -1099,12 +1089,7 @@ def misplaced_attr_name(attr: Item, +kind: UsageKind) ->
       bad_attr(Bool.not(kind_required_allowed(kind)), "required")
     case Heading{title}: bad_attr(kind_pos(kind), "heading")
     case Alias{name}: bad_attr(kind_pos(kind), "alias")
-    case AsNat{}: bad_attr(Bool.not(kind_valued(kind)), "as_nat")
-    case AsU32{}: bad_attr(Bool.not(kind_valued(kind)), "as_u32")
-    case AsF32{}: bad_attr(Bool.not(kind_valued(kind)), "as_f32")
-    case AsBool{}: bad_attr(Bool.not(kind_valued(kind)), "as_bool")
-    case AsFile{}: bad_attr(Bool.not(kind_valued(kind)), "as_file")
-    case AsDir{}: bad_attr(Bool.not(kind_valued(kind)), "as_dir")
+    case As{t}: bad_attr(Bool.not(kind_valued(kind)), type_name(t))
     case OneOf{values}:
       bad_attr(Bool.not(kind_valued(kind)), "one_of")
     case Delim{sep}: bad_attr(Bool.not(kind_delim_allowed(kind)), "delim")
@@ -1138,12 +1123,7 @@ def placement_issues(attrs: List<&2, Item>, +kind: UsageKind,
 def value_type_names(attrs: List<&2, Item>) -> List<&2, String>:
   match attrs:
     case Nil{}: Nil{}
-    case AsNat{} <> tail: "as_nat" <> value_type_names(tail)
-    case AsU32{} <> tail: "as_u32" <> value_type_names(tail)
-    case AsF32{} <> tail: "as_f32" <> value_type_names(tail)
-    case AsBool{} <> tail: "as_bool" <> value_type_names(tail)
-    case AsFile{} <> tail: "as_file" <> value_type_names(tail)
-    case AsDir{} <> tail: "as_dir" <> value_type_names(tail)
+    case As{t} <> tail: type_name(t) <> value_type_names(tail)
     case head <> tail: value_type_names(tail)
 
 def extra_type_issues(names: List<&2, String>, +at: String) ->
@@ -1178,12 +1158,7 @@ def command_attr_name(attr: Item, root: Bool) -> Maybe<&2, String>:
     case Env{name}: Some{"env"}
     case Global{}: Some{"global"}
     case Heading{title}: Some{"heading"}
-    case AsNat{}: Some{"as_nat"}
-    case AsU32{}: Some{"as_u32"}
-    case AsF32{}: Some{"as_f32"}
-    case AsBool{}: Some{"as_bool"}
-    case AsFile{}: Some{"as_file"}
-    case AsDir{}: Some{"as_dir"}
+    case As{t}: Some{type_name(t)}
     case OneOf{values}: Some{"one_of"}
     case Delim{sep}: Some{"delim"}
     case Hyphen{}: Some{"hyphen"}
@@ -1210,12 +1185,6 @@ def has_bare(items: List<&2, Item>) -> Bool:
     case Nil{}: False{}
     case Bare{value} <> tail: True{}
     case head <> tail: has_bare(tail)
-
-def has_as_u32(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case AsU32{} <> tail: True{}
-    case head <> tail: has_as_u32(tail)
 
 def has_required(items: List<&2, Item>) -> Bool:
   match items:
@@ -1288,16 +1257,16 @@ def scope_group_rules(items: List<&2, Item>) -> List<&2, String>:
     case NeedOne{group} <> tail: group <> scope_group_rules(tail)
     case head <> tail: scope_group_rules(tail)
 
-def parsed_is_pos(usage: Usage) -> Bool:
-  match usage:
-    case Parsed{id, short, long, kind}: kind_pos(kind)
+def usage_kind(~f: UsageKind -> Bool, parsed: Usage) -> Bool:
+  match parsed:
+    case Parsed{id, short, long, kind}: f(kind)
     case Invalid{col}: False{}
 
 def has_pos_item(items: List<&2, Item>) -> Bool:
   match items:
     case Nil{}: False{}
     case Arg{usage, help, attrs} <> tail:
-      Bool.or(parsed_is_pos(parse_usage(usage)), has_pos_item(tail))
+      Bool.or(usage_kind(~kind_pos, parse_usage(usage)), has_pos_item(tail))
     case head <> tail: has_pos_item(tail)
 
 def has_sub_item(items: List<&2, Item>) -> Bool:
@@ -1425,6 +1394,30 @@ def arg_alias_entries(aliases: List<&2, String>) -> List<&2, Seen>:
     case Nil{}: Nil{}
     case name <> tail:
       SeenArgAlias{name} <> arg_alias_entries(tail)
+
+def arg_entries(parsed: Usage, +attrs: List<&2, Item>) -> List<&2, Seen>:
+  match parsed:
+    case Parsed{derived, short, long, kind}:
+      SeenArg{use_id(find_id(attrs), derived), short, long} <>
+        arg_alias_entries(find_aliases(attrs))
+    case Invalid{col}:
+      Nil{}
+
+def has_global(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case Global{} <> tail: True{}
+    case head <> tail: has_global(tail)
+
+def global_entries(items: List<&2, Item>) -> List<&2, Seen>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      List.append(&2, Seen,
+        Bool.pick(List<&2, Seen>, has_global(attrs),
+          arg_entries(parse_usage(usage), attrs), Nil{}),
+        global_entries(tail))
+    case head <> tail: global_entries(tail)
 
 def sub_alias_issue(+name: String, +at: String,
     seen: List<&2, Seen>) -> List<&2, Problem>:
@@ -1567,24 +1560,6 @@ def decimal_scan(s: String, state: DecimalState) -> Bool:
 def valid_f32(s: String) -> Bool:
   decimal_scan(s, DecStart{})
 
-def has_as_nat(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case AsNat{} <> tail: True{}
-    case head <> tail: has_as_nat(tail)
-
-def has_as_bool(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case AsBool{} <> tail: True{}
-    case head <> tail: has_as_bool(tail)
-
-def has_as_f32(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case AsF32{} <> tail: True{}
-    case head <> tail: has_as_f32(tail)
-
 def find_one_of(items: List<&2, Item>) -> Maybe<&2, List<&2, String>>:
   match items:
     case Nil{}: None{}
@@ -1598,17 +1573,29 @@ def choice_accept(found: Maybe<&2, List<&2, String>>,
     case Some{values}:
       List.contains(~String, ~String.eq, values, value)
 
+def type_accepts(t: ValueType, +value: String) -> Bool:
+  match t:
+    case TNat{}: valid_nat(value)
+    case TU32{}: valid_u32(value)
+    case TF32{}: valid_f32(value)
+    case TBool{}: valid_bool(value)
+    case _: True{}
+
+def types_accept(attrs: List<&2, Item>, +value: String) -> Bool:
+  match attrs:
+    case Nil{}: True{}
+    case As{t} <> tail:
+      Bool.and(type_accepts(t, value), types_accept(tail, value))
+    case head <> tail: types_accept(tail, value)
+
 def default_valid(kind: UsageKind, +attrs: List<&2, Item>,
     +value: String) -> Bool:
   match kind:
     case NegatableKind{}:
       valid_bool(value)
     case _:
-      Bool.and(Bool.or(Bool.not(has_as_nat(attrs)), valid_nat(value)),
-        Bool.and(Bool.or(Bool.not(has_as_u32(attrs)), valid_u32(value)),
-          Bool.and(Bool.or(Bool.not(has_as_bool(attrs)), valid_bool(value)),
-            Bool.and(Bool.or(Bool.not(has_as_f32(attrs)), valid_f32(value)),
-              choice_accept(find_one_of(attrs), value)))))
+      Bool.and(types_accept(attrs, value),
+        choice_accept(find_one_of(attrs), value))
 
 def check_default(found: Maybe<&2, String>, kind: UsageKind,
     +attrs: List<&2, Item>, id: String, at: String) -> List<&2, Problem>:
@@ -1651,10 +1638,6 @@ def misplaced_arg(+kind: UsageKind, +attrs: List<&2, Item>,
   List.append(&2, Problem, placement_issues(attrs, kind, at),
     duplicate_type_issues(value_type_names(attrs), at))
 
-type ArgCheck is Data:
-  ArgCheck{issues: List<&2, Problem>, entries: List<&2, Seen>,
-    optional: Bool, variadic: Bool}
-
 def arg_reserved_dup(+at: String, +long: String, seen: List<&2, Seen>,
     id: String, short: String, version: Bool) -> List<&2, Problem>:
   reserved = Bool.or(String.eq(long, "--help"),
@@ -1680,28 +1663,23 @@ def arg_issues(+kind: UsageKind, +id: String, +short: String,
     bare_issue(kind, id, short, attrs, at),
   ])
 
-def arg_check(parsed: Usage, +usage: String, help: String,
+def arg_problems(parsed: Usage, +usage: String, help: String,
     +attrs: List<&2, Item>, remaining: List<&2, Item>, +at: String,
     ids: List<&2, String>, +seen: List<&2, Seen>,
-    +optional: Bool, +variadic: Bool, +version: Bool) -> ArgCheck:
+    optional: Bool, variadic: Bool, +version: Bool) -> List<&2, Problem>:
   match parsed:
     case Invalid{col}:
-      ArgCheck{List.append(&2, Problem, [BadUsage{at, usage, col}],
+      List.append(&2, Problem, [BadUsage{at, usage, col}],
         when_problem(Bool.and(String.is_empty(help),
-          Bool.not(has_hidden(attrs))), NoHelp{at, usage})),
-        Nil{}, optional, variadic}
+          Bool.not(has_hidden(attrs))), NoHelp{at, usage}))
     case Parsed{derived, +short, +long, +kind}:
       +id = use_id(find_id(attrs), derived)
       +aliases = find_aliases(attrs)
-      issues = List.append(&2, Problem,
+      List.append(&2, Problem,
         arg_issues(kind, id, short, long, usage, help, attrs,
           remaining, at, ids, seen, optional, variadic, version),
         arg_alias_issues(aliases, at, SeenArg{id, short, long} <> seen,
           version))
-      ArgCheck{issues, SeenArg{id, short, long} <>
-        arg_alias_entries(aliases),
-        Bool.or(optional, kind_optional_pos(kind)),
-        Bool.or(variadic, kind_variadic_pos(kind))}
 
 def command_body_issues(+at: String, name: String, about: String,
     +items: List<&2, Item>) -> List<&2, Problem>:
@@ -1722,69 +1700,43 @@ def sub_name_issues(+at: String, +name: String,
       [Reserved{at, name}],
       when_problem(sub_collision(seen, name), Dup{at, name})))
 
-def item_count(items: List<&2, Item>) -> Nat:
+def lint(items: List<&2, Item>, +at: String, +ids: List<&2, String>,
+    +seen: List<&2, Seen>, +inherited: List<&2, Seen>, +optional: Bool,
+    +variadic: Bool, +version: Bool, +root: Bool) -> List<&2, Problem>:
   match items:
     case Nil{}:
-      0n
-    case Arg{usage, help, attrs} <> tail:
-      Nat.add(1n, Nat.add(item_count(attrs), item_count(tail)))
-    case Sub{name, about, children} <> tail:
-      Nat.add(1n, Nat.add(item_count(children), item_count(tail)))
-    case head <> tail:
-      Nat.add(1n, item_count(tail))
-
-type LintWork is Data:
-  WorkItems{items: List<&2, Item>, at: String,
-    ids: List<&2, String>, seen: List<&2, Seen>,
-    optional: Bool, variadic: Bool, version: Bool, root: Bool}
-  WorkAfterArg{check: ArgCheck, tail: List<&2, Item>, at: String,
-    ids: List<&2, String>, seen: List<&2, Seen>,
-    version: Bool, root: Bool}
-
-def lint_work(fuel: Nat, work: LintWork) -> List<&2, Problem>:
-  match fuel work:
-    case 0n _:
       Nil{}
-    case 1n+p WorkItems{Nil{}, at, ids, seen, optional, variadic, version, root}:
-      Nil{}
-    case 1n+p WorkItems{Arg{+usage, help, attrs} <> +tail,
-        +at, +ids, +seen, optional, variadic, +version, root}:
-      lint_work(p, WorkAfterArg{
-        arg_check(parse_usage(usage), usage, help, attrs, tail,
-          at, ids, seen, optional, variadic, version),
-        tail, at, ids, seen, version, root})
-    case 1n++p WorkItems{Sub{+name, about, +children} <> tail,
-        +at, ids, +seen, optional, variadic, +version, root}:
+    case Arg{+usage, help, +attrs} <> +tail:
+      +parsed = parse_usage(usage)
+      List.append(&2, Problem,
+        arg_problems(parsed, usage, help, attrs, tail, at, ids, seen,
+          optional, variadic, version),
+        lint(tail, at, ids,
+          List.append(&2, Seen, arg_entries(parsed, attrs), seen),
+          inherited,
+          Bool.or(optional, usage_kind(~kind_optional_pos, parsed)),
+          Bool.or(variadic, usage_kind(~kind_variadic_pos, parsed)),
+          version, root))
+    case Sub{+name, about, +children} <> tail:
       +child_at = String.concat([at, " ", name])
       +aliases = find_aliases(children)
       List.concat(&2, Problem, [
         sub_name_issues(at, name, seen),
         sub_alias_issues(aliases, at, SeenSub{name} <> seen),
         command_body_issues(child_at, name, about, children),
-        lint_work(p, WorkItems{children, child_at, scope_ids(children),
-          Nil{}, False{}, False{}, version, False{}}),
-        lint_work(p, WorkItems{tail, at, ids,
+        lint(children, child_at, scope_ids(children), inherited,
+          List.append(&2, Seen, global_entries(children), inherited),
+          False{}, False{}, version, False{}),
+        lint(tail, at, ids,
           List.append(&2, Seen, sub_alias_entries(aliases),
             SeenSub{name} <> seen),
-          optional, variadic, version, root}),
+          inherited, optional, variadic, version, root),
       ])
-    case 1n+p WorkItems{head <> tail,
-        +at, ids, seen, optional, variadic, version, +root}:
+    case head <> tail:
       List.append(&2, Problem,
         maybe_misplaced(command_attr_name(head, root), at),
-        lint_work(p, WorkItems{tail, at, ids, seen, optional,
-          variadic, version, root}))
-    case 1n+p WorkAfterArg{ArgCheck{issues, entries, next_optional,
-        next_variadic}, tail, at, ids, seen, version, root}:
-      List.append(&2, Problem, issues,
-        lint_work(p, WorkItems{tail, at, ids,
-          List.append(&2, Seen, entries, seen),
-          next_optional, next_variadic, version, root}))
-
-def lint_items(+items: List<&2, Item>, at: String,
-    ids: List<&2, String>, version: Bool, root: Bool) -> List<&2, Problem>:
-  lint_work(Nat.add(1n, Nat.mul(4n, item_count(items))),
-    WorkItems{items, at, ids, Nil{}, False{}, False{}, version, root})
+        lint(tail, at, ids, seen, inherited, optional, variadic,
+          version, root))
 
 def problems(c: Cmd) -> List<&2, Problem>:
   match c:
@@ -1792,5 +1744,6 @@ def problems(c: Cmd) -> List<&2, Problem>:
       List.concat(&2, Problem, [
         when_problem(Bool.not(valid_command_name(name)), BadName{name, name}),
         command_body_issues(name, name, about, items),
-        lint_items(items, name, scope_ids(items), has_version_item(items), True{}),
+        lint(items, name, scope_ids(items), Nil{}, global_entries(items),
+          False{}, False{}, has_version_item(items), True{}),
       ])
