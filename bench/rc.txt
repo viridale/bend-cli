@@ -1,1 +1,12 @@
 # FID term_keep ctr_take rfc_seal
+#
+# Accepted rises, to carry into the first generated baseline (M7) with
+# these reasons; regenerating this file drops comments, so copy them over.
+# Both came with M2's universal "--" fix (e8e744c), against the build before
+# it; counts include inlined spins, once per call site (SPEC §14.3).
+#
+# FID_CLI_SCAN_GO 0 1 0 -> 1 1 2: scan_go matches tokens and mode together
+#   and rebuilds the cons cell in place; the Capture row hands off the rest
+#   of argv instead of reversing an accumulator.
+# FID_CLI_SCAN 1 1 2 -> 0 2 4: scan_trace's events walk is inlined on both
+#   branches of scan_close; one runs per call, so no executed count rises.
