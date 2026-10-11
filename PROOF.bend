@@ -2166,3 +2166,583 @@ def p14_finish(+s: String, +cols: Nat) ->
 
 def Laws.p14(s, cols):
   p14_finish(s, cols)
+
+def false_true_absurd(e: {False{} == True{} : Bool}) -> Empty:
+  %e : bool_disc(Bool.not(_))
+  Unit{}
+
+def bool_cmp_refl(b: Bool) -> {EQ{} == Bool.cmp(b, b) : Cmp}:
+  match b:
+    case True{}: {==}
+    case False{}: {==}
+
+def word_cmp_refl(n: Nat, w: Word(n)) -> {EQ{} == Word.cmp(n, w, w) : Cmp}:
+  match n:
+    case 0n: {==}
+    case 1n+p:
+      match w:
+        case WCon{b, t}:
+          %word_cmp_refl(p, t) : {EQ{} == Word.cmp.fin(b, b, _) : Cmp}
+          bool_cmp_refl(b)
+
+def string_cmp_refl(s: String) ->
+    {((s, s), EQ{}) == String.cmp(s, s) : (String & String) & Cmp}:
+  match s:
+    case SNil{}: {==}
+    case SCon{h, t}:
+      match h:
+        case Chr{x}:
+          match x:
+            case U32{w}:
+              %word_cmp_refl(32n, w) :
+                {((SCon{Chr{U32{w}}, t}, SCon{Chr{U32{w}}, t}), EQ{})
+                  == String.cmp.fin(t, t,
+                    ((Chr{U32{w}}, Chr{U32{w}}), _))
+                  : (String & String) & Cmp}
+              %string_cmp_refl(t) :
+                {((SCon{Chr{U32{w}}, t}, SCon{Chr{U32{w}}, t}), EQ{})
+                  == String.cmp.rec(Chr{U32{w}}, Chr{U32{w}}, _)
+                  : (String & String) & Cmp}
+              {==}
+
+def string_eq_refl(s: String) -> {String.eq(s, s) == True{} : Bool}:
+  %string_cmp_refl(s) :
+    {Cmp.is_eq(Pair.snd(String & String, Cmp, _)) == True{} : Bool}
+  {==}
+
+def same_take_prefix(xs: List<&2, String>, +ys: List<&2, String>) ->
+    {Laws.same_strings(xs, List.take(&2, String,
+      List.append(&2, String, xs, ys), List.length(&2, String, xs)))
+      == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      match ys:
+        case Nil{}: {==}
+        case y <> yt: {==}
+    case +x <> +xt:
+      and_true(String.eq(x, x),
+        Laws.same_strings(xt, List.take(&2, String,
+          List.append(&2, String, xt, ys), List.length(&2, String, xt))),
+        string_eq_refl(x), same_take_prefix(xt, ys))
+
+def same_take_reverse(xs: List<&2, String>, acc: List<&2, String>,
+    ys: List<&2, String>) ->
+    {Laws.same_strings(List.reverse.go(&2, String, xs, acc),
+      List.take(&2, String,
+        List.reverse.go(&2, String, xs, List.append(&2, String, acc, ys)),
+        List.length(&2, String, List.reverse.go(&2, String, xs, acc))))
+      == True{} : Bool}:
+  match xs:
+    case Nil{}: same_take_prefix(acc, ys)
+    case x <> xt: same_take_reverse(xt, x <> acc, ys)
+
+def add_succ_right(n: Nat, m: Nat) ->
+    {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}:
+  match n:
+    case 0n: {==}
+    case 1n+p:
+      %add_succ_right(p, m) : {1n+Nat.add(p, 1n+m) == 1n+_ : Nat}
+      {==}
+
+def add_zero_right(n: Nat) -> {Nat.add(n, 0n) == n : Nat}:
+  match n:
+    case 0n: {==}
+    case 1n+p:
+      %add_zero_right(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+
+def length_reverse_go(xs: List<&2, String>, +acc: List<&2, String>) ->
+    {List.length(&2, String, List.reverse.go(&2, String, xs, acc))
+      == Nat.add(List.length(&2, String, xs), List.length(&2, String, acc))
+      : Nat}:
+  match xs:
+    case Nil{}: {==}
+    case x <> +xt:
+      %add_succ_right(List.length(&2, String, xt),
+        List.length(&2, String, acc)) :
+        {List.length(&2, String, List.reverse.go(&2, String, xt, x <> acc))
+          == _ : Nat}
+      length_reverse_go(xt, x <> acc)
+
+def length_reverse(+xs: List<&2, String>) ->
+    {List.length(&2, String, List.reverse.go(&2, String, xs, Nil{}))
+      == List.length(&2, String, xs) : Nat}:
+  %add_zero_right(List.length(&2, String, xs)) :
+    {List.length(&2, String, List.reverse.go(&2, String, xs, Nil{}))
+      == _ : Nat}
+  length_reverse_go(xs, Nil{})
+
+def operands_reverse_go(xs: List<&2, Cli.ScanEvent>,
+    acc: List<&2, Cli.ScanEvent>) ->
+    {List.reverse.go(&2, String, Laws.operands(xs), Laws.operands(acc))
+      == Laws.operands(List.reverse.go(&2, Cli.ScanEvent, xs, acc))
+      : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case Cli.FlagHit{id, value} <> xt:
+      operands_reverse_go(xt, Cli.FlagHit{id, value} <> acc)
+    case Cli.CountHit{id} <> xt:
+      operands_reverse_go(xt, Cli.CountHit{id} <> acc)
+    case Cli.ValueHit{id, value} <> xt:
+      operands_reverse_go(xt, Cli.ValueHit{id, value} <> acc)
+    case Cli.Operand{token} <> xt:
+      operands_reverse_go(xt, Cli.Operand{token} <> acc)
+    case Cli.Enter{name} <> xt:
+      operands_reverse_go(xt, Cli.Enter{name} <> acc)
+    case Cli.HelpHit{long} <> xt:
+      operands_reverse_go(xt, Cli.HelpHit{long} <> acc)
+    case Cli.VersionHit{} <> xt:
+      operands_reverse_go(xt, Cli.VersionHit{} <> acc)
+
+def reverse_go_twice(xs: List<&2, String>, acc: List<&2, String>) ->
+    {List.reverse.go(&2, String, acc, xs)
+      == List.reverse.go(&2, String,
+        List.reverse.go(&2, String, xs, acc), Nil{}) : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case x <> xt: reverse_go_twice(xt, x <> acc)
+
+def pushes(ts: List<&2, String>, acc: List<&2, Cli.ScanEvent>) ->
+    List<&2, Cli.ScanEvent>:
+  match ts:
+    case Nil{}: acc
+    case t <> rest: pushes(rest, Cli.Operand{t} <> acc)
+
+def operands_pushes(ts: List<&2, String>, acc: List<&2, Cli.ScanEvent>) ->
+    {List.reverse.go(&2, String, ts, Laws.operands(acc))
+      == Laws.operands(pushes(ts, acc)) : List<&2, String>}:
+  match ts:
+    case Nil{}: {==}
+    case t <> rest: operands_pushes(rest, Cli.Operand{t} <> acc)
+
+def suffix_pushes(+post: List<&2, String>, +events: List<&2, Cli.ScanEvent>) ->
+    {Laws.has_suffix(post, Laws.operands(
+      List.reverse(&2, Cli.ScanEvent, pushes(post, events)))) == True{} : Bool}:
+  %operands_reverse_go(pushes(post, events), Nil{}) :
+    {Laws.same_strings(List.reverse(&2, String, post),
+      List.take(&2, String, List.reverse(&2, String, _),
+        List.length(&2, String, post))) == True{} : Bool}
+  %operands_pushes(post, events) :
+    {Laws.same_strings(List.reverse(&2, String, post),
+      List.take(&2, String,
+        List.reverse(&2, String, List.reverse.go(&2, String, _, Nil{})),
+        List.length(&2, String, post))) == True{} : Bool}
+  %reverse_go_twice(
+    List.reverse.go(&2, String, post, Laws.operands(events)), Nil{}) :
+    {Laws.same_strings(List.reverse(&2, String, post),
+      List.take(&2, String, _, List.length(&2, String, post)))
+      == True{} : Bool}
+  %length_reverse(post) :
+    {Laws.same_strings(List.reverse(&2, String, post),
+      List.take(&2, String,
+        List.reverse.go(&2, String, post, Laws.operands(events)), _))
+      == True{} : Bool}
+  same_take_reverse(post, Nil{}, Laws.operands(events))
+
+def state_events(state: Cli.ScanState) -> List<&2, Cli.ScanEvent>:
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      events
+
+def state_issue(state: Cli.ScanState) -> Maybe<&2, Cli.ScanFault>:
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      issue
+
+def operand_go(ts: List<&2, String>, state: Cli.ScanState) ->
+    Cli.ScanState:
+  match ts:
+    case Nil{}: state
+    case t <> rest: operand_go(rest, Cli.scan_operand(state, t))
+
+def first_issue_some(issue: Maybe<&2, Cli.ScanFault>, fault: Cli.ScanFault) ->
+    {Maybe.is_some(&2, Cli.ScanFault, Cli.first_issue(issue, fault))
+      == True{} : Bool}:
+  match issue:
+    case None{}: {==}
+    case Some{old}: {==}
+
+def operand_fault_case(take: Bool, scope: Cli.Scope,
+    events: List<&2, Cli.ScanEvent>, resting: Bool, count: Nat,
+    external: Maybe<&2, Cli.ExternalArgs>, +issue: Maybe<&2, Cli.ScanFault>,
+    +t: String,
+    held: {Maybe.is_some(&2, Cli.ScanFault, issue) == True{} : Bool}) ->
+    {Maybe.is_some(&2, Cli.ScanFault, state_issue(Cli.scan_operand_case(
+      take, Cli.ScanState{scope, events, resting, count, external, issue},
+      t))) == True{} : Bool}:
+  match take:
+    case True{}: held
+    case False{}: first_issue_some(issue, Cli.E09{t})
+
+def operand_fault(state: Cli.ScanState, +t: String,
+    held: {Maybe.is_some(&2, Cli.ScanFault, state_issue(state))
+      == True{} : Bool}) ->
+    {Maybe.is_some(&2, Cli.ScanFault,
+      state_issue(Cli.scan_operand(state, t))) == True{} : Bool}:
+  match state:
+    case Cli.ScanState{+scope, events, resting, +count, external, issue}:
+      operand_fault_case(Cli.scope_can_take(scope, count), scope, events,
+        resting, count, external, issue, t, held)
+
+def operands_fault(ts: List<&2, String>, +state: Cli.ScanState,
+    held: {Maybe.is_some(&2, Cli.ScanFault, state_issue(state))
+      == True{} : Bool}) ->
+    {Maybe.is_some(&2, Cli.ScanFault, state_issue(operand_go(ts, state)))
+      == True{} : Bool}:
+  match ts:
+    case Nil{}: held
+    case +t <> rest:
+      operands_fault(rest, Cli.scan_operand(state, t),
+        operand_fault(state, t, held))
+
+def none_some_absurd(m: Maybe<&2, Cli.ScanFault>,
+    none: {Maybe.is_none(&2, Cli.ScanFault, m) == True{} : Bool},
+    some: {Maybe.is_some(&2, Cli.ScanFault, m) == True{} : Bool}) -> Empty:
+  match m:
+    case None{}: false_true_absurd(some)
+    case Some{fault}: false_true_absurd(none)
+
+def operand_events_case(take: Bool, +scope: Cli.Scope,
+    +events: List<&2, Cli.ScanEvent>, +resting: Bool, +count: Nat,
+    +external: Maybe<&2, Cli.ExternalArgs>,
+    +issue: Maybe<&2, Cli.ScanFault>, +t: String, +rest: List<&2, String>,
+    clean: {Maybe.is_none(&2, Cli.ScanFault, state_issue(operand_go(rest,
+      Cli.scan_operand_case(take,
+        Cli.ScanState{scope, events, resting, count, external, issue}, t))))
+      == True{} : Bool},
+    step: {Maybe.is_none(&2, Cli.ScanFault, state_issue(operand_go(rest,
+      Cli.scan_operand_case(take,
+        Cli.ScanState{scope, events, resting, count, external, issue}, t))))
+      == True{} : Bool} ->
+      {pushes(rest, state_events(Cli.scan_operand_case(take,
+        Cli.ScanState{scope, events, resting, count, external, issue}, t)))
+        == state_events(operand_go(rest, Cli.scan_operand_case(take,
+          Cli.ScanState{scope, events, resting, count, external, issue}, t)))
+        : List<&2, Cli.ScanEvent>}) ->
+    {pushes(rest, Cli.Operand{t} <> events)
+      == state_events(operand_go(rest, Cli.scan_operand_case(take,
+        Cli.ScanState{scope, events, resting, count, external, issue}, t)))
+      : List<&2, Cli.ScanEvent>}:
+  match take:
+    case True{}: step(clean)
+    case False{}:
+      Empty.absurd({pushes(rest, Cli.Operand{t} <> events)
+        == state_events(operand_go(rest, Cli.scan_error(
+          Cli.ScanState{scope, events, resting, count, external, issue},
+          Cli.E09{t}))) : List<&2, Cli.ScanEvent>},
+        none_some_absurd(state_issue(operand_go(rest, Cli.scan_error(
+          Cli.ScanState{scope, events, resting, count, external, issue},
+          Cli.E09{t}))), clean,
+          operands_fault(rest, Cli.scan_error(
+            Cli.ScanState{scope, events, resting, count, external, issue},
+            Cli.E09{t}), first_issue_some(issue, Cli.E09{t}))))
+
+def operand_events(ts: List<&2, String>, state: Cli.ScanState,
+    clean: {Maybe.is_none(&2, Cli.ScanFault, state_issue(operand_go(ts,
+      state))) == True{} : Bool}) ->
+    {pushes(ts, state_events(state)) == state_events(operand_go(ts, state))
+      : List<&2, Cli.ScanEvent>}:
+  match ts:
+    case Nil{}: {==}
+    case +t <> +rest:
+      match state:
+        case Cli.ScanState{+scope, +events, +resting, +count, +external,
+            +issue}:
+          operand_events_case(Cli.scope_can_take(scope, count), scope,
+            events, resting, count, external, issue, t, rest, clean,
+            next => operand_events(rest, Cli.scan_operand_case(
+              Cli.scope_can_take(scope, count),
+              Cli.ScanState{scope, events, resting, count, external, issue},
+              t), next))
+
+def scan_operands(ts: List<&2, String>, state: Cli.ScanState, ended: Bool) ->
+    {Cli.Operands{operand_go(ts, state), ended}
+      == Cli.scan_go(ts, Cli.Operands{state, ended}) : Cli.Mode}:
+  match ts:
+    case Nil{}: {==}
+    case +t <> rest:
+      scan_operands(rest, Cli.scan_operand(state, t), ended)
+
+def p9_seen(+pre: List<&2, String>, post: List<&2, String>,
+    trace: Cli.ScanTrace,
+    dash: {True{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(pre, post, trace) == True{} : Bool}:
+  match trace:
+    case Cli.ScanTrace{path, events, ended, external, issue}:
+      %dash :
+        {Bool.or(Bool.not(Bool.and(Bool.not(_),
+          Bool.and(ended, Maybe.is_none(&2, Cli.ScanFault, issue)))),
+          Laws.has_suffix(post, Laws.operands(events))) == True{} : Bool}
+      {==}
+
+def p9_unended(pre: List<&2, String>, post: List<&2, String>,
+    state: Cli.ScanState,
+    clear: {False{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(pre, post, Cli.scan_trace_of(state, False{}))
+      == True{} : Bool}:
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      match scope:
+        case Cli.Scope{path, items, globals}:
+          %clear :
+            {Bool.or(Bool.not(Bool.and(Bool.not(_),
+              Bool.and(False{}, Maybe.is_none(&2, Cli.ScanFault, issue)))),
+              Laws.has_suffix(post, Laws.operands(
+                List.reverse(&2, Cli.ScanEvent, events)))) == True{} : Bool}
+          {==}
+
+def p9_close_case(ended: Bool, issue: Maybe<&2, Cli.ScanFault>,
+    post: List<&2, String>, events: List<&2, Cli.ScanEvent>,
+    found: {Maybe.is_none(&2, Cli.ScanFault, issue) == True{} : Bool} ->
+      {Laws.has_suffix(post, Laws.operands(
+        List.reverse(&2, Cli.ScanEvent, events))) == True{} : Bool}) ->
+    {Bool.or(Bool.not(Bool.and(ended,
+      Maybe.is_none(&2, Cli.ScanFault, issue))),
+      Laws.has_suffix(post, Laws.operands(
+        List.reverse(&2, Cli.ScanEvent, events)))) == True{} : Bool}:
+  match ended issue:
+    case True{} None{}: found({==})
+    case True{} Some{fault}: {==}
+    case False{} _: {==}
+
+def p9_close(pre: List<&2, String>, post: List<&2, String>,
+    state: Cli.ScanState, ended: Bool,
+    clear: {False{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool},
+    found: {Maybe.is_none(&2, Cli.ScanFault, state_issue(state))
+      == True{} : Bool} ->
+      {Laws.has_suffix(post, Laws.operands(List.reverse(&2, Cli.ScanEvent,
+        state_events(state)))) == True{} : Bool}) ->
+    {Laws.p9_trace(pre, post, Cli.scan_trace_of(state, ended))
+      == True{} : Bool}:
+  match state:
+    case Cli.ScanState{scope, +events, resting, count, external, +issue}:
+      match scope:
+        case Cli.Scope{path, items, globals}:
+          %clear :
+            {Bool.or(Bool.not(Bool.and(Bool.not(_),
+              Bool.and(ended, Maybe.is_none(&2, Cli.ScanFault, issue)))),
+              Laws.has_suffix(post, Laws.operands(
+                List.reverse(&2, Cli.ScanEvent, events)))) == True{} : Bool}
+          p9_close_case(ended, issue, post, events, found)
+
+def p9_suffix(+post: List<&2, String>, +state: Cli.ScanState,
+    found: {Maybe.is_none(&2, Cli.ScanFault,
+      state_issue(operand_go(post, state))) == True{} : Bool}) ->
+    {Laws.has_suffix(post, Laws.operands(List.reverse(&2, Cli.ScanEvent,
+      state_events(operand_go(post, state))))) == True{} : Bool}:
+  %operand_events(post, state, found) :
+    {Laws.has_suffix(post, Laws.operands(
+      List.reverse(&2, Cli.ScanEvent, _))) == True{} : Bool}
+  suffix_pushes(post, state_events(state))
+
+def p9_operands(pre: List<&2, String>, +post: List<&2, String>,
+    +state: Cli.ScanState, +ended: Bool,
+    clear: {False{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(pre, post,
+      Cli.scan_trace(Cli.scan_go(post, Cli.Operands{state, ended})))
+      == True{} : Bool}:
+  %scan_operands(post, state, ended) :
+    {Laws.p9_trace(pre, post, Cli.scan_trace(_)) == True{} : Bool}
+  p9_close(pre, post, operand_go(post, state), ended, clear,
+    found => p9_suffix(post, state, found))
+
+def p9_closed(ts: List<&2, String>, pre: List<&2, String>,
+    post: List<&2, String>, tail: Cli.Tail,
+    clear: {False{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(pre, post,
+      Cli.scan_trace(Cli.scan_go(ts, Cli.Closed{tail}))) == True{} : Bool}:
+  match ts:
+    case Nil{}: p9_unended(pre, post, Cli.scan_tail_close(tail), clear)
+    case t <> rest: p9_closed(rest, pre, post, Cli.scan_tail(tail, t), clear)
+
+def p9_dash(pre: List<&2, String>, +post: List<&2, String>, mode: Cli.Mode,
+    clear: {False{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(pre, post,
+      Cli.scan_trace(Cli.scan_go("--" <> post, mode))) == True{} : Bool}:
+  match mode:
+    case Cli.Open{state}: p9_operands(pre, post, state, True{}, clear)
+    case Cli.Fetch{state, info}:
+      p9_closed(post, pre, post, Cli.scan_faulted(Cli.scan_error(state,
+        Cli.E03{Cli.arg_display(info)}), "--"), clear)
+    case Cli.Operands{state, ended}:
+      p9_operands(pre, post, Cli.scan_operand(state, "--"), ended, clear)
+    case Cli.Capture{state, name}:
+      p9_unended(pre, post, Cli.scan_external(state, name, "--" <> post),
+        clear)
+    case Cli.Closed{tail}:
+      p9_closed(post, pre, post, Cli.scan_tail(tail, "--"), clear)
+
+def or_false_left(b: Bool, c: Bool,
+    e: {False{} == Bool.or(b, c) : Bool}) -> {False{} == b : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({False{} == True{} : Bool}, false_true_absurd(e))
+    case False{}: {==}
+
+def or_false_right(b: Bool, c: Bool,
+    e: {False{} == Bool.or(b, c) : Bool}) -> {False{} == c : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({False{} == c : Bool}, false_true_absurd(e))
+    case False{}: e
+
+def p9_before(pre: List<&2, String>, q: List<&2, String>,
+    +post: List<&2, String>, mode: Cli.Mode,
+    clear: {False{} == List.contains(~String, ~String.eq, q, "--") : Bool},
+    +free: {False{} == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(q, post, Cli.scan_trace(Cli.scan_go(
+      List.append(&2, String, pre, "--" <> post), mode))) == True{} : Bool}:
+  match pre:
+    case Nil{}: p9_dash(q, post, mode, clear)
+    case +t <> +rest:
+      match mode:
+        case Cli.Open{state}:
+          %or_false_left(String.eq(t, "--"),
+            List.contains(~String, ~String.eq, rest, "--"), free) :
+            {Laws.p9_trace(q, post, Cli.scan_trace(Cli.scan_go(
+              List.append(&2, String, rest, "--" <> post),
+              Cli.scan_open(_, state, t)))) == True{} : Bool}
+          p9_before(rest, q, post, Cli.scan_token(t, state), clear,
+            or_false_right(String.eq(t, "--"),
+              List.contains(~String, ~String.eq, rest, "--"), free))
+        case Cli.Fetch{state, info}:
+          p9_before(rest, q, post, Cli.scan_fetch(state, info, t), clear,
+            or_false_right(String.eq(t, "--"),
+              List.contains(~String, ~String.eq, rest, "--"), free))
+        case Cli.Operands{state, ended}:
+          p9_before(rest, q, post,
+            Cli.Operands{Cli.scan_operand(state, t), ended}, clear,
+            or_false_right(String.eq(t, "--"),
+              List.contains(~String, ~String.eq, rest, "--"), free))
+        case Cli.Capture{state, name}:
+          p9_unended(q, post, Cli.scan_external(state, name,
+            t <> List.append(&2, String, rest, "--" <> post)), clear)
+        case Cli.Closed{tail}:
+          p9_before(rest, q, post, Cli.Closed{Cli.scan_tail(tail, t)},
+            clear, or_false_right(String.eq(t, "--"),
+              List.contains(~String, ~String.eq, rest, "--"), free))
+
+def p9_split(dash: Bool, +pre: List<&2, String>, +post: List<&2, String>,
+    mode: Cli.Mode,
+    +seen: {dash == List.contains(~String, ~String.eq, pre, "--")
+      : Bool}) ->
+    {Laws.p9_trace(pre, post, Cli.scan_trace(Cli.scan_go(
+      List.append(&2, String, pre, "--" <> post), mode))) == True{} : Bool}:
+  match dash:
+    case True{}:
+      p9_seen(pre, post, Cli.scan_trace(Cli.scan_go(
+        List.append(&2, String, pre, "--" <> post), mode)), seen)
+    case False{}: p9_before(pre, pre, post, mode, seen, seen)
+
+def Laws.p9(c, pre, post):
+  p9_split(List.contains(~String, ~String.eq, pre, "--"), pre, post,
+    Cli.Open{Cli.scan_start(c)}, {==})
+
+def Laws.g_lex_cluster():
+  {==}
+
+def Laws.g_lex_values():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
+def Laws.g_lex_end():
+  ({==}, {==})
+
+def Laws.g_lex_count():
+  ({==}, {==})
+
+def Laws.g_lex_negation():
+  ({==}, ({==}, {==}))
+
+def Laws.g_lex_bare():
+  {==}
+
+def Laws.g_lex_errors():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_lex_recovery():
+  {==}
+
+def Laws.g_pos_variadic():
+  ({==}, ({==}, {==}))
+
+def Laws.g_pos_cases():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))
+
+def Laws.g_sub_descent():
+  ({==}, ({==}, {==}))
+
+def Laws.g_sub_alias():
+  {==}
+
+def Laws.g_sub_help():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_sub_scope_errors():
+  ({==}, ({==}, {==}))
+
+def Laws.g_sub_external():
+  ({==}, {==})
+
+def Laws.g_sub_missing():
+  ({==}, ({==}, {==}))
+
+def Laws.g_sub_short_shadow():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_val_strings():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_val_nat():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_val_u32():
+  ({==}, ({==}, {==}))
+
+def Laws.g_val_f32():
+  ({==}, ({==}, ({==}, ({==}, {==}))))
+
+def Laws.g_val_bool():
+  ({==}, ({==}, {==}))
+
+def Laws.g_val_one_of():
+  ({==}, {==})
+
+def Laws.g_val_delim():
+  ({==}, {==})
+
+def Laws.g_src_env():
+  {==}
+
+def Laws.g_src_empty_default():
+  {==}
+
+def Laws.g_src_precedence():
+  ({==}, ({==}, {==}))
+
+def Laws.g_src_invalid():
+  ({==}, {==})
+
+def Laws.g_rel_required():
+  ({==}, {==})
+
+def Laws.g_rel_need_one():
+  ({==}, ({==}, {==}))
+
+def Laws.g_rel_exclusive():
+  {==}
+
+def Laws.g_rel_conflict_order():
+  ({==}, {==})
+
+def Laws.g_rel_requires():
+  ({==}, {==})
+
+def Laws.g_rel_defaults():
+  ({==}, {==})
