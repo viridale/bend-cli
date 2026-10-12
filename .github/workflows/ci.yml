@@ -54,7 +54,8 @@ jobs:
         if: steps.kernel.outputs.cache-hit != 'true'
         run: |
           curl -fsSL https://raw.githubusercontent.com/leanprover/elan/v4.2.4/elan-init.sh -o /tmp/elan-init.sh
-          sh /tmp/elan-init.sh -y --no-modify-path --default-toolchain leanprover/lean4:v4.34.0
+          sh /tmp/elan-init.sh -y --no-modify-path --default-toolchain none
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.34.0
       - name: Check proofs
         run: |
           bend PROOF.bend --verdict
