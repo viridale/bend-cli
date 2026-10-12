@@ -113,6 +113,7 @@ jobs:
             bend "examples/$app/main.bend" -o "build/$app"
             bend "examples/$app/main.bend" -o "build/$app.js"
           done
+          bend bench/main.bend -o build/bench
       - name: End-to-end tests
         run: bend tests/e2e.bend
       # script(1) gives pkg a terminal, so its help must carry SGR bytes
@@ -153,6 +154,28 @@ jobs:
             want "$(cat build/err.txt)" 'grep: build/c.txt: No such file or directory'
             want "$status" 2
           done
+      # G6: stdout must not depend on the thread count. The times on stderr
+      # are reported, not checked, until the targets are set (SPEC §14.4).
+      - name: Benchmark
+        shell: bash
+        run: |
+          for t in 1 all; do
+            flags=(); [ "$t" = 1 ] && flags=(--threads 1)
+            out=build/bench.$t
+            build/bench "${flags[@]}" >"$out.txt" 2>"$out.err" &&
+              status=0 || status=$?
+            sed "s/^/threads=$t /" "$out.err"
+            [ "$status" = 0 ] || exit "$status"
+          done
+          cat build/bench.1.txt
+          for phase in eval help; do
+            awk -v p="$phase" '$1 == p":" { ms[FILENAME] = $2 }
+              END { a = ms[ARGV[1]]; b = ms[ARGV[2]]
+                    if (b > 0) printf "%s speedup: %.1fx\n", p, a / b
+                    else printf "%s speedup: n/a, all cores took 0 ms\n", p }' \
+              build/bench.1.err build/bench.all.err
+          done
+          diff build/bench.1.txt build/bench.all.txt
 
   # SPEC §11: the completion scripts in real shells and the man pages through
   # mandoc. Ubuntu 22.04 has fish 3.3.1, the oldest fish supported, and runs
@@ -198,4 +221,4 @@ jobs:
           BASH_CMD="docker run --rm -it -v $PWD:$PWD bash:4.4 bash" \
             tests/complete/run.sh bash
 
-  # Add G6 and G7 in M7, when bench/main.bend runs.
+  # Add G7 in M7, with bench/rc.txt generated from build/bench.c.
