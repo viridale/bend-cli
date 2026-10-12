@@ -2,7 +2,9 @@
 # Purpose: compare a harness's native build at a base ref with the worktree's:
 #   median wall time, peak RSS, and the --threads 1 over all-cores speedup.
 # Expected output: a table of old and new by thread count, then whether the
-#   outputs match; exit 0 only when every run succeeds and all output agrees.
+#   stdouts match; exit 0 only when every run exits 0 and every stdout
+#   agrees. Stderr isn't compared, since a harness may print its timings
+#   there (bench/main.bend does); a failed run prints its stderr.
 #   Refuses to run (exit 3) while the 1-minute load average is above -L.
 # Run: tools/bench.sh [-r main] [-n 5] [-L load] harness.bend [app args...]
 #
@@ -134,21 +136,17 @@ printf '%-12s %14s %14s\n' 'old/new' \
 
 status=0
 for build in old new; do
-  for ext in out err; do
-    for f in "$work/$build".*."$ext"; do
-      if ! cmp -s "$f" "$work/$build.1.warm.$ext"; then
-        echo "bench: $build $ext differs: $(basename "$f") vs $build.1.warm.$ext"
-        status=1
-      fi
-    done
+  for f in "$work/$build".*.out; do
+    if ! cmp -s "$f" "$work/$build.1.warm.out"; then
+      echo "bench: $build stdout differs: $(basename "$f") vs $build.1.warm.out"
+      status=1
+    fi
   done
 done
-for ext in out err; do
-  if ! cmp -s "$work/old.1.warm.$ext" "$work/new.1.warm.$ext"; then
-    echo "bench: old and new $ext differ:"
-    diff "$work/old.1.warm.$ext" "$work/new.1.warm.$ext" | head -n 20 || true
-    status=1
-  fi
-done
-[ "$status" -ne 0 ] || echo 'bench: stdout and stderr identical across builds and thread counts'
+if ! cmp -s "$work/old.1.warm.out" "$work/new.1.warm.out"; then
+  echo 'bench: old and new stdout differ:'
+  diff "$work/old.1.warm.out" "$work/new.1.warm.out" | head -n 20 || true
+  status=1
+fi
+[ "$status" -ne 0 ] || echo 'bench: stdout identical across builds and thread counts'
 exit "$status"

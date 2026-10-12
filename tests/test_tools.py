@@ -206,6 +206,54 @@ case WL_CASE(FID_OTHER_BAZ):
         self.assertIn('FID_RUN_BAR 0 1 0', got.stdout)
         self.assertNotIn('FID_OTHER_BAZ', got.stdout)
 
+    def test_rc_names_root_defs_from_a_harness_in_a_subdirectory(self):
+        source = self.write('bench.c', '''// Spins
+// =====
+// Segments
+// =====
+case WL_CASE(FID____CLI_FOO):
+  term_keep(x);
+case WL_CASE(FID____CLI_FOO_K1):
+  term_keep(x);
+case WL_CASE(FID____RUN_BAR):
+  ctr_take(x);
+case WL_CASE(FID_RUN_TEXT):
+  rfc_seal(x);
+case WL_CASE(FID_CLI_SPEC):
+  rfc_seal(x);
+''')
+        got = self.run_tool('rc.sh', source)
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertEqual(got.stdout.splitlines()[1:],
+                         ['FID_CLI_FOO 2 0 0', 'FID_RUN_BAR 0 1 0'])
+
+    def test_bench_compares_stdout_but_not_stderr(self):
+        self.repo()
+        self.write('app.bend', 'old\n')
+        self.git('add', 'app.bend')
+        self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+                 'commit', '-qm', 'base')
+        self.write('app.bend', 'new\n')
+        self.write('bin/sysctl', '#!/bin/sh\necho 2\n', executable=True)
+        for out, code, says in [('same', 0, 'stdout identical across builds'),
+                                ('$$', 1, 'old stdout differs')]:
+            with self.subTest(out=out):
+                self.write('bin/bend', f'''#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -o ]; then
+    shift
+    printf '#!/bin/sh\\necho {out}\\necho "time $$" >&2\\n' >"$1"
+    chmod +x "$1"
+    exit 0
+  fi
+  shift
+done
+exit 2
+''', executable=True)
+                got = self.run_tool('bench.sh', '-L', '999999', '-n', '1', 'app.bend')
+                self.assertEqual(got.returncode, code, got.stdout + got.stderr)
+                self.assertIn(says, got.stdout)
+
     def test_bench_rejects_failed_run_and_keeps_other_scratch(self):
         self.repo()
         self.write('app.bend', 'old\n')

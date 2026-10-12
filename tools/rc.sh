@@ -9,6 +9,13 @@
 # follow it), and each spin helper they call, once per call site and expanded
 # through the spins that spin calls. Spin numbers change between builds, so a
 # spin counts only toward its callers.
+#
+# Bend names an imported def after its file's path from the harness, with
+# "_" for each "." and "/" ("../cli.bend" gives FID____CLI_<DEF>), and the
+# harness's own defs after nothing. The CLI and RUN defs under the most
+# "../" steps are the repo root's and print as FID_CLI_<DEF> and
+# FID_RUN_<DEF>, so bench/main.bend's own run_text stays out. A harness in
+# the root can't tell its own cli_* or run_* defs from them.
 set -euo pipefail
 BEND_TOOLS_PIN=2.0.36
 # shellcheck source=.bend-version.sh
@@ -64,7 +71,7 @@ counts=$(LC_ALL=C awk '
   sec == "Segments" && match($0, /WL_CASE\(FID_[A-Z0-9_]+\)/) {
     f = substr($0, RSTART + 8, RLENGTH - 9); b = f; sub(/_K[0-9]+$/, "", b)
     if (b != def) def = f
-    unit = def ~ /^FID_(CLI|RUN)_/ ? def : ""
+    unit = def ~ /^FID_(___)*(CLI|RUN)_/ ? def : ""
     if (unit != "") own[unit] = 1
   }
   unit != "" { scan($0, unit) }
@@ -75,13 +82,20 @@ counts=$(LC_ALL=C awk '
       exit 2
     }
     for (u in own) {
+      match(u, /^FID__*/)
+      if (RLENGTH - 4 > depth) depth = RLENGTH - 4
+    }
+    for (u in own) {
+      match(u, /^FID__*/)
+      if (RLENGTH - 4 != depth) continue
+      name = "FID_" substr(u, RLENGTH + 1)
       for (k = 1; k <= 3; k++) t[k] = n[u, k]
       m = split(calls[u], c, " ")
       for (i = 1; i <= m; i++) {
         expand(c[i])
         for (k = 1; k <= 3; k++) t[k] += x[c[i], k]
       }
-      printf "%s %d %d %d\n", u, t[1], t[2], t[3]
+      printf "%s %d %d %d\n", name, t[1], t[2], t[3]
     }
   }
 ' "$1" | LC_ALL=C sort)
