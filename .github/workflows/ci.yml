@@ -40,7 +40,9 @@ jobs:
       # and each file importing it print SOME PROOFS FAIL, exit 1 and list
       # the defs that rely on them (SPEC F1, G2): run.bend's defs behind the
       # importer's path to it, then the importer's own. Every other file
-      # prints ALL PROOFS CHECK and the --verdict hint, and exits 0.
+      # prints ALL PROOFS CHECK and the --verdict hint, and exits 0. A
+      # LAWS.bend has a TODO per law, and its PROOF.bend runs under Check
+      # proofs.
       - name: Check source modules
         shell: bash
         run: |
@@ -57,7 +59,7 @@ jobs:
               ./run.bend) want="$(foreign '')" code=1 ;;
               ./main.bend) want="$(foreign run. main)" code=1 ;;
               ./tests/f32.bend) want="$(foreign ../run. main)" code=1 ;;
-              ./examples/*/main.bend) want="$(foreign ../../run.)" code=1 ;;
+              ./examples/*/main.bend) want="$(foreign ../../run. main)" code=1 ;;
               *) want=$'ALL PROOFS CHECK\nUse --verdict for mathematical validity.'
                  code=0 ;;
             esac
@@ -70,7 +72,7 @@ jobs:
               failed=1
             fi
           done < <(find . -name '*.bend' -not -path './tmp/*' \
-            -not -path './LAWS.bend' -not -path './PROOF.bend' -print | sort)
+            -not -name LAWS.bend -not -name PROOF.bend -print | sort)
           exit "$failed"
       # --verdict builds Bend's proof kernel with Lean once per Bend version
       # and reuses it from ~/.bend/bendtt; the cache saves only on success.
@@ -107,6 +109,10 @@ jobs:
           bend main.bend -o build/pkg.js
           bend tests/f32.bend -o build/f32
           bend tests/f32.bend -o build/f32.js
+          for app in hello grep; do
+            bend "examples/$app/main.bend" -o "build/$app"
+            bend "examples/$app/main.bend" -o "build/$app.js"
+          done
       - name: End-to-end tests
         run: bend tests/e2e.bend
       # script(1) gives pkg a terminal, so its help must carry SGR bytes
@@ -119,6 +125,34 @@ jobs:
             script -qec "build/pkg --help" /tmp/tty.txt </dev/null >/dev/null
           fi
           LC_ALL=C grep -q $'\033\\[' /tmp/tty.txt
+      # The examples' laws cover their parsing and each file's output; this
+      # covers their IO: a greeting, and grep over two files that match and
+      # one that cannot be opened.
+      - name: Example apps
+        shell: bash
+        run: |
+          # The runtime takes the first --, and Bun one before it (F4, F19).
+          app() {
+            if [ "$mode" = native ]; then "build/$1" -- "${@:2}"
+            else bun "build/$1.js" -- -- "${@:2}"; fi
+          }
+          # want GOT EXPECTED: unless equal, shows both and fails the step.
+          want() {
+            [ "$1" = "$2" ] ||
+              { printf '%s: want %q\n%*s got %q\n' "$mode" "$2" ${#mode} '' "$1"; exit 1; }
+          }
+          printf 'one x\ntwo x\n' > build/a.txt
+          printf 'X three\nfour x\n' > build/b.txt
+          for mode in native js; do
+            want "$(app hello Ada)" 'Hello, Ada!'
+            # -m counts per file, and the missing file makes the exit 2
+            # while the others still print.
+            out="$(app grep -i -m 1 x build/a.txt build/b.txt build/c.txt \
+              2>build/err.txt)" && status=0 || status=$?
+            want "$out" $'build/a.txt:one x\nbuild/b.txt:X three'
+            want "$(cat build/err.txt)" 'grep: build/c.txt: No such file or directory'
+            want "$status" 2
+          done
 
   # SPEC §11: the completion scripts in real shells and the man pages through
   # mandoc. Ubuntu 22.04 has fish 3.3.1, the oldest fish supported, and runs

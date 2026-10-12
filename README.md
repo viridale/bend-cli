@@ -59,6 +59,10 @@ bend main.bend -o hello
 `-h` shows a summary; `--help` shows every help paragraph. Usage errors go
 to stderr and exit 2. Invalid command definitions and decoder bugs exit 70.
 
+[`examples/hello`](examples/hello) is this quickstart with its laws and
+proofs. [`examples/grep`](examples/grep) adds options, an environment
+fallback, color, and file reads, with laws for its parsing and output.
+
 ## Define commands
 
 `Cli.cmd(name, about, items)` defines a root command. Add `Cli.sub` for
