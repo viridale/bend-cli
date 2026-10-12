@@ -4,6 +4,7 @@
 - Expect `bend LAWS.bend --check-only` to fail with one TODO per open law once the laws type-check; `bend PROOF.bend` is what closes them.
 - In a proof, `%e : P` with `e : {a == b}` needs the goal to be `P` with `_` as `b` and leaves `P` with `_` as `a`, so state a lemma with the side to remove on the right; a rewrite's proof term is a use of what it names and its motive is not, so mark `+` on a parameter that both the rewrite and the rest of the proof use.
 - Keep `F32.read` out of laws: the checker does not reduce it, so even `{F32.read("1.5") == Some{1.5}}` cannot be proved.
+- Keep large `Nat` literals out of laws: the checker's `Nat` is unary and it normalizes both sides, so even `{nat_of("100000") == 100000n}` overflows its stack; state the value as `Nat.read`'s answer and prove it through a lemma over an abstract string.
 - Lay out `main.bend`, `LAWS.bend`, and `PROOF.bend` as Bend's demos do: a header comment with purpose, expected output, and run command; laws through an import alias; one proof def per law.
 - Keep decisions in pure functions over `Data` with the IO in a thin shell; match every `Result`, close every handle on every branch, bound loops with `Nat` fuel, and keep `@unsafe` out of anything a law depends on.
 - Define a def above its first caller, put the shrinking argument first, match only parameters and pattern-bound variables, and annotate every operator and every `<-` bind; check with `--check-only` after each def.
@@ -20,5 +21,6 @@
 - Find a def in the emitted C as `FID_<FILE>_<DEF>` in upper case, named after its file rather than its import alias, with continuations at `_K<n>`; an inlined def may have none.
 - Verify a refactor by building one harness to C and native from the old and new code, requiring byte-identical output, and comparing `tools/rc.sh new.c old.txt` per def and in total, where `old.txt` is `tools/rc.sh old.c`.
 - Keep the first `--`, `--threads`, `--gpu`, `--gpu-build`, and `--bend-help` out of app options, values, and tests; the runtime consumes them before `main` sees argv (README, Platform notes).
+- Launch compiled JS under Bun as `bun app.js -- -- args`: Bun removes a `--` right after the script path, and the runtime removes the next.
 - Build the deployment target; run it with `--threads 1` and with all cores, confirm equal output, and report the speedup.
 - Run `bend PROOF.bend --verdict` last; report commands, outputs, and open holes, since a passing proof covers only its stated laws.

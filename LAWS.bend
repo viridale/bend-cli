@@ -6,8 +6,11 @@
 # P12 fixes when readers, choose and route raise their own validation Bug,
 # not what they return; G-READ fixes values, except a given f32 (K8), and
 # what route's selected callback returns. P7 and P8 fix term's colors;
-# G-HELP, G-ERR, G-TIP and G-COLOR fix outcome's bytes for V1-V5, not what
-# outcome's Matched holds, nor completions, man or decoding (M5, M6).
+# G-HELP, G-ERR, G-TIP and G-COLOR fix outcome's bytes for V1-V5. P10 and
+# P11 fix eval's codes and streams for every decoder through eval_with,
+# which eval calls (eval_bridge); the M5 goldens fix eval's bytes and Go
+# values for chosen cases. Nothing here fixes completions or man (M6), nor
+# Run.main's IO, which tests/e2e.bend covers (K4).
 
 import Base
 import ./cli.bend as Cli
@@ -1834,11 +1837,16 @@ def tip_block(tips: List<&2, String>) -> String:
     case Nil{}: ""
     case tip <> tail: String.append("\n", tip_lines(tip <> tail))
 
-# The uncolored outcome for an error: message, tips, then the scope's usage.
+# An uncolored error page: message, tips, then the scope's usage.
+def error_text(message: String, tips: List<&2, String>,
+    usage: String) -> String:
+  String.concat(["error: ", message, "\n", tip_block(tips), "\nUsage: ",
+    usage, "\n\nFor more information, try '--help'.\n"])
+
+# The uncolored outcome for an error.
 def report(message: String, tips: List<&2, String>,
     usage: String) -> Cli.Outcome:
-  Cli.Shown{2, "", String.concat(["error: ", message, "\n", tip_block(tips),
-    "\nUsage: ", usage, "\n\nFor more information, try '--help'.\n"])}
+  Cli.Shown{2, "", error_text(message, tips, usage)}
 
 # G-ERR: each scan error's message, at the scope where scanning stopped: E02,
 # E03, E04, E05, then E09 twice, the second on a hyphen token after `--`,
@@ -2206,3 +2214,906 @@ law g_lint_flag_default:
   {Cli.problems(Cli.cmd("tool", "Tool", [
     Cli.arg("-v...", "Verbosity", [Cli.default("2")]),
   ])) == [Cli.Misplaced{"tool", "default"}] : List<&2, Cli.Problem>}
+
+# M5: eval answers outcome's Shown as Exit and decodes a Matched (V7).
+# eval_with is eval with the decoder passed as a value, so a law can
+# quantify over decoders. eval must be a direct forwarding definition,
+# eval(~A, ~decode, c, h, argv) = eval_with(A, decode, c, h, argv), so P10
+# and P11, proved of eval_with, carry to every eval; eval_bridge checks it.
+
+# P10: for every decoder, eval_with answers Go, or Exit with code 0, 2 or 70.
+def p10_code(-A: Type, s: Cli.Step<A>) -> Bool:
+  match s:
+    case Cli.Go{value, term}: True{}
+    case Cli.Exit{+code, out, err}:
+      Bool.or(U32.is_eq(code, 0),
+        Bool.or(U32.is_eq(code, 2), U32.is_eq(code, 70)))
+
+law p10:
+  for -A: Type
+  for decode: @+m: Cli.Matches -> Cli.Dec(A)
+  for c: Cli.Cmd
+  for h: Cli.Host
+  for argv: List<&2, String>
+  {p10_code(A, Cli.eval_with(A, decode, c, h, argv)) == True{} : Bool}
+
+# P11: for every decoder, eval_with's exit 0 leaves stderr empty, and its
+# exits 2 and 70 leave stdout empty.
+def p11_streams(-A: Type, s: Cli.Step<A>) -> Bool:
+  match s:
+    case Cli.Go{value, term}: True{}
+    case Cli.Exit{+code, out, err}:
+      Bool.and(Bool.or(Bool.not(U32.is_eq(code, 0)), String.is_empty(err)),
+        Bool.or(Bool.not(Bool.or(U32.is_eq(code, 2), U32.is_eq(code, 70))),
+          String.is_empty(out)))
+
+law p11:
+  for -A: Type
+  for decode: @+m: Cli.Matches -> Cli.Dec(A)
+  for c: Cli.Cmd
+  for h: Cli.Host
+  for argv: List<&2, String>
+  {p11_streams(A, Cli.eval_with(A, decode, c, h, argv)) == True{} : Bool}
+
+# eval is eval_with with its template arguments as values: with keep for
+# every spec, and with pkg's decoder.
+law eval_bridge:
+  for +c: Cli.Cmd
+  for +h: Cli.Host
+  for +argv: List<&2, String>
+  {Cli.eval(~Cli.Matches, ~Cli.keep, c, h, argv)
+    == Cli.eval_with(Cli.Matches, Cli.keep, c, h, argv)
+    : Cli.Step<Cli.Matches>} &
+  {Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), h, argv)
+    == Cli.eval_with(Demo.Action, Demo.decode, Demo.cli(), h, argv)
+    : Cli.Step<Demo.Action>}
+
+# The parse a decoder sees, without the spec it came from.
+type Parsed is Data:
+  Parsed{path: List<&2, String>, fields: List<&2, Cli.Field>,
+    external: Maybe<&2, Cli.ExternalArgs>}
+
+def parsed(+m: Cli.Matches) -> Cli.Dec(Parsed):
+  match m:
+    case Cli.Matches{cmd, path, fields, external}:
+      Done{Parsed{path, fields, external}}
+
+def ran(c: Cli.Cmd, h: Cli.Host,
+    argv: List<&2, String>) -> Cli.Step<Parsed>:
+  Cli.eval(~Parsed, ~parsed, c, h, argv)
+
+# Go at the root without an external call; host() gives no color, width 80.
+def went(fields: List<&2, Cli.Field>) -> Cli.Step<Parsed>:
+  Cli.Go{Parsed{[], fields, None{}}, Cli.Term{False{}, False{}, 80n}}
+
+def went_to(path: List<&2, String>, fields: List<&2, Cli.Field>,
+    external: Maybe<&2, Cli.ExternalArgs>) -> Cli.Step<Parsed>:
+  Cli.Go{Parsed{path, fields, external}, Cli.Term{False{}, False{}, 80n}}
+
+def failed(-A: Type, message: String, tips: List<&2, String>,
+    usage: String) -> Cli.Step<A>:
+  Cli.Exit{2, "", error_text(message, tips, usage)}
+
+# G-LEX through G-REL through eval: each M2 case's Go value, or its exact
+# help, version or error bytes with their tips (§12.2). Each law covers
+# every distinct input of the M2 law named without the `_eval` suffix.
+
+law g_lex_cluster_eval:
+  {ran(flags(), host(), ["-abc"]) ==
+    went([
+      field("a", ["true"], Cli.Argv{}),
+      field("b", ["true"], Cli.Argv{}),
+      field("c", ["true"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_lex_values_eval:
+  {ran(out_option(), host(), ["-ofile"]) ==
+    went([
+      field("out", ["file"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(out_option(), host(), ["-o=file"]) ==
+    went([
+      field("out", ["file"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(out_option(), host(), ["-o", "file"]) ==
+    went([
+      field("out", ["file"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(out_option(), host(), ["--out=file"]) ==
+    went([
+      field("out", ["file"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(out_option(), host(), ["--out", "file"]) ==
+    went([
+      field("out", ["file"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(out_option(), host(), ["--out="]) ==
+    went([
+      field("out", [""], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(out_option(), host(), ["-o"]) ==
+    failed(Parsed,
+      "a value is required for '--out <FILE>' but none was supplied",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_lex_end_eval:
+  {ran(optional_operand(), host(), ["-"]) ==
+    went([
+      field("x", ["-"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(optional_operand(), host(), ["--", "-x"]) ==
+    went([
+      field("x", ["-x"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_lex_count_eval:
+  {ran(count_option(), host(), ["-vvv"]) ==
+    went([
+      field("verbose", ["3"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_lex_negation_eval:
+  {ran(negatable_option(), host(), ["--no-x"]) ==
+    went([
+      field("x", ["false"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(negatable_option(), host(), ["--x", "--no-x"]) ==
+    went([
+      field("x", ["false"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_lex_bare_eval:
+  {ran(color_option(), host(), ["--color"]) ==
+    went([
+      field("color", ["auto"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_lex_errors_eval:
+  {ran(decimal_option(False{}), host(), ["-m", "-5"]) ==
+    failed(Parsed, "a value is required for '-m <NUM>' but none was supplied",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(decimal_option(True{}), host(), ["-m", "-5"]) ==
+    went([
+      field("m", ["-5"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--flag", "Flag", []),
+  ]), host(), ["--flag=x"]) ==
+    failed(Parsed,
+      "unexpected value 'x' for '--flag' found; no more were expected",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("-a", "Flag a", []),
+  ]), host(), ["-az"]) ==
+    failed(Parsed, "unexpected argument '-z' found",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_lex_recovery_eval:
+  {ran(flags(), host(), ["--bad=x", "--help"]) ==
+    Cli.Exit{0, page([
+      "Tool",
+      "",
+      "Usage: tool [OPTIONS]",
+      "",
+      "Options:",
+      "  -a          Flag a",
+      "  -b          Flag b",
+      "  -c          Flag c",
+      "  -h, --help  Print help",
+    ]), ""} : Cli.Step<Parsed>}
+
+law g_pos_variadic_eval:
+  {ran(cp(), host(), ["a", "b", "dest"]) ==
+    went([
+      field("src", ["a", "b"], Cli.Argv{}),
+      field("dst", ["dest"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(cp(), host(), ["a", "dest"]) ==
+    went([
+      field("src", ["a"], Cli.Argv{}),
+      field("dst", ["dest"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(cp(), host(), ["dest"]) ==
+    failed(Parsed,
+      "the following required arguments were not provided:\n  <SRC>...",
+      [], "cp <SRC>... <DST>") : Cli.Step<Parsed>}
+
+law g_pos_cases_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("[OUT]", "Output", []),
+  ]), host(), []) ==
+    went([]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<X>", "Operand", []),
+  ]), host(), ["a", "b"]) ==
+    failed(Parsed, "unexpected argument 'b' found",
+      [], "tool <X>") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<ITEM>...", "Items", [Cli.rest()]),
+  ]), host(), ["a", "--", "-x"]) ==
+    went([
+      field("item", ["a", "--", "-x"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<X>", "Operand", [Cli.hyphen()]),
+  ]), host(), ["-x"]) ==
+    went([
+      field("x", ["-x"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("[X]", "Operand", []),
+  ]), host(), [""]) ==
+    went([
+      field("x", [""], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<N>", "Number", [Cli.as_f32()]),
+  ]), host(), ["-5"]) ==
+    went([
+      field("n", ["-5"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<N>", "Number", [Cli.as_nat()]),
+  ]), host(), ["x"]) ==
+    failed(Parsed,
+      "invalid value 'x' for '<N>': expected a whole number from 0 to 281474976710655",
+      [], "tool <N>") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<X>", "Operand", [Cli.hyphen()]),
+  ]), host(), ["-h"]) ==
+    Cli.Exit{0, page([
+      "Tool",
+      "",
+      "Usage: tool <X>",
+      "",
+      "Arguments:",
+      "  <X>         Operand",
+      "",
+      "Options:",
+      "  -h, --help  Print help",
+    ]), ""} : Cli.Step<Parsed>}
+
+law g_sub_descent_eval:
+  {ran(sub_tool(), host(), ["-g", "alpha", "-g", "--child"]) ==
+    went_to(["alpha"], [
+      field("global", ["true"], Cli.Argv{}),
+      field("child", ["true"], Cli.Argv{}),
+    ], None{}) : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["-g", "alpha", "--child"]) ==
+    went_to(["alpha"], [
+      field("global", ["true"], Cli.Argv{}),
+      field("child", ["true"], Cli.Argv{}),
+    ], None{}) : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["alpha", "-g"]) ==
+    went_to(["alpha"], [
+      field("global", ["true"], Cli.Argv{}),
+    ], None{}) : Cli.Step<Parsed>}
+
+law g_sub_alias_eval:
+  {ran(sub_tool(), host(), ["a", "beta"]) ==
+    went_to(["alpha", "beta"], [], None{}) : Cli.Step<Parsed>}
+
+law g_sub_help_eval:
+  {ran(sub_tool(), host(), ["help"]) ==
+    Cli.Exit{0, page([
+      "Tool",
+      "",
+      "Usage: tool [OPTIONS] <COMMAND>",
+      "",
+      "Commands:",
+      "  alpha         Alpha [aliases: a]",
+      "  help          Print this message or the help of the given subcommand(s)",
+      "",
+      "Options:",
+      "      --root    Root only",
+      "  -g, --global  Global flag",
+      "  -h, --help    Print help",
+    ]), ""} : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["help", "a", "beta"]) ==
+    Cli.Exit{0, page([
+      "Beta",
+      "",
+      "Usage: tool alpha beta [OPTIONS]",
+      "",
+      "Options:",
+      "  -g, --global  Global flag",
+      "  -h, --help    Print help",
+    ]), ""} : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["help", "bad"]) ==
+    failed(Parsed, "unrecognized subcommand 'bad'",
+      [], "tool [OPTIONS] <COMMAND>") : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["alpha", "--help"]) ==
+    Cli.Exit{0, page([
+      "Alpha",
+      "",
+      "Usage: tool alpha [OPTIONS] [COMMAND]",
+      "",
+      "Commands:",
+      "  beta          Beta",
+      "  help          Print this message or the help of the given subcommand(s)",
+      "",
+      "Options:",
+      "      --child   Child flag",
+      "  -g, --global  Global flag",
+      "  -h, --help    Print help",
+    ]), ""} : Cli.Step<Parsed>}
+
+law g_sub_scope_errors_eval:
+  {ran(sub_tool(), host(), ["alpha", "--root"]) ==
+    failed(Parsed,
+      "unexpected argument '--root' found",
+      ["'--root' belongs to 'tool'; place it before 'alpha'"],
+      "tool alpha [OPTIONS] [COMMAND]") : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["--child", "alpha"]) ==
+    failed(Parsed,
+      "unexpected argument '--child' found",
+      ["'--child' belongs to subcommand 'tool alpha'"],
+      "tool [OPTIONS] <COMMAND>") : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), ["--alpha"]) ==
+    failed(Parsed,
+      "unexpected argument '--alpha' found",
+      ["subcommand 'alpha' exists; to use it, remove the '--'"],
+      "tool [OPTIONS] <COMMAND>") : Cli.Step<Parsed>}
+
+law g_sub_external_eval:
+  {ran(external_tool(), host(), ["plug", "--x", "--help"]) ==
+    went_to([], [], Some{Cli.ExternalArgs{"plug", ["--x", "--help"]}})
+     : Cli.Step<Parsed>} &
+  {ran(external_tool(), host(), ["known"]) ==
+    went_to(["known"], [], None{}) : Cli.Step<Parsed>}
+
+law g_sub_missing_eval:
+  {ran(sub_tool(), host(), ["-g"]) ==
+    failed(Parsed,
+      "'tool' requires a subcommand but none was provided\n  [subcommands: alpha, help]",
+      [], "tool [OPTIONS] <COMMAND>") : Cli.Step<Parsed>} &
+  {ran(sub_tool(), host(), []) ==
+    Cli.Exit{2, "", page([
+      "Tool",
+      "",
+      "Usage: tool [OPTIONS] <COMMAND>",
+      "",
+      "Commands:",
+      "  alpha         Alpha [aliases: a]",
+      "  help          Print this message or the help of the given subcommand(s)",
+      "",
+      "Options:",
+      "      --root    Root only",
+      "  -g, --global  Global flag",
+      "  -h, --help    Print help",
+    ])} : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.sub_optional(),
+    Cli.sub("alpha", "Alpha", []),
+  ]), host(), []) ==
+    went([]) : Cli.Step<Parsed>}
+
+law g_sub_short_shadow_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("-h", "Human", []),
+  ]), host(), ["-h"]) ==
+    went([
+      field("h", ["true"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("-h", "Human", []),
+  ]), host(), ["--help"]) ==
+    Cli.Exit{0, page([
+      "Tool",
+      "",
+      "Usage: tool [OPTIONS]",
+      "",
+      "Options:",
+      "  -h          Human",
+      "      --help  Print help",
+    ]), ""} : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.version("1.0"),
+    Cli.arg("-V", "Verbose", []),
+  ]), host(), ["-V"]) ==
+    went([
+      field("V", ["true"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.version("1.0"),
+    Cli.arg("-V", "Verbose", []),
+  ]), host(), ["--version"]) ==
+    Cli.Exit{0, page([
+      "tool 1.0",
+    ]), ""} : Cli.Step<Parsed>}
+
+law g_val_strings_eval:
+  {ran(typed([]), host(), ["--value="]) ==
+    went([
+      field("value", [""], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_file()]), host(), ["--value="]) ==
+    went([
+      field("value", [""], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_dir()]), host(), ["--value="]) ==
+    went([
+      field("value", [""], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([]), host(), ["--value=a", "--value=b"]) ==
+    went([
+      field("value", ["b"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_val_nat_eval:
+  {ran(typed([Cli.as_nat()]), host(), ["--value=0"]) ==
+    went([
+      field("value", ["0"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_nat()]), host(), ["--value=281474976710655"]) ==
+    went([
+      field("value", ["281474976710655"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_nat()]), host(), ["--value=281474976710656"]) ==
+    failed(Parsed,
+      "invalid value '281474976710656' for '--value <V>': expected a whole number from 0 to 281474976710655",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_nat()]), host(), ["--value=-1"]) ==
+    failed(Parsed,
+      "invalid value '-1' for '--value <V>': expected a whole number from 0 to 281474976710655",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_val_u32_eval:
+  {ran(typed([Cli.as_u32()]), host(), ["--value=0"]) ==
+    went([
+      field("value", ["0"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_u32()]), host(), ["--value=4294967295"]) ==
+    went([
+      field("value", ["4294967295"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_u32()]), host(), ["--value=4294967296"]) ==
+    failed(Parsed,
+      "invalid value '4294967296' for '--value <V>': expected a whole number from 0 to 4294967295",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_val_f32_eval:
+  {ran(typed([Cli.as_f32()]), host(), ["--value=-5"]) ==
+    went([
+      field("value", ["-5"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_f32()]), host(), ["--value=.5"]) ==
+    went([
+      field("value", [".5"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_f32()]), host(), ["--value=1e+3"]) ==
+    went([
+      field("value", ["1e+3"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_f32()]), host(), ["--value=1e"]) ==
+    failed(Parsed,
+      "invalid value '1e' for '--value <V>': expected a decimal number",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_f32()]), host(), ["--value=+3"]) ==
+    failed(Parsed,
+      "invalid value '+3' for '--value <V>': expected a decimal number",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_val_bool_eval:
+  {ran(typed([Cli.as_bool()]), host(), ["--value=YeS"]) ==
+    went([
+      field("value", ["YeS"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_bool()]), host(), ["--value=0"]) ==
+    went([
+      field("value", ["0"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.as_bool()]), host(), ["--value=maybe"]) ==
+    failed(Parsed,
+      "invalid value 'maybe' for '--value <V>': expected true or false",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_val_one_of_eval:
+  {ran(typed([Cli.one_of(["red", "blue"])]), host(), ["--value=red"]) ==
+    went([
+      field("value", ["red"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(typed([Cli.one_of(["red", "blue"])]), host(), ["--value=Red"]) ==
+    failed(Parsed,
+      "invalid value 'Red' for '--value <V>': expected one of 'red', 'blue'",
+      ["a similar value exists: 'red'"], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_val_delim_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--tag <TAG>...", "Tags", [Cli.delim(',')]),
+  ]), host(), ["--tag=a,b", "--tag=c"]) ==
+    went([
+      field("tag", ["a", "b", "c"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("<TAG>...", "Tags", [Cli.delim(',')]),
+  ]), host(), ["a,b", "c"]) ==
+    went([
+      field("tag", ["a", "b", "c"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_val_delim_typed_eval:
+  {ran(numbers([Cli.as_nat(), Cli.delim(',')]),
+    host(), ["--n=1,2", "--n", "3"]) ==
+    went([
+      field("n", ["1", "2", "3"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(number_operands([Cli.as_u32(), Cli.delim(',')]), host(), ["1,2"]) ==
+    went([
+      field("n", ["1", "2"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(numbers([Cli.as_bool(), Cli.delim(','), Cli.env("N")]),
+    Cli.host_var(host(), "N", "yes,0"), []) ==
+    went([
+      field("n", ["yes", "0"], Cli.Env{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(numbers([Cli.one_of(["a", "b"]), Cli.delim(','), Cli.default("b,a")]),
+    host(), []) ==
+    went([
+      field("n", ["b", "a"], Cli.Default{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(numbers([Cli.as_nat(), Cli.delim(',')]), host(), ["--n=1,x"]) ==
+    failed(Parsed,
+      "invalid value 'x' for '--n <N>...': expected a whole number from 0 to 281474976710655",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(numbers([Cli.as_nat(), Cli.delim(','), Cli.env("N")]),
+    Cli.host_var(host(), "N", "1,x"), []) ==
+    failed(Parsed,
+      "invalid value 'x' for '--n <N>...' from environment variable N: expected a whole number from 0 to 281474976710655",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(number_operands([Cli.as_u32(), Cli.delim(',')]), host(), ["1,x,y"]) ==
+    failed(Parsed,
+      "invalid value 'x' for '<N>...': expected a whole number from 0 to 4294967295",
+      [], "tool <N>...") : Cli.Step<Parsed>}
+
+law g_src_env_eval:
+  {ran(sourced(),
+    Cli.host_var(Cli.host_var(Cli.host_var(host(),
+      "TOOL_FLAG", "ON"), "TOOL_VERBOSE", "3"), "TOOL_VALUE", "env"), []) ==
+    went([
+      field("flag", ["true"], Cli.Env{}),
+      field("verbose", ["3"], Cli.Env{}),
+      field("value", ["env"], Cli.Env{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_src_empty_default_eval:
+  {ran(sourced(), Cli.host_var(host(), "TOOL_VALUE", ""), []) ==
+    went([
+      field("value", ["fallback"], Cli.Default{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_src_precedence_eval:
+  {ran(sourced(),
+    Cli.host_var(host(), "TOOL_VALUE", "env"), ["--value=argv"]) ==
+    went([
+      field("value", ["argv"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(sourced(), Cli.host_var(host(), "TOOL_FLAG", "false"), ["--flag"]) ==
+    went([
+      field("flag", ["true"], Cli.Argv{}),
+      field("value", ["fallback"], Cli.Default{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(sourced(),
+    Cli.host_var(host(), "TOOL_VERBOSE", "7"), ["--verbose", "--verbose"]) ==
+    went([
+      field("verbose", ["2"], Cli.Argv{}),
+      field("value", ["fallback"], Cli.Default{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_src_invalid_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--value <V>", "Value", [Cli.as_nat(), Cli.env("TOOL_VALUE")]),
+  ]), Cli.host_var(host(), "TOOL_VALUE", "nope"), []) ==
+    failed(Parsed,
+      "invalid value 'nope' for '--value <V>' from environment variable TOOL_VALUE: expected a whole number from 0 to 281474976710655",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--flag", "Flag", [Cli.env("TOOL_FLAG")]),
+  ]), Cli.host_var(host(), "TOOL_FLAG", "maybe"), []) ==
+    failed(Parsed,
+      "invalid value 'maybe' for '--flag' from environment variable TOOL_FLAG: expected true or false",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_rel_required_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--out <O>", "Output", [Cli.required()]),
+    Cli.arg("<FILE>", "File", []),
+    Cli.arg("--ok", "Ready", []),
+  ]), host(), ["--ok"]) ==
+    failed(Parsed,
+      "the following required arguments were not provided:\n  --out <O>\n  <FILE>",
+      [], "tool [OPTIONS] --out <O> <FILE>") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--out <O>", "Output", [Cli.required(), Cli.env("TOOL_OUT")]),
+  ]), Cli.host_var(host(), "TOOL_OUT", "env"), []) ==
+    went([
+      field("out", ["env"], Cli.Env{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_rel_need_one_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.need_one("pick"),
+    Cli.arg("--a", "A", [Cli.group("pick")]),
+    Cli.arg("--b", "B", [Cli.group("pick")]),
+  ]), host(), ["--help"]) ==
+    Cli.Exit{0, page([
+      "Tool",
+      "",
+      "Usage: tool [OPTIONS] <--a|--b>",
+      "",
+      "Options:",
+      "      --a     A",
+      "      --b     B",
+      "  -h, --help  Print help",
+    ]), ""} : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.need_one("pick"),
+    Cli.arg("--a", "A", [Cli.group("pick")]),
+    Cli.arg("--b", "B", [Cli.group("pick")]),
+  ]), host(), ["--", "x"]) ==
+    failed(Parsed, "unexpected argument 'x' found",
+      [], "tool [OPTIONS] <--a|--b>") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.need_one("pick"),
+    Cli.arg("--a", "A", [Cli.group("pick")]),
+    Cli.arg("--b", "B", [Cli.group("pick")]),
+    Cli.arg("--ok", "Ready", []),
+  ]), host(), ["--ok"]) ==
+    failed(Parsed,
+      "the following required arguments were not provided:\n  <--a|--b>",
+      [], "tool [OPTIONS] <--a|--b>") : Cli.Step<Parsed>}
+
+law g_rel_exclusive_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.exclusive("pick"),
+    Cli.arg("--a", "A", [Cli.group("pick")]),
+    Cli.arg("--b", "B", [Cli.group("pick")]),
+  ]), host(), ["--a", "--b"]) ==
+    failed(Parsed, "the argument '--b' cannot be used with '--a'",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_rel_conflict_order_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a <A>", "A", [Cli.env("TOOL_A"), Cli.conflicts("b")]),
+    Cli.arg("--b <B>", "B", []),
+  ]), Cli.host_var(host(), "TOOL_A", "env"), ["--b=argv"]) ==
+    failed(Parsed, "the argument '--a <A>' cannot be used with '--b <B>'",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a", "A", [Cli.conflicts("b")]),
+    Cli.arg("--b", "B", []),
+  ]), host(), ["--b", "--a"]) ==
+    failed(Parsed, "the argument '--a' cannot be used with '--b'",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_rel_requires_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a", "A", [Cli.requires("b")]),
+    Cli.arg("--b <B>", "B", [Cli.env("TOOL_B")]),
+  ]), host(), ["--a"]) ==
+    failed(Parsed, "the argument '--a' requires '--b <B>'",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a", "A", [Cli.requires("b")]),
+    Cli.arg("--b <B>", "B", [Cli.env("TOOL_B")]),
+  ]), Cli.host_var(host(), "TOOL_B", "env"), ["--a"]) ==
+    went([
+      field("a", ["true"], Cli.Argv{}),
+      field("b", ["env"], Cli.Env{}),
+    ]) : Cli.Step<Parsed>}
+
+law g_rel_defaults_eval:
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a <A>", "A", [Cli.default("a"), Cli.conflicts("b")]),
+    Cli.arg("--b <B>", "B", [Cli.default("b")]),
+  ]), host(), ["--b=argv"]) ==
+    went([
+      field("a", ["a"], Cli.Default{}),
+      field("b", ["argv"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a", "A", [Cli.requires("b")]),
+    Cli.arg("--b <B>", "B", [Cli.default("b")]),
+  ]), host(), ["--a"]) ==
+    failed(Parsed, "the argument '--a' requires '--b <B>'",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+# G-ERR E12: a decoder's Usage fault is an error at the matched scope, exit
+# 2, colored by stderr's decision; Bug prints `bug: <msg>` uncolored, exit
+# 70; Done is Go with term's decisions and the host width, unclamped.
+# Messages print as given: a Usage message's final newline adds a blank
+# line before the usage, and a Bug message's makes the output end in two.
+def strict() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.sub_optional(),
+    Cli.arg("--ok", "Accept", [Cli.global()]),
+    Cli.arg("--bug", "Fail as a defect", [Cli.global()]),
+    Cli.sub("deep", "Deep", []),
+  ])
+
+# Each fault's message ends with end.
+def verdict(bug: Bool, ok: Bool, end: String) -> Cli.Dec(String):
+  match bug ok:
+    case True{} _: Cli.bug(String, String.append("--bug was given", end))
+    case False{} True{}: Done{"accepted"}
+    case False{} False{}:
+      Cli.fail(String, String.append("pass --ok to accept", end))
+
+def strict_decode(+m: Cli.Matches) -> Cli.Dec(String):
+  do Cli.Dec<String>:
+    ok : Bool <- Cli.flag(m, "ok")
+    bug : Bool <- Cli.flag(m, "bug")
+    answer : String <- verdict(bug, ok, "")
+    return answer
+
+def strict_run(h: Cli.Host, argv: List<&2, String>) -> Cli.Step<String>:
+  Cli.eval(~String, ~strict_decode, strict(), h, argv)
+
+def newline_decode(+m: Cli.Matches) -> Cli.Dec(String):
+  do Cli.Dec<String>:
+    ok : Bool <- Cli.flag(m, "ok")
+    bug : Bool <- Cli.flag(m, "bug")
+    answer : String <- verdict(bug, ok, "\n")
+    return answer
+
+def newline_run(argv: List<&2, String>) -> Cli.Step<String>:
+  Cli.eval(~String, ~newline_decode, strict(), host(), argv)
+
+law g_err_decode:
+  {strict_run(host(), []) ==
+    failed(String, "pass --ok to accept", [], "tool [OPTIONS] [COMMAND]")
+    : Cli.Step<String>} &
+  {strict_run(host(), ["deep"]) ==
+    failed(String, "pass --ok to accept", [], "tool deep [OPTIONS]")
+    : Cli.Step<String>} &
+  {strict_run(Cli.host_tty(host(), False{}, True{}), []) ==
+    Cli.Exit{2, "", page([
+      "\u{1B}[1;31merror:\u{1B}[0m pass --ok to accept",
+      "",
+      "\u{1B}[1;4mUsage:\u{1B}[0m \u{1B}[1mtool\u{1B}[0m [OPTIONS] [COMMAND]",
+      "",
+      "For more information, try '\u{1B}[1m--help\u{1B}[0m'.",
+    ])} : Cli.Step<String>} &
+  {strict_run(host(), ["--ok", "deep", "--bug"]) ==
+    Cli.Exit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
+  {strict_run(tty(), ["--bug"]) ==
+    Cli.Exit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
+  {strict_run(host(), ["deep", "--ok"]) ==
+    Cli.Go{"accepted", Cli.Term{False{}, False{}, 80n}} : Cli.Step<String>} &
+  {strict_run(Cli.host_tty(Cli.host(200n), True{}, False{}), ["--ok"]) ==
+    Cli.Go{"accepted", Cli.Term{True{}, False{}, 200n}} : Cli.Step<String>} &
+  {Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), tty(),
+    ["--color=never", "list"]) ==
+    Cli.Go{Demo.Action{0n, None{}, Demo.Show{False{}, Demo.Text{}}},
+      Cli.Term{False{}, False{}, 80n}} : Cli.Step<Demo.Action>} &
+  {newline_run([]) == Cli.Exit{2, "", page([
+    "error: pass --ok to accept",
+    "",
+    "",
+    "Usage: tool [OPTIONS] [COMMAND]",
+    "",
+    "For more information, try '--help'.",
+  ])} : Cli.Step<String>} &
+  {newline_run(["--bug"]) ==
+    Cli.Exit{70, "", "bug: --bug was given\n\n"} : Cli.Step<String>}
+
+# G-LINT: lint comes before every rule, so a bad spec exits 70 even for
+# --help, --version or empty argv; the text is never colored.
+def broken() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.version("1.0"),
+    Cli.arg("--help", "Help", []),
+    Cli.sub("run", "Run", [
+      Cli.arg("-v", "Verbose", []),
+      Cli.arg("-v", "Verbose again", []),
+    ]),
+  ])
+
+def broken_exit() -> Cli.Step<Parsed>:
+  Cli.Exit{70, "", page([
+    "bug: invalid command-line definition",
+    "  tool: '--help' is reserved",
+    "  tool run: '-v' is declared more than once",
+  ])}
+
+law g_lint_exit:
+  {ran(broken(), host(), ["--help"]) == broken_exit() : Cli.Step<Parsed>} &
+  {ran(broken(), host(), ["--version"]) == broken_exit()
+    : Cli.Step<Parsed>} &
+  {ran(broken(), host(), []) == broken_exit() : Cli.Step<Parsed>} &
+  {ran(broken(), tty(), ["run", "-v"]) == broken_exit() : Cli.Step<Parsed>}
+
+# §6.7: the variables Run.host reads: each arg's env name in pre-order,
+# then the color and width names, keeping only the first of any repeat.
+def envs() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--a <A>", "A", [Cli.env("B_VAR")]),
+    Cli.sub("x", "X", [
+      Cli.arg("--c <C>", "C", [Cli.env("A_VAR")]),
+      Cli.arg("--d <D>", "D", [Cli.env("B_VAR"), Cli.hidden()]),
+    ]),
+    Cli.arg("--e <E>", "E", [Cli.env("TERM"), Cli.global()]),
+  ])
+
+law g_vars:
+  {Cli.vars(Demo.cli()) == ["PKG_REGISTRY", "NO_COLOR", "CLICOLOR",
+    "CLICOLOR_FORCE", "TERM", "COLUMNS"] : List<&2, String>} &
+  {Cli.vars(envs()) == ["B_VAR", "A_VAR", "TERM", "NO_COLOR", "CLICOLOR",
+    "CLICOLOR_FORCE", "COLUMNS"] : List<&2, String>} &
+  {Cli.vars(flags()) == ["NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "TERM",
+    "COLUMNS"] : List<&2, String>}
+
+# §7.3: the host from what Run.host reads: variables, then whether stdout
+# and stderr are TTYs, then their columns. COLUMNS sets the width when
+# as_nat accepts it and it is at least 1, so past U32 but not past
+# 281474976710655; otherwise stdout's columns if it is a TTY, else stderr's
+# if it is one; 0 or no TTY gives 80. The checker's Nat is unary, so a width
+# past U32 is stated as Nat.read's answer, which as_nat uses (§8.5), not as
+# a literal it would have to build.
+def width_of(h: Cli.Host) -> Nat:
+  match h:
+    case Cli.Host{width, vars, out_tty, err_tty}: width
+
+def columns(value: String) -> List<&2, Cli.Var>:
+  [Cli.Var{"COLUMNS", value}]
+
+law g_host_probe:
+  {Cli.probe([Cli.Var{"TERM", "xterm"}, Cli.Var{"COLUMNS", "120"}],
+    True{}, False{}, 90, 70) == Cli.Host{120n,
+    [Cli.Var{"TERM", "xterm"}, Cli.Var{"COLUMNS", "120"}], True{}, False{}}
+    : Cli.Host} &
+  {width_of(Cli.probe(columns("1"), False{}, False{}, 0, 0)) == 1n : Nat} &
+  {width_of(Cli.probe(columns("4294967296"), False{}, False{}, 0, 0))
+    == Maybe.default(&2, Nat, Nat.read("4294967296"), 0n) : Nat} &
+  {width_of(Cli.probe(columns("281474976710656"), True{}, True{}, 90, 70))
+    == 90n : Nat} &
+  {width_of(Cli.probe(columns("0"), True{}, True{}, 90, 70)) == 90n : Nat} &
+  {width_of(Cli.probe(columns("wide"), True{}, True{}, 90, 70)) == 90n
+    : Nat} &
+  {width_of(Cli.probe(columns(""), True{}, True{}, 90, 70)) == 90n : Nat} &
+  {width_of(Cli.probe([], True{}, True{}, 90, 70)) == 90n : Nat} &
+  {width_of(Cli.probe([], True{}, True{}, 0, 70)) == 80n : Nat} &
+  {width_of(Cli.probe([], False{}, True{}, 90, 70)) == 70n : Nat} &
+  {width_of(Cli.probe([], False{}, True{}, 90, 0)) == 80n : Nat} &
+  {width_of(Cli.probe([], False{}, False{}, 90, 70)) == 80n : Nat}
+
+# §7.2: act's code passes through up to 255; a larger one exits 70 with a
+# bug line for stderr.
+law g_act_exit:
+  {Cli.act_exit(0) == (0, "") : (U32 & String)} &
+  {Cli.act_exit(1) == (1, "") : (U32 & String)} &
+  {Cli.act_exit(255) == (255, "") : (U32 & String)} &
+  {Cli.act_exit(256) ==
+    (70, "bug: exit code 256 is out of range 0..255\n") : (U32 & String)} &
+  {Cli.act_exit(4294967295) ==
+    (70, "bug: exit code 4294967295 is out of range 0..255\n")
+    : (U32 & String)}
+
+# §12.3: pkg's act prints plan's line and returns plan's code. The line is
+# the job, its fields, verbose and any -C dir, with lists joined by commas;
+# `run exit <N>` with one argument that reads as a U32 returns N, and every
+# other action returns 0.
+def job(j: Demo.Job) -> Demo.Action:
+  Demo.Action{0n, None{}, j}
+
+law g_plan_pkg:
+  {Demo.plan(job(Demo.Add{True{}, "https://registry.example",
+    ["left-pad", "lodash"]})) == Demo.Plan{0,
+    "add dev=true registry=https://registry.example names=left-pad,lodash verbose=0"}
+    : Demo.Plan} &
+  {Demo.plan(Demo.Action{2n, Some{"/tmp"}, Demo.Remove{["a"]}}) ==
+    Demo.Plan{0, "remove names=a verbose=2 dir=/tmp"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Show{False{}, Demo.Json{}})) ==
+    Demo.Plan{0, "list all=false format=json verbose=0"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Script{"build", ["x", "--", "-y"]})) ==
+    Demo.Plan{0, "run script=build args=x,--,-y verbose=0"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Script{"exit", ["3"]})) ==
+    Demo.Plan{3, "run script=exit args=3 verbose=0"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Script{"exit", ["256"]})) ==
+    Demo.Plan{256, "run script=exit args=256 verbose=0"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Script{"exit", ["x"]})) ==
+    Demo.Plan{0, "run script=exit args=x verbose=0"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Script{"exit", ["1", "2"]})) ==
+    Demo.Plan{0, "run script=exit args=1,2 verbose=0"} : Demo.Plan} &
+  {Demo.plan(job(Demo.Script{"exit", []})) ==
+    Demo.Plan{0, "run script=exit args= verbose=0"} : Demo.Plan}

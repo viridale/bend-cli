@@ -3513,3 +3513,242 @@ def Laws.g_lint_lines():
 
 def Laws.g_lint_flag_default():
   ({==}, ({==}, ({==}, {==})))
+
+# P10 and P11 follow eval_with's cases: lint, then the parse, then the
+# decoder's answer at the matched scope.
+def p10_fault(-A: Type, f: Cli.Fault, cmd: Cli.Cmd,
+    path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.faulted(A, f, cmd, path, h, argv)) == True{}
+      : Bool}:
+  match f:
+    case Cli.Bug{msg}: {==}
+    case Cli.Usage{msg}: {==}
+
+def p10_decoded(-A: Type, d: Cli.Dec(A), cmd: Cli.Cmd,
+    path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.decoded(A, d, cmd, path, h, argv)) == True{}
+      : Bool}:
+  match d:
+    case Done{a}: {==}
+    case Fail{f}: p10_fault(A, f, cmd, path, h, argv)
+
+def p10_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    r: Cli.ParseResult, +c: Cli.Cmd, +h: Cli.Host,
+    +argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.eval_step(A, decode, Cli.outcome_parse(r, c, h,
+      argv), h, argv)) == True{} : Bool}:
+  match r:
+    case Cli.Accepted{+path, fields, external}:
+      p10_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
+        path, h, argv)
+    case Cli.HelpRequested{path, long}: {==}
+    case Cli.VersionRequested{}: {==}
+    case Cli.SummaryRequired{}: {==}
+    case Cli.Rejected{path, fault}: {==}
+
+def p10_lint(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    found: List<&2, Cli.Problem>, +c: Cli.Cmd, +h: Cli.Host,
+    +argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.eval_step(A, decode, Cli.outcome_lint(found, c, h,
+      argv), h, argv)) == True{} : Bool}:
+  match found:
+    case Nil{}: p10_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
+    case p <> tail: {==}
+
+def p10_cmd(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A), +c: Cli.Cmd,
+    h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.eval_with(A, decode, c, h, argv)) == True{}
+      : Bool}:
+  p10_lint(A, decode, Cli.problems(c), c, h, argv)
+
+def Laws.p10(A, decode, c, h, argv):
+  p10_cmd(A, decode, c, h, argv)
+
+def p11_fault(-A: Type, f: Cli.Fault, cmd: Cli.Cmd,
+    path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.faulted(A, f, cmd, path, h, argv)) == True{}
+      : Bool}:
+  match f:
+    case Cli.Bug{msg}: {==}
+    case Cli.Usage{msg}: {==}
+
+def p11_decoded(-A: Type, d: Cli.Dec(A), cmd: Cli.Cmd,
+    path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.decoded(A, d, cmd, path, h, argv)) == True{}
+      : Bool}:
+  match d:
+    case Done{a}: {==}
+    case Fail{f}: p11_fault(A, f, cmd, path, h, argv)
+
+def p11_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    r: Cli.ParseResult, +c: Cli.Cmd, +h: Cli.Host,
+    +argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.eval_step(A, decode, Cli.outcome_parse(r, c, h,
+      argv), h, argv)) == True{} : Bool}:
+  match r:
+    case Cli.Accepted{+path, fields, external}:
+      p11_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
+        path, h, argv)
+    case Cli.HelpRequested{path, long}: {==}
+    case Cli.VersionRequested{}: {==}
+    case Cli.SummaryRequired{}: {==}
+    case Cli.Rejected{path, fault}: {==}
+
+def p11_lint(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    found: List<&2, Cli.Problem>, +c: Cli.Cmd, +h: Cli.Host,
+    +argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.eval_step(A, decode, Cli.outcome_lint(found, c, h,
+      argv), h, argv)) == True{} : Bool}:
+  match found:
+    case Nil{}: p11_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
+    case p <> tail: {==}
+
+def p11_cmd(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A), +c: Cli.Cmd,
+    h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.eval_with(A, decode, c, h, argv)) == True{}
+      : Bool}:
+  p11_lint(A, decode, Cli.problems(c), c, h, argv)
+
+def Laws.p11(A, decode, c, h, argv):
+  p11_cmd(A, decode, c, h, argv)
+
+def Laws.eval_bridge(c, h, argv):
+  ({==}, {==})
+
+def Laws.g_lex_cluster_eval():
+  {==}
+
+def Laws.g_lex_values_eval():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
+def Laws.g_lex_end_eval():
+  ({==}, {==})
+
+def Laws.g_lex_count_eval():
+  {==}
+
+def Laws.g_lex_negation_eval():
+  ({==}, {==})
+
+def Laws.g_lex_bare_eval():
+  {==}
+
+def Laws.g_lex_errors_eval():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_lex_recovery_eval():
+  {==}
+
+def Laws.g_pos_variadic_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_pos_cases_eval():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))
+
+def Laws.g_sub_descent_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_sub_alias_eval():
+  {==}
+
+def Laws.g_sub_help_eval():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_sub_scope_errors_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_sub_external_eval():
+  ({==}, {==})
+
+def Laws.g_sub_missing_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_sub_short_shadow_eval():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_val_strings_eval():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_val_nat_eval():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_val_u32_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_val_f32_eval():
+  ({==}, ({==}, ({==}, ({==}, {==}))))
+
+def Laws.g_val_bool_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_val_one_of_eval():
+  ({==}, {==})
+
+def Laws.g_val_delim_eval():
+  ({==}, {==})
+
+def Laws.g_val_delim_typed_eval():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
+def Laws.g_src_env_eval():
+  {==}
+
+def Laws.g_src_empty_default_eval():
+  {==}
+
+def Laws.g_src_precedence_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_src_invalid_eval():
+  ({==}, {==})
+
+def Laws.g_rel_required_eval():
+  ({==}, {==})
+
+def Laws.g_rel_need_one_eval():
+  ({==}, ({==}, {==}))
+
+def Laws.g_rel_exclusive_eval():
+  {==}
+
+def Laws.g_rel_conflict_order_eval():
+  ({==}, {==})
+
+def Laws.g_rel_requires_eval():
+  ({==}, {==})
+
+def Laws.g_rel_defaults_eval():
+  ({==}, {==})
+
+def Laws.g_err_decode():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    {==})))))))))
+
+def Laws.g_lint_exit():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_vars():
+  ({==}, ({==}, {==}))
+
+# A COLUMNS value as_nat accepts and that is not all zeroes sets the width
+# to Nat.read's answer, whatever the TTYs say; s stays abstract, so the
+# checker never builds the unary Nat.
+def columns_used(+s: String, o: Bool, e: Bool, oc: U32, ec: U32,
+    ok: {True{} == Cli.columns_ok(s) : Bool}) ->
+    {Laws.width_of(Cli.probe(Laws.columns(s), o, e, oc, ec))
+      == Maybe.default(&2, Nat, Nat.read(s), 0n) : Nat}:
+  %ok : {Cli.width_or(Cli.columns_valid(_, s),
+    Cli.nonzero(Cli.tty_columns(o, e, oc, ec), 80n))
+    == Maybe.default(&2, Nat, Nat.read(s), 0n) : Nat}
+  {==}
+
+def Laws.g_host_probe():
+  ({==}, ({==}, (columns_used("4294967296", False{}, False{}, 0, 0, {==}),
+    ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    {==})))))))))))
+
+def Laws.g_act_exit():
+  ({==}, ({==}, ({==}, ({==}, {==}))))
+
+def Laws.g_plan_pkg():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))

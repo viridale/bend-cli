@@ -35,13 +35,43 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Each file must print exactly its expected output and exit with its
+      # expected status. run.bend's host effects are foreign, so run.bend
+      # and each file importing it print SOME PROOFS FAIL, exit 1 and list
+      # the defs that rely on them (SPEC F1, G2): run.bend's defs behind the
+      # importer's path to it, then the importer's own. Every other file
+      # prints ALL PROOFS CHECK and the --verdict hint, and exits 0.
       - name: Check source modules
+        shell: bash
         run: |
-          find . -name '*.bend' -not -path './tmp/*' \
-            -not -path './LAWS.bend' -not -path './PROOF.bend' -print | sort |
-            while IFS= read -r file; do
-              bend "$file" --check-only
-            done
+          run_defs=(Sys.isatty Sys.columns Sys.exit exit_when exit finish host
+            ended stepped main)
+          foreign() {
+            local names=("${run_defs[@]/#/$1}" "${@:2}")
+            printf 'SOME PROOFS FAIL\nError: %d defs rely on unsafe or foreign code:\n' "${#names[@]}"
+            printf -- '- %s\n' "${names[@]}"
+          }
+          failed=0
+          while IFS= read -r file; do
+            case "$file" in
+              ./run.bend) want="$(foreign '')" code=1 ;;
+              ./main.bend) want="$(foreign run. main)" code=1 ;;
+              ./tests/f32.bend) want="$(foreign ../run. main)" code=1 ;;
+              ./examples/*/main.bend) want="$(foreign ../../run.)" code=1 ;;
+              *) want=$'ALL PROOFS CHECK\nUse --verdict for mathematical validity.'
+                 code=0 ;;
+            esac
+            got="$(bend "$file" --check-only 2>&1 </dev/null)" && status=0 || status=$?
+            if [ "$got" = "$want" ] && [ "$status" = "$code" ]; then
+              echo "ok $file"
+            else
+              echo "FAIL $file: expected exit $code, got exit $status; output diff:"
+              diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") || true
+              failed=1
+            fi
+          done < <(find . -name '*.bend' -not -path './tmp/*' \
+            -not -path './LAWS.bend' -not -path './PROOF.bend' -print | sort)
+          exit "$failed"
       # --verdict builds Bend's proof kernel with Lean once per Bend version
       # and reuses it from ~/.bend/bendtt; the cache saves only on success.
       - name: Restore proof kernel
@@ -63,5 +93,31 @@ jobs:
             while IFS= read -r file; do
               bend "$file" --verdict
             done
+      # SPEC F19: the js end-to-end launcher relies on how this Bun version
+      # treats a "--" after the script path.
+      - name: Install Bun
+        run: |
+          curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
+          bash /tmp/bun-install.sh bun-v1.2.23
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: |
+          mkdir -p build
+          bend main.bend -o build/pkg
+          bend main.bend -o build/pkg.js
+          bend tests/f32.bend -o build/f32
+          bend tests/f32.bend -o build/f32.js
+      - name: End-to-end tests
+        run: bend tests/e2e.bend
+      # script(1) gives pkg a terminal, so its help must carry SGR bytes
+      # (SPEC §13); the BSD and util-linux forms differ.
+      - name: TTY smoke test
+        run: |
+          if [ "$(uname)" = Darwin ]; then
+            script -q /tmp/tty.txt build/pkg --help </dev/null >/dev/null
+          else
+            script -qec "build/pkg --help" /tmp/tty.txt </dev/null >/dev/null
+          fi
+          LC_ALL=C grep -q $'\033\\[' /tmp/tty.txt
 
-  # Add G4-G8 in milestone order as their implementations become runnable.
+  # Add G6 and G7 in M7, when bench/main.bend runs.

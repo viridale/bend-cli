@@ -5037,3 +5037,129 @@ def outcome_lint(found: List<&2, Problem>, +c: Cmd, +h: Host,
 # error is Shown; Matched is a parse left to decode.
 def outcome(+c: Cmd, h: Host, argv: List<&2, String>) -> Outcome:
   outcome_lint(problems(c), c, h, argv)
+
+# ---- Eval (§6.6, §7.2, §7.3, V7) ----
+
+type Step<-A: Type> is Type:
+  Go{value: A, term: Term}
+  Exit{code: U32, out: String, err: String}
+
+# E12: a decoder's Usage message as an error at the matched scope, printed
+# as given, in stderr's colors.
+def usage_err(t: Term, msg: String, view: View) -> String:
+  match t view:
+    case Term{out_color, err_color, width}
+        View{here, about, items, globals, root, stuck}:
+      emit(err_color, error_page([plain(msg)], [],
+        usage_block(usage_elems(here, items, globals), page_width(width))))
+
+def faulted(-A: Type, f: Fault, +cmd: Cmd, path: List<&2, String>, h: Host,
+    argv: List<&2, String>) -> Step<A>:
+  match f:
+    case Bug{msg}: Exit{70, "", String.concat(["bug: ", msg, "\n"])}
+    case Usage{msg}:
+      Exit{2, "", usage_err(term(cmd, h, argv), msg, view_of(cmd, path))}
+
+# V7: Done is Go with term's decisions; a fault exits 70 or 2.
+def decoded(-A: Type, d: Dec(A), cmd: Cmd, path: List<&2, String>, h: Host,
+    argv: List<&2, String>) -> Step<A>:
+  match d:
+    case Done{a}: Go{a, term(cmd, h, argv)}
+    case Fail{f}: faulted(A, f, cmd, path, h, argv)
+
+def eval_step(-A: Type, decode: @+m: Matches -> Dec(A), o: Outcome, h: Host,
+    argv: List<&2, String>) -> Step<A>:
+  match o:
+    case Shown{code, out, err}: Exit{code, out, err}
+    case Matched{Matches{+cmd, +path, fields, external}}:
+      decoded(A, decode(Matches{cmd, path, fields, external}), cmd, path, h,
+        argv)
+
+# eval with the decoder as a value, so a law can quantify over decoders.
+def eval_with(-A: Type, decode: @+m: Matches -> Dec(A), c: Cmd, +h: Host,
+    +argv: List<&2, String>) -> Step<A>:
+  eval_step(A, decode, outcome(c, h, argv), h, argv)
+
+# The whole CLI as a function. It must stay a direct forwarding definition:
+# P10 and P11 are proved of eval_with.
+def eval(~A: Type, ~decode: @+m: Matches -> Dec(A), c: Cmd, h: Host,
+    argv: List<&2, String>) -> Step<A>:
+  eval_with(A, decode, c, h, argv)
+
+# Each arg's env name in pre-order: an arg's own, then its subcommands'.
+def env_names(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, attrs} <> tail:
+      List.append(&2, String, maybe_list(find_env(attrs)), env_names(tail))
+    case Sub{name, about, children} <> tail:
+      List.append(&2, String, env_names(children), env_names(tail))
+    case head <> tail: env_names(tail)
+
+# kept, then each name not yet in it.
+def distinct(names: List<&2, String>, kept: List<&2, String>) ->
+    List<&2, String>:
+  match names:
+    case Nil{}: kept
+    case name <> tail: distinct(tail, append_unique(kept, name))
+
+def vars(c: Cmd) -> List<&2, String>:
+  match c:
+    case Cmd{name, about, items}:
+      distinct(List.append(&2, String, env_names(items),
+        ["NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "TERM", "COLUMNS"]), [])
+
+# COLUMNS sets the width when as_nat reads it and it is at least 1. digits
+# is bound because a temporary argument makes String.is_empty take its
+# string, adding a take to each caller that reuses one (valid_nat).
+def columns_ok(+value: String) -> Bool:
+  digits = trim_zeroes(value)
+  Bool.and(valid_nat(value), Bool.not(String.is_empty(digits)))
+
+def columns_valid(ok: Bool, value: String) -> Maybe<&2, Nat>:
+  match ok:
+    case True{}: Some{nat_of(value)}
+    case False{}: None{}
+
+def columns_width(found: Maybe<&2, String>) -> Maybe<&2, Nat>:
+  match found:
+    case None{}: None{}
+    case Some{+value}: columns_valid(columns_ok(value), value)
+
+# stdout's columns if it is a TTY, else stderr's if it is one, else 0.
+def tty_columns(out_tty: Bool, err_tty: Bool, out_cols: U32,
+    err_cols: U32) -> Nat:
+  match out_tty err_tty:
+    case True{} _: U32.to_nat(out_cols)
+    case False{} True{}: U32.to_nat(err_cols)
+    case False{} False{}: 0n
+
+# first, unless it is 0.
+def nonzero(first: Nat, then: Nat) -> Nat:
+  match first:
+    case 0n: then
+    case 1n+p: 1n+p
+
+def width_or(found: Maybe<&2, Nat>, then: Nat) -> Nat:
+  match found:
+    case None{}: then
+    case Some{width}: width
+
+# §7.3: the host from Run.host's readings; the width is COLUMNS, else the
+# TTY columns, else 80.
+def probe(+vars: List<&2, Var>, +out_tty: Bool, +err_tty: Bool,
+    out_cols: U32, err_cols: U32) -> Host:
+  Host{width_or(columns_width(var_value(vars, "COLUMNS")),
+    nonzero(tty_columns(out_tty, err_tty, out_cols, err_cols), 80n)),
+    vars, out_tty, err_tty}
+
+def act_code(fits: Bool, n: U32) -> (U32 & String):
+  match fits:
+    case True{}: (n, "")
+    case False{}:
+      (70, String.concat(["bug: exit code ", U32.show(n),
+        " is out of range 0..255\n"]))
+
+# §7.2: act's code, or 70 with a stderr line when it exceeds 255.
+def act_exit(+n: U32) -> (U32 & String):
+  act_code(U32.is_le(n, 255), n)

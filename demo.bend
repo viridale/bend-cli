@@ -1,4 +1,5 @@
-# Purpose: the pkg reference app, pure part: its spec, actions and decoder.
+# Purpose: the pkg reference app, pure part: its spec, actions, decoder,
+# plan and act (§12.3).
 # Expected output: ALL PROOFS CHECK.
 # Run: bend demo.bend --check-only
 
@@ -86,3 +87,67 @@ def decode(+m: Cli.Matches) -> Cli.Dec(Action):
       ("run", script),
     ])
     return Action{verbose, dir, job}
+
+# What act does: its exit code and the line it prints (§12.3).
+type Plan is Data:
+  Plan{code: U32, line: String}
+
+def bool_word(b: Bool) -> String:
+  match b:
+    case True{}: "true"
+    case False{}: "false"
+
+def format_word(f: Format) -> String:
+  match f:
+    case Text{}: "text"
+    case Json{}: "json"
+
+def dir_text(dir: Maybe<&2, String>) -> String:
+  match dir:
+    case None{}: ""
+    case Some{d}: String.append(" dir=", d)
+
+def read_code(found: Maybe<&2, U32>) -> U32:
+  match found:
+    case None{}: 0
+    case Some{n}: n
+
+# `run exit <N>` returns N, so end-to-end cases can reach any exit code.
+def exit_code(exit: Bool, args: List<&2, String>) -> U32:
+  match exit args:
+    case True{} n <> Nil{}: read_code(U32.read(n))
+    case _ _: 0
+
+# The job's word and fields, then rest; only `run exit` sets the code.
+def job_plan(j: Job, rest: String) -> Plan:
+  match j:
+    case Add{dev, registry, names}:
+      Plan{0, String.concat(["add dev=", bool_word(dev), " registry=",
+        registry, " names=", String.join(names, ","), rest])}
+    case Remove{names}:
+      Plan{0, String.concat(["remove names=", String.join(names, ","), rest])}
+    case Show{all, format}:
+      Plan{0, String.concat(["list all=", bool_word(all), " format=",
+        format_word(format), rest])}
+    case Script{+name, +args}:
+      Plan{exit_code(String.eq(name, "exit"), args),
+        String.concat(["run script=", name, " args=", String.join(args, ","),
+          rest])}
+
+def plan(a: Action) -> Plan:
+  match a:
+    case Action{verbose, dir, job}:
+      job_plan(job, String.concat([" verbose=", Nat.show(verbose),
+        dir_text(dir)]))
+
+def said(p: Plan) -> IO(U32):
+  match p:
+    case Plan{code, line}:
+      do IO<U32>:
+        IO.print(line)
+        return code
+
+# pkg's act: print plan's line and return its code. pkg does nothing else,
+# so it ignores the terminal.
+def act(+t: Cli.Term, a: Action) -> IO(U32):
+  said(plan(a))
