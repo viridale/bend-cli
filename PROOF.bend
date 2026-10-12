@@ -3144,3 +3144,372 @@ def Laws.g_read_external():
 
 def Laws.g_read_pkg():
   ({==}, ({==}, ({==}, {==})))
+
+# P7 and P8: the --color pre-scan and the environment rules.
+
+def stop_keep(argv: List<&2, String>, +y: Maybe<&2, String>) ->
+    {Cli.ColorStop{y} == Cli.color_scan(argv, Cli.ColorStop{y})
+      : Cli.Prescan}:
+  match argv:
+    case Nil{}: {==}
+    case token <> tail: stop_keep(tail, y)
+
+def seek_step(d: Bool, b: Bool, a: Bool, n: Bool, token: String,
+    +tail: List<&2, String>, +y: Maybe<&2, String>,
+    quiet: {Bool.and(Bool.not(d), Bool.or(Bool.or(b, a), n)) == False{}
+      : Bool},
+    ih: @q: {n == False{} : Bool} -> {Cli.color_value(y) ==
+      Cli.color_pick(Cli.color_scan(tail, Cli.ColorSeek{y}))
+      : Maybe<&2, Bool>}) ->
+    {Cli.color_value(y) == Cli.color_pick(Cli.color_scan(tail,
+      Cli.color_seek(d, b, a, token, y))) : Maybe<&2, Bool>}:
+  match d b a:
+    case True{} _ _:
+      %stop_keep(tail, y) :
+        {Cli.color_value(y) == Cli.color_pick(_) : Maybe<&2, Bool>}
+      {==}
+    case False{} True{} _:
+      Empty.absurd({Cli.color_value(y) == Cli.color_pick(Cli.color_scan(tail,
+        Cli.ColorWant{})) : Maybe<&2, Bool>}, true_false_absurd(quiet))
+    case False{} False{} True{}:
+      Empty.absurd({Cli.color_value(y) == Cli.color_pick(Cli.color_scan(tail,
+        Cli.ColorSeek{Some{String.drop(token, 8n)}})) : Maybe<&2, Bool>},
+        true_false_absurd(quiet))
+    case False{} False{} False{}: ih(quiet)
+
+# A scan from a seeking state over argv that never names --color before a
+# `--` ends with the value it started with.
+def seek_keep(argv: List<&2, String>, +y: Maybe<&2, String>,
+    quiet: {Laws.names_color(argv) == False{} : Bool}) ->
+    {Cli.color_value(y) == Cli.color_pick(Cli.color_scan(argv,
+      Cli.ColorSeek{y})) : Maybe<&2, Bool>}:
+  match argv:
+    case Nil{}: {==}
+    case +token <> +tail:
+      seek_step(String.eq(token, "--"), String.eq(token, "--color"),
+        String.starts_with(token, "--color="), Laws.names_color(tail), token,
+        tail, y, quiet, q => seek_keep(tail, y, q))
+
+def flag_quiet(enabled: Bool, argv: List<&2, String>,
+    quiet: {Laws.names_color(argv) == False{} : Bool}) ->
+    {None{} == Cli.color_flag(enabled, argv) : Maybe<&2, Bool>}:
+  match enabled:
+    case True{}: seek_keep(argv, None{}, quiet)
+    case False{}: {==}
+
+def p7_rules(s: Bool, vars: List<&2, Cli.Var>, out_tty: Bool,
+    err_tty: Bool, width: Nat, e: {s == True{} : Bool}) ->
+    {Laws.colors(Cli.term_env(Cli.env_rules(s, vars), out_tty, err_tty,
+      width)) == (False{}, False{}) : (Bool & Bool)}:
+  match s:
+    case True{}: {==}
+    case False{}:
+      Empty.absurd({Laws.colors(Cli.term_env(Cli.env_rules(False{}, vars),
+        out_tty, err_tty, width)) == (False{}, False{}) : (Bool & Bool)},
+        false_true_absurd(e))
+
+def p7_found(found: Maybe<&2, String>, vars: List<&2, Cli.Var>,
+    out_tty: Bool, err_tty: Bool, width: Nat,
+    e: {Laws.set_nonempty(found) == True{} : Bool}) ->
+    {Laws.colors(Cli.term_env(Cli.env_rules(Cli.var_set(found), vars),
+      out_tty, err_tty, width)) == (False{}, False{}) : (Bool & Bool)}:
+  match found:
+    case None{}:
+      Empty.absurd({Laws.colors(Cli.term_env(Cli.env_rules(False{}, vars),
+        out_tty, err_tty, width)) == (False{}, False{}) : (Bool & Bool)},
+        false_true_absurd(e))
+    case Some{value}:
+      p7_rules(Bool.not(String.is_empty(value)), vars, out_tty, err_tty,
+        width, e)
+
+def Laws.p7(c, h, argv, no_color, quiet):
+  match c h:
+    case Cli.Cmd{name, about, items} Cli.Host{width, +vars, out_tty, err_tty}:
+      %flag_quiet(Cli.has_color(items), argv, quiet) :
+        {Laws.colors(Cli.term_for(_, vars, out_tty, err_tty, width))
+          == (False{}, False{}) : (Bool & Bool)}
+      p7_found(Cli.var_value(vars, "NO_COLOR"), vars, out_tty, err_tty, width,
+        no_color)
+
+def has_color_mid(before: List<&2, Cli.Item>, after: List<&2, Cli.Item>) ->
+    {True{} == Cli.has_color(List.append(&2, Cli.Item, before,
+      Cli.color() <> after)) : Bool}:
+  match before:
+    case Nil{}: {==}
+    case +item <> tail:
+      %has_color_mid(tail, after) :
+        {True{} == Bool.or(Cli.is_color(item), _) : Bool}
+      Equal.sym(Bool, Bool.or(Cli.is_color(item), True{}), True{},
+        or_true_right(Cli.is_color(item)))
+
+def flag_on(enabled: Bool, argv: List<&2, String>,
+    e: {True{} == enabled : Bool}) ->
+    {Cli.color_pick(Cli.color_scan(argv, Cli.ColorSeek{None{}})) ==
+      Cli.color_flag(enabled, argv) : Maybe<&2, Bool>}:
+  %e : {Cli.color_pick(Cli.color_scan(argv, Cli.ColorSeek{None{}})) ==
+    Cli.color_flag(_, argv) : Maybe<&2, Bool>}
+  {==}
+
+# Seeking or waiting for a --color value: not past a `--`.
+def scan_open(s: Cli.Prescan) -> Data:
+  match s:
+    case Cli.ColorSeek{last}: Unit
+    case Cli.ColorWant{}: Unit
+    case Cli.ColorStop{last}: Empty
+
+def seek_open(d: Bool, b: Bool, a: Bool, token: String,
+    y: Maybe<&2, String>, e: {d == False{} : Bool}) ->
+    scan_open(Cli.color_seek(d, b, a, token, y)):
+  match d b a:
+    case True{} _ _: true_false_absurd(e)
+    case False{} True{} _: Unit{}
+    case False{} False{} True{}: Unit{}
+    case False{} False{} False{}: Unit{}
+
+def want_open(f: Bool, +token: String,
+    e: {String.eq(token, "--") == False{} : Bool}) ->
+    scan_open(Cli.color_want(f, token)):
+  match f:
+    case False{}: Unit{}
+    case True{}:
+      seek_open(String.eq(token, "--"), String.eq(token, "--color"),
+        String.starts_with(token, "--color="), token, Some{""}, e)
+
+def step_open(s: Cli.Prescan, +token: String, open: scan_open(s),
+    e: {String.eq(token, "--") == False{} : Bool}) ->
+    scan_open(Cli.color_step(s, token)):
+  match s:
+    case Cli.ColorSeek{last}:
+      seek_open(String.eq(token, "--"), String.eq(token, "--color"),
+        String.starts_with(token, "--color="), token, last, e)
+    case Cli.ColorWant{}: want_open(String.starts_with(token, "-"), token, e)
+    case Cli.ColorStop{last}: open
+
+def or_false_head(b: Bool, c: Bool, e: {Bool.or(b, c) == False{} : Bool}) ->
+    {b == False{} : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, true_false_absurd(e))
+    case False{}: {==}
+
+def or_false_tail(b: Bool, c: Bool, e: {Bool.or(b, c) == False{} : Bool}) ->
+    {c == False{} : Bool}:
+  match b:
+    case True{}: Empty.absurd({c == False{} : Bool}, true_false_absurd(e))
+    case False{}: e
+
+# A prefix with no `--` leaves the pre-scan open for what follows it.
+def pre_pick(pre: List<&2, String>, +rest: List<&2, String>,
+    +s: Cli.Prescan, +b: Bool, open: scan_open(s),
+    +clear: {List.contains(~String, ~String.eq, pre, "--") == False{}
+      : Bool},
+    hit: @t: Cli.Prescan -> scan_open(t) -> {Some{b} ==
+      Cli.color_pick(Cli.color_scan(rest, t)) : Maybe<&2, Bool>}) ->
+    {Some{b} == Cli.color_pick(Cli.color_scan(List.append(&2, String, pre,
+      rest), s)) : Maybe<&2, Bool>}:
+  match pre:
+    case Nil{}: hit(s, open)
+    case +token <> +tail:
+      pre_pick(tail, rest, Cli.color_step(s, token), b,
+        step_open(s, token, open, or_false_head(String.eq(token, "--"),
+          List.contains(~String, ~String.eq, tail, "--"), clear)),
+        or_false_tail(String.eq(token, "--"),
+          List.contains(~String, ~String.eq, tail, "--"), clear), hit)
+
+def hit_never(+post: List<&2, String>,
+    +quiet: {Laws.names_color(post) == False{} : Bool}, t: Cli.Prescan,
+    open: scan_open(t)) ->
+    {Some{False{}} == Cli.color_pick(Cli.color_scan(List.append(&2, String,
+      ["--color=never"], post), t)) : Maybe<&2, Bool>}:
+  match t:
+    case Cli.ColorSeek{last}: seek_keep(post, Some{"never"}, quiet)
+    case Cli.ColorWant{}: seek_keep(post, Some{"never"}, quiet)
+    case Cli.ColorStop{last}:
+      Empty.absurd({Some{False{}} == Cli.color_pick(Cli.color_scan(
+        "--color=never" <> post, Cli.ColorStop{last})) : Maybe<&2, Bool>},
+        open)
+
+def hit_always(+post: List<&2, String>,
+    +quiet: {Laws.names_color(post) == False{} : Bool}, t: Cli.Prescan,
+    open: scan_open(t)) ->
+    {Some{True{}} == Cli.color_pick(Cli.color_scan(List.append(&2, String,
+      ["--color=always"], post), t)) : Maybe<&2, Bool>}:
+  match t:
+    case Cli.ColorSeek{last}: seek_keep(post, Some{"always"}, quiet)
+    case Cli.ColorWant{}: seek_keep(post, Some{"always"}, quiet)
+    case Cli.ColorStop{last}:
+      Empty.absurd({Some{True{}} == Cli.color_pick(Cli.color_scan(
+        "--color=always" <> post, Cli.ColorStop{last})) : Maybe<&2, Bool>},
+        open)
+
+def hit_never_apart(+post: List<&2, String>,
+    +quiet: {Laws.names_color(post) == False{} : Bool}, t: Cli.Prescan,
+    open: scan_open(t)) ->
+    {Some{False{}} == Cli.color_pick(Cli.color_scan(List.append(&2, String,
+      ["--color", "never"], post), t)) : Maybe<&2, Bool>}:
+  match t:
+    case Cli.ColorSeek{last}: seek_keep(post, Some{"never"}, quiet)
+    case Cli.ColorWant{}: seek_keep(post, Some{"never"}, quiet)
+    case Cli.ColorStop{last}:
+      Empty.absurd({Some{False{}} == Cli.color_pick(Cli.color_scan(
+        "--color" <> "never" <> post, Cli.ColorStop{last}))
+        : Maybe<&2, Bool>}, open)
+
+def hit_always_apart(+post: List<&2, String>,
+    +quiet: {Laws.names_color(post) == False{} : Bool}, t: Cli.Prescan,
+    open: scan_open(t)) ->
+    {Some{True{}} == Cli.color_pick(Cli.color_scan(List.append(&2, String,
+      ["--color", "always"], post), t)) : Maybe<&2, Bool>}:
+  match t:
+    case Cli.ColorSeek{last}: seek_keep(post, Some{"always"}, quiet)
+    case Cli.ColorWant{}: seek_keep(post, Some{"always"}, quiet)
+    case Cli.ColorStop{last}:
+      Empty.absurd({Some{True{}} == Cli.color_pick(Cli.color_scan(
+        "--color" <> "always" <> post, Cli.ColorStop{last}))
+        : Maybe<&2, Bool>}, open)
+
+def p8_at(name: String, about: String, before: List<&2, Cli.Item>,
+    after: List<&2, Cli.Item>, h: Cli.Host, pre: List<&2, String>,
+    post: List<&2, String>, chosen: List<&2, String>) -> (Bool & Bool):
+  Laws.colors_around(Cli.cmd(name, about, List.append(&2, Cli.Item, before,
+    Cli.color() <> after)), h, pre, post, chosen)
+
+# One spelling: whatever chosen leaves after an open pre-scan decides both
+# streams.
+def around(name: String, about: String, +before: List<&2, Cli.Item>,
+    +after: List<&2, Cli.Item>, h: Cli.Host, +pre: List<&2, String>,
+    +post: List<&2, String>, +chosen: List<&2, String>, +b: Bool,
+    clear: {List.contains(~String, ~String.eq, pre, "--") == False{} : Bool},
+    hit: @t: Cli.Prescan -> scan_open(t) -> {Some{b} ==
+      Cli.color_pick(Cli.color_scan(List.append(&2, String, chosen, post), t))
+      : Maybe<&2, Bool>}) ->
+    {p8_at(name, about, before, after, h, pre, post, chosen) == (b, b)
+      : (Bool & Bool)}:
+  match h:
+    case Cli.Host{width, vars, out_tty, err_tty}:
+      %Equal.trans(Maybe<&2, Bool>, Some{b},
+        Cli.color_pick(Cli.color_scan(List.append(&2, String, pre,
+          List.append(&2, String, chosen, post)), Cli.ColorSeek{None{}})),
+        Cli.color_flag(Cli.has_color(List.append(&2, Cli.Item, before,
+          Cli.color() <> after)), List.append(&2, String, pre,
+          List.append(&2, String, chosen, post))),
+        pre_pick(pre, List.append(&2, String, chosen, post),
+          Cli.ColorSeek{None{}}, b, Unit{}, clear, hit),
+        flag_on(Cli.has_color(List.append(&2, Cli.Item, before,
+          Cli.color() <> after)), List.append(&2, String, pre,
+          List.append(&2, String, chosen, post)),
+          has_color_mid(before, after))) :
+        {Laws.colors(Cli.term_for(_, vars, out_tty, err_tty, width)) == (b, b)
+          : (Bool & Bool)}
+      {==}
+
+def list4_eq(-A: Type, -a1: A, -a2: A, -a3: A, -a4: A, -b1: A, -b2: A,
+    -b3: A, -b4: A, e1: {a1 == b1 : A}, e2: {a2 == b2 : A},
+    e3: {a3 == b3 : A}, e4: {a4 == b4 : A}) ->
+    {[a1, a2, a3, a4] == [b1, b2, b3, b4] : List<A>}:
+  %e1 : {[a1, a2, a3, a4] == [_, b2, b3, b4] : List<A>}
+  %e2 : {[a1, a2, a3, a4] == [a1, _, b3, b4] : List<A>}
+  %e3 : {[a1, a2, a3, a4] == [a1, a2, _, b4] : List<A>}
+  %e4 : {[a1, a2, a3, a4] == [a1, a2, a3, _] : List<A>}
+  {==}
+
+def p8_list(+name: String, +about: String, +before: List<&2, Cli.Item>,
+    +after: List<&2, Cli.Item>, +h: Cli.Host, +pre: List<&2, String>,
+    +post: List<&2, String>,
+    +clear: {List.contains(~String, ~String.eq, pre, "--") == False{} : Bool},
+    +quiet: {Laws.names_color(post) == False{} : Bool}) ->
+    {[p8_at(name, about, before, after, h, pre, post, ["--color=never"]),
+      p8_at(name, about, before, after, h, pre, post, ["--color=always"]),
+      p8_at(name, about, before, after, h, pre, post, ["--color", "never"]),
+      p8_at(name, about, before, after, h, pre, post, ["--color", "always"])]
+      == [(False{}, False{}), (True{}, True{}), (False{}, False{}),
+        (True{}, True{})] : List<(Bool & Bool)>}:
+  list4_eq((Bool & Bool),
+    p8_at(name, about, before, after, h, pre, post, ["--color=never"]),
+    p8_at(name, about, before, after, h, pre, post, ["--color=always"]),
+    p8_at(name, about, before, after, h, pre, post, ["--color", "never"]),
+    p8_at(name, about, before, after, h, pre, post, ["--color", "always"]),
+    (False{}, False{}), (True{}, True{}), (False{}, False{}),
+    (True{}, True{}),
+    around(name, about, before, after, h, pre, post, ["--color=never"],
+      False{}, clear, t => o => hit_never(post, quiet, t, o)),
+    around(name, about, before, after, h, pre, post, ["--color=always"],
+      True{}, clear, t => o => hit_always(post, quiet, t, o)),
+    around(name, about, before, after, h, pre, post, ["--color", "never"],
+      False{}, clear, t => o => hit_never_apart(post, quiet, t, o)),
+    around(name, about, before, after, h, pre, post, ["--color", "always"],
+      True{}, clear, t => o => hit_always_apart(post, quiet, t, o)))
+
+def Laws.p8(name, about, before, after, h, pre, post, clear, quiet):
+  p8_list(name, about, before, after, h, pre, post, clear, quiet)
+
+def Laws.g_help_root():
+  ({==}, {==})
+
+def Laws.g_help_sub():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_help_width():
+  ({==}, {==})
+
+def Laws.g_help_paragraphs():
+  ({==}, {==})
+
+def Laws.g_help_sections():
+  ({==}, {==})
+
+def Laws.g_help_usage():
+  ({==}, {==})
+
+def Laws.g_help_outcome():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
+
+def Laws.g_err_format():
+  {==}
+
+def Laws.g_err_scan():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
+def Laws.g_err_check():
+  ({==}, ({==}, ({==}, ({==}, {==}))))
+
+def Laws.g_err_precedence():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_tip_scope():
+  ({==}, ({==}, {==}))
+
+def Laws.g_tip_suggest():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_tip_order():
+  {==}
+
+def Laws.g_tip_candidates():
+  ({==}, ({==}, {==}))
+
+def Laws.g_tip_distance():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
+def Laws.g_color_tty():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
+def Laws.g_color_env():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    ({==}, ({==}, ({==}, {==}))))))))))))
+
+def Laws.g_color_flag():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
+
+def Laws.g_color_help():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_color_error():
+  ({==}, {==})
+
+def Laws.g_lint_lines():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    ({==}, ({==}, ({==}, {==}))))))))))))
+
+def Laws.g_lint_flag_default():
+  ({==}, ({==}, ({==}, {==})))

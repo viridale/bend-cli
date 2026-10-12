@@ -5,7 +5,9 @@
 # pins whitespace normalization; G-TEXT pins representative wrapped content.
 # P12 fixes when readers, choose and route raise their own validation Bug,
 # not what they return; G-READ fixes values, except a given f32 (K8), and
-# what route's selected callback returns.
+# what route's selected callback returns. P7 and P8 fix term's colors;
+# G-HELP, G-ERR, G-TIP and G-COLOR fix outcome's bytes for V1-V5, not what
+# outcome's Matched holds, nor completions, man or decoding (M5, M6).
 
 import Base
 import ./cli.bend as Cli
@@ -589,7 +591,7 @@ law g_sub_help:
     Cli.HelpRequested{["alpha"], True{}} : Cli.ParseResult}
 
 # G-SUB: former, future, and misspelled subcommand options are errors.
-# T1-T3 text is pinned with Step output in M5.
+# G-TIP pins the T1-T3 text.
 law g_sub_scope_errors:
   {Cli.parse(sub_tool(), host(), ["alpha", "--root"]) ==
     Cli.Rejected{["alpha"], Cli.E01{"--root"}} : Cli.ParseResult} &
@@ -1456,3 +1458,751 @@ law g_read_pkg:
     Some{Done{Demo.Action{0n, None{}, Demo.Script{"build",
       ["x", "--", "-y"]}}}}
     : Maybe<Cli.Dec(Demo.Action)>}
+
+# M4: outcome is eval's answer before decoding (V1-V5): Shown is the exit
+# code and the bytes for stdout and stderr; Matched is a parse to decode.
+# term is the color and width that outcome, help and Go use.
+
+# The colors term decides, stdout first.
+def colors(t: Cli.Term) -> (Bool & Bool):
+  match t:
+    case Cli.Term{out_color, err_color, width}: (out_color, err_color)
+
+# Whether a token before the first `--` spells --color, in either form.
+def names_color(argv: List<&2, String>) -> Bool:
+  match argv:
+    case Nil{}: False{}
+    case +token <> tail:
+      Bool.and(Bool.not(String.eq(token, "--")),
+        Bool.or(Bool.or(String.eq(token, "--color"),
+          String.starts_with(token, "--color=")), names_color(tail)))
+
+def set_nonempty(found: Maybe<&2, String>) -> Bool:
+  match found:
+    case None{}: False{}
+    case Some{value}: Bool.not(String.is_empty(value))
+
+# P7: a non-empty NO_COLOR turns both streams off unless argv spells --color
+# before its first `--`.
+law p7:
+  for c: Cli.Cmd
+  for +h: Cli.Host
+  for +argv: List<&2, String>
+  {set_nonempty(Cli.host_value(h, "NO_COLOR")) == True{} : Bool} ->
+  {names_color(argv) == False{} : Bool} ->
+  {colors(Cli.term(c, h, argv)) == (False{}, False{}) : (Bool & Bool)}
+
+def colors_around(c: Cli.Cmd, h: Cli.Host, pre: List<&2, String>,
+    post: List<&2, String>, chosen: List<&2, String>) -> (Bool & Bool):
+  colors(Cli.term(c, h, List.append(&2, String, pre,
+    List.append(&2, String, chosen, post))))
+
+# The colors for pre ++ chosen ++ post, for each spelling of never and always.
+def p8_colors(+c: Cli.Cmd, +h: Cli.Host, +pre: List<&2, String>,
+    +post: List<&2, String>) -> List<(Bool & Bool)>:
+  [
+    colors_around(c, h, pre, post, ["--color=never"]),
+    colors_around(c, h, pre, post, ["--color=always"]),
+    colors_around(c, h, pre, post, ["--color", "never"]),
+    colors_around(c, h, pre, post, ["--color", "always"]),
+  ]
+
+# P8: in an app with color(), the last --color before `--` decides both
+# streams on every host: never turns color off and always turns it on.
+law p8:
+  for name: String
+  for about: String
+  for before: List<&2, Cli.Item>
+  for after: List<&2, Cli.Item>
+  for h: Cli.Host
+  for +pre: List<&2, String>
+  for +post: List<&2, String>
+  {List.contains(~String, ~String.eq, pre, "--") == False{} : Bool} ->
+  {names_color(post) == False{} : Bool} ->
+  {p8_colors(Cli.cmd(name, about,
+    List.append(&2, Cli.Item, before, Cli.color() <> after)), h, pre, post)
+    == [(False{}, False{}), (True{}, True{}), (False{}, False{}),
+      (True{}, True{})] : List<(Bool & Bool)>}
+
+# Text as printed: each line ends with a newline.
+def page(lines: List<&2, String>) -> String:
+  match lines:
+    case Nil{}: ""
+    case line <> tail: String.concat([line, "\n", page(tail)])
+
+def pkg_page() -> String:
+  page([
+    "A package manager (demo)",
+    "",
+    "Usage: pkg [OPTIONS] <COMMAND>",
+    "",
+    "Commands:",
+    "  add                 Add packages",
+    "  remove              Remove packages [aliases: rm]",
+    "  list                List installed packages",
+    "  run                 Run a package script",
+    "  completions         Print a shell completion script",
+    "  help                Print this message or the help of the given subcommand(s)",
+    "",
+    "Options:",
+    "      --color <WHEN>  When to use color [default: auto] [possible values: auto,",
+    "                      always, never]",
+    "  -v, --verbose...    More output; repeat for more",
+    "  -C <DIR>            Run as if started in DIR",
+    "  -h, --help          Print help",
+    "  -V, --version       Print version",
+  ])
+
+# G-HELP: the root page lists visible subcommands with the help subcommand
+# last, then options: own, inherited globals, then help and version. Long-only
+# options indent 4 more. With no two-paragraph text, -h and --help agree.
+law g_help_root:
+  {Cli.help(Demo.cli(), [], False{}, host()) == pkg_page() : String} &
+  {Cli.help(Demo.cli(), [], True{}, host()) == pkg_page() : String}
+
+def add_page() -> String:
+  page([
+    "Add packages",
+    "",
+    "Usage: pkg add [OPTIONS] <NAME>...",
+    "",
+    "Arguments:",
+    "  <NAME>...             Packages to add",
+    "",
+    "Options:",
+    "  -D, --dev             Add as development dependencies",
+    "      --registry <URL>  Registry to fetch from [env: PKG_REGISTRY] [default:",
+    "                        https://registry.example]",
+    "      --color <WHEN>    When to use color [default: auto] [possible values:",
+    "                        auto, always, never]",
+    "  -v, --verbose...      More output; repeat for more",
+    "  -C <DIR>              Run as if started in DIR",
+    "  -h, --help            Print help",
+    "",
+    "Examples:",
+    "  Add a development dependency:",
+    "    $ pkg add -D left-pad",
+  ])
+
+# G-HELP: a subcommand page lists arguments, its own options, the root's
+# globals and help. help and usage render the longest valid prefix of path.
+law g_help_sub:
+  {Cli.help(Demo.cli(), ["add"], False{}, host()) == add_page() : String} &
+  {Cli.help(Demo.cli(), ["add", "nope"], True{}, host())
+    == add_page() : String} &
+  {Cli.usage(Demo.cli(), ["add"]) == "pkg add [OPTIONS] <NAME>..." : String} &
+  {Cli.usage(Demo.cli(), ["nope"]) == "pkg [OPTIONS] <COMMAND>" : String}
+
+# G-HELP: W clamps host width to 40 and 100. At 40, a left cell wider than
+# K - 4 = 12 stands alone, and its text starts on the next line at C = 15.
+law g_help_width:
+  {Cli.help(Demo.cli(), [], False{}, Cli.host(30n)) == page([
+    "A package manager (demo)",
+    "",
+    "Usage: pkg [OPTIONS] <COMMAND>",
+    "",
+    "Commands:",
+    "  add          Add packages",
+    "  remove       Remove packages [aliases:",
+    "               rm]",
+    "  list         List installed packages",
+    "  run          Run a package script",
+    "  completions  Print a shell completion",
+    "               script",
+    "  help         Print this message or the",
+    "               help of the given",
+    "               subcommand(s)",
+    "",
+    "Options:",
+    "      --color <WHEN>",
+    "               When to use color",
+    "               [default: auto] [possible",
+    "               values: auto, always,",
+    "               never]",
+    "  -v, --verbose...",
+    "               More output; repeat for",
+    "               more",
+    "  -C <DIR>     Run as if started in DIR",
+    "  -h, --help   Print help",
+    "  -V, --version",
+    "               Print version",
+  ]) : String} &
+  {Cli.help(Demo.cli(), [], False{}, Cli.host(120n)) == page([
+    "A package manager (demo)",
+    "",
+    "Usage: pkg [OPTIONS] <COMMAND>",
+    "",
+    "Commands:",
+    "  add                 Add packages",
+    "  remove              Remove packages [aliases: rm]",
+    "  list                List installed packages",
+    "  run                 Run a package script",
+    "  completions         Print a shell completion script",
+    "  help                Print this message or the help of the given subcommand(s)",
+    "",
+    "Options:",
+    "      --color <WHEN>  When to use color [default: auto] [possible values: auto, always, never]",
+    "  -v, --verbose...    More output; repeat for more",
+    "  -C <DIR>            Run as if started in DIR",
+    "  -h, --help          Print help",
+    "  -V, --version       Print version",
+  ]) : String}
+
+def docs() -> Cli.Cmd:
+  Cli.cmd("docs",
+    "Render documents\n\nReads Markdown and writes HTML.\nOne file at a time.", [
+    Cli.arg("-o, --out <FILE>", "Output file\n\nDefaults to standard output.",
+      []),
+    Cli.arg("--title <TEXT>",
+      "Page title, such as 日本語 or cafe\u{301} and some more text", []),
+    Cli.arg("<INPUT>", "Input file", []),
+  ])
+
+def docs_page(long: Bool) -> String:
+  match long:
+    case False{}:
+      page([
+        "Render documents",
+        "",
+        "Usage: docs [OPTIONS] <INPUT>",
+        "",
+        "Arguments:",
+        "  <INPUT>     Input file",
+        "",
+        "Options:",
+        "  -o, --out <FILE>",
+        "              Output file",
+        "      --title <TEXT>",
+        "              Page title, such as 日本語",
+        "              or cafe\u{301} and some more text",
+        "  -h, --help  Print help (see more with",
+        "              '--help')",
+      ])
+    case True{}:
+      page([
+        "Render documents",
+        "",
+        "Reads Markdown and writes HTML.",
+        "One file at a time.",
+        "",
+        "Usage: docs [OPTIONS] <INPUT>",
+        "",
+        "Arguments:",
+        "  <INPUT>     Input file",
+        "",
+        "Options:",
+        "  -o, --out <FILE>",
+        "              Output file",
+        "",
+        "              Defaults to standard",
+        "              output.",
+        "      --title <TEXT>",
+        "              Page title, such as 日本語",
+        "              or cafe\u{301} and some more text",
+        "  -h, --help  Print help (see a summary",
+        "              with '-h')",
+      ])
+
+# G-HELP: -h shows first paragraphs and --help all of them, keeping hard line
+# breaks; the help option names the other page. Wrapping counts each CJK
+# character as 2 columns and a combining mark as 0.
+law g_help_paragraphs:
+  {Cli.help(docs(), [], False{}, Cli.host(20n))
+    == docs_page(False{}) : String} &
+  {Cli.help(docs(), [], True{}, Cli.host(20n))
+    == docs_page(True{}) : String}
+
+def feat() -> Cli.Cmd:
+  Cli.cmd("feat", "Feature tour", [
+    Cli.arg("--mode <MODE>", "Mode", [Cli.env("FEAT_MODE"), Cli.default("fast"),
+      Cli.one_of(["fast", "slow"]), Cli.alias("--speed")]),
+    Cli.arg("--secret", "Hidden flag", [Cli.hidden()]),
+    Cli.arg("--host <HOST>", "Server host", [Cli.heading("Network")]),
+    Cli.arg("--port <PORT>", "Server port",
+      [Cli.heading("Network"), Cli.as_u32()]),
+    Cli.example("feat --mode slow", "Run slowly"),
+    Cli.example("feat --host example.org", "Use a server"),
+    Cli.after("Docs: https://example.org/feat"),
+  ])
+
+def feat_page() -> String:
+  page([
+    "Feature tour",
+    "",
+    "Usage: feat [OPTIONS]",
+    "",
+    "Options:",
+    "      --mode <MODE>  Mode [env: FEAT_MODE] [default: fast] [possible values:",
+    "                     fast, slow] [aliases: --speed]",
+    "  -h, --help         Print help",
+    "",
+    "Network:",
+    "      --host <HOST>  Server host",
+    "      --port <PORT>  Server port",
+    "",
+    "Examples:",
+    "  Run slowly:",
+    "    $ feat --mode slow",
+    "  Use a server:",
+    "    $ feat --host example.org",
+    "",
+    "Docs: https://example.org/feat",
+  ])
+
+# G-HELP: tags follow env, default, possible values, aliases; a hidden arg is
+# left out; a heading gets its own section after Options, with one column
+# for the page; examples, then after text, close the page.
+law g_help_sections:
+  {Cli.help(feat(), [], False{}, host()) == feat_page() : String} &
+  {Cli.help(feat(), [], True{}, host()) == feat_page() : String}
+
+def up() -> Cli.Cmd:
+  Cli.cmd("up", "Upload", [
+    Cli.need_one("src"),
+    Cli.arg("--token <T>", "Token", [Cli.required()]),
+    Cli.arg("--file <F>", "File", [Cli.group("src")]),
+    Cli.arg("--url <U>", "URL", [Cli.group("src")]),
+    Cli.arg("[DEST]", "Destination", []),
+  ])
+
+# G-HELP: usage text puts required options and need_one groups, as E06 writes
+# them, before positionals; it wraps between elements, continuing at 7.
+law g_help_usage:
+  {Cli.usage(up(), [])
+    == "up [OPTIONS] --token <T> <--file <F>|--url <U>> [DEST]" : String} &
+  {Cli.help(up(), [], False{}, Cli.host(30n)) == page([
+    "Upload",
+    "",
+    "Usage: up [OPTIONS] --token <T>",
+    "       <--file <F>|--url <U>> [DEST]",
+    "",
+    "Arguments:",
+    "  [DEST]      Destination",
+    "",
+    "Options:",
+    "      --token <T>",
+    "              Token",
+    "      --file <F>",
+    "              File",
+    "      --url <U>",
+    "              URL",
+    "  -h, --help  Print help",
+  ]) : String}
+
+# G-HELP: help and version go to stdout with exit 0: -h the summary page,
+# --help and `help add` the full page, and the first of help and version wins
+# (V1, V2). Empty argv that the root rejects shows the summary page on stderr
+# with exit 2 (V3).
+law g_help_outcome:
+  {Cli.outcome(Demo.cli(), host(), ["-h"])
+    == Cli.Shown{0, pkg_page(), ""} : Cli.Outcome} &
+  {Cli.outcome(docs(), Cli.host(20n), ["-h"])
+    == Cli.Shown{0, docs_page(False{}), ""} : Cli.Outcome} &
+  {Cli.outcome(docs(), Cli.host(20n), ["--help"])
+    == Cli.Shown{0, docs_page(True{}), ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["help", "add"])
+    == Cli.Shown{0, add_page(), ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["--version"])
+    == Cli.Shown{0, "pkg 0.1.0\n", ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["-V"])
+    == Cli.Shown{0, "pkg 0.1.0\n", ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["-V", "--help"])
+    == Cli.Shown{0, "pkg 0.1.0\n", ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["--help", "-V"])
+    == Cli.Shown{0, pkg_page(), ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), [])
+    == Cli.Shown{2, "", pkg_page()} : Cli.Outcome}
+
+# G-ERR: an error is exit 2 on stderr: the message, a blank line, then the
+# usage of the scope where it occurred and a pointer to --help.
+law g_err_format:
+  {Cli.outcome(Demo.cli(), host(), ["--bogus"]) == Cli.Shown{2, "", page([
+    "error: unexpected argument '--bogus' found",
+    "",
+    "Usage: pkg [OPTIONS] <COMMAND>",
+    "",
+    "For more information, try '--help'.",
+  ])} : Cli.Outcome}
+
+def tip_lines(tips: List<&2, String>) -> String:
+  match tips:
+    case Nil{}: ""
+    case tip <> tail: String.concat(["  tip: ", tip, "\n", tip_lines(tail)])
+
+def tip_block(tips: List<&2, String>) -> String:
+  match tips:
+    case Nil{}: ""
+    case tip <> tail: String.append("\n", tip_lines(tip <> tail))
+
+# The uncolored outcome for an error: message, tips, then the scope's usage.
+def report(message: String, tips: List<&2, String>,
+    usage: String) -> Cli.Outcome:
+  Cli.Shown{2, "", String.concat(["error: ", message, "\n", tip_block(tips),
+    "\nUsage: ", usage, "\n\nFor more information, try '--help'.\n"])}
+
+# G-ERR: each scan error's message, at the scope where scanning stopped: E02,
+# E03, E04, E05, then E09 twice, the second on a hyphen token after `--`,
+# which no slot takes, so T5 does not apply. g_err_format is E01.
+law g_err_scan:
+  {Cli.outcome(Demo.cli(), host(), ["bogus"]) ==
+    report("unrecognized subcommand 'bogus'", [], "pkg [OPTIONS] <COMMAND>")
+    : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["add", "--registry"]) ==
+    report("a value is required for '--registry <URL>' but none was supplied",
+      [], "pkg add [OPTIONS] <NAME>...") : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["list", "--format", "xml"]) ==
+    report("invalid value 'xml' for '--format <FMT>': expected one of 'text', 'json'",
+      [], "pkg list [OPTIONS]") : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["list", "--all=yes"]) ==
+    report("unexpected value 'yes' for '--all' found; no more were expected",
+      [], "pkg list [OPTIONS]") : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["list", "extra"]) ==
+    report("unexpected argument 'extra' found", [], "pkg list [OPTIONS]")
+    : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["list", "--", "-x"]) ==
+    report("unexpected argument '-x' found", [], "pkg list [OPTIONS]")
+    : Cli.Outcome}
+
+def rel() -> Cli.Cmd:
+  Cli.cmd("rel", "Relations", [
+    Cli.arg("--json", "JSON output", [Cli.conflicts("yaml")]),
+    Cli.arg("--yaml", "YAML output", []),
+    Cli.arg("--key <KEY>", "Signing key", [Cli.requires("sign")]),
+    Cli.arg("--sign", "Sign output", []),
+    Cli.arg("--jobs <N>", "Parallel jobs", [Cli.as_u32(), Cli.env("REL_JOBS")]),
+  ])
+
+# G-ERR: each post-scan check's message, E06, E07, E08, E10, then E11; E06
+# and E10 add indented lines, and an error message is not wrapped.
+law g_err_check:
+  {Cli.outcome(Demo.cli(), host(), ["add"]) == report(
+    "the following required arguments were not provided:\n  <NAME>...",
+    [], "pkg add [OPTIONS] <NAME>...") : Cli.Outcome} &
+  {Cli.outcome(rel(), host(), ["--json", "--yaml"]) ==
+    report("the argument '--yaml' cannot be used with '--json'", [],
+      "rel [OPTIONS]") : Cli.Outcome} &
+  {Cli.outcome(rel(), host(), ["--key", "k"]) ==
+    report("the argument '--key <KEY>' requires '--sign'", [],
+      "rel [OPTIONS]") : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["-v"]) == report(
+    "'pkg' requires a subcommand but none was provided\n  [subcommands: add, remove, list, run, completions, help]",
+    [], "pkg [OPTIONS] <COMMAND>") : Cli.Outcome} &
+  {Cli.outcome(rel(), Cli.host_var(host(), "REL_JOBS", "many"), []) ==
+    report("invalid value 'many' for '--jobs <N>' from environment variable REL_JOBS: expected a whole number from 0 to 4294967295",
+      [], "rel [OPTIONS]") : Cli.Outcome}
+
+def list_page() -> String:
+  page([
+    "List installed packages",
+    "",
+    "Usage: pkg list [OPTIONS]",
+    "",
+    "Options:",
+    "  -a, --all           Include transitive packages",
+    "      --format <FMT>  Output format [default: text] [possible values: text,",
+    "                      json]",
+    "      --color <WHEN>  When to use color [default: auto] [possible values: auto,",
+    "                      always, never]",
+    "  -v, --verbose...    More output; repeat for more",
+    "  -C <DIR>            Run as if started in DIR",
+    "  -h, --help          Print help",
+  ])
+
+# G-ERR: a later help token wins over E01, E03 and E04; E02 stops the scan
+# before it.
+law g_err_precedence:
+  {Cli.outcome(Demo.cli(), host(), ["--bogus", "-h"])
+    == Cli.Shown{0, pkg_page(), ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["add", "--registry", "--help"])
+    == Cli.Shown{0, add_page(), ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["list", "--format", "xml", "-h"])
+    == Cli.Shown{0, list_page(), ""} : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["bogus", "--help"]) ==
+    report("unrecognized subcommand 'bogus'", [], "pkg [OPTIONS] <COMMAND>")
+    : Cli.Outcome}
+
+# G-TIP: T1 names the ancestor that owns a long, T2 the first descendant in
+# pre-order, and T3 a subcommand written as a long.
+law g_tip_scope:
+  {Cli.outcome(sub_tool(), host(), ["alpha", "--root"]) ==
+    report("unexpected argument '--root' found",
+      ["'--root' belongs to 'tool'; place it before 'alpha'"],
+      "tool alpha [OPTIONS] [COMMAND]") : Cli.Outcome} &
+  {Cli.outcome(sub_tool(), host(), ["--child", "alpha"]) ==
+    report("unexpected argument '--child' found",
+      ["'--child' belongs to subcommand 'tool alpha'"],
+      "tool [OPTIONS] <COMMAND>") : Cli.Outcome} &
+  {Cli.outcome(sub_tool(), host(), ["--alpha"]) ==
+    report("unexpected argument '--alpha' found",
+      ["subcommand 'alpha' exists; to use it, remove the '--'"],
+      "tool [OPTIONS] <COMMAND>") : Cli.Outcome}
+
+# G-TIP: T4 suggests a similar argument, subcommands (aliases included) or a
+# one_of value; T5 shows how to pass a hyphen token to a positional.
+law g_tip_suggest:
+  {Cli.outcome(Demo.cli(), host(), ["--verbos"]) ==
+    report("unexpected argument '--verbos' found",
+      ["a similar argument exists: '--verbose'"],
+      "pkg [OPTIONS] <COMMAND>") : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["rn"]) ==
+    report("unrecognized subcommand 'rn'",
+      ["some similar subcommands exist: 'rm', 'run'"],
+      "pkg [OPTIONS] <COMMAND>") : Cli.Outcome} &
+  {Cli.outcome(Demo.cli(), host(), ["list", "--format", "jsn"]) ==
+    report("invalid value 'jsn' for '--format <FMT>': expected one of 'text', 'json'",
+      ["a similar value exists: 'json'"], "pkg list [OPTIONS]")
+    : Cli.Outcome} &
+  {Cli.outcome(cp(), host(), ["-x"]) ==
+    report("unexpected argument '-x' found",
+      ["to pass '-x' as a value, use '-- -x'"], "cp <SRC>... <DST>")
+    : Cli.Outcome}
+
+def rmf() -> Cli.Cmd:
+  Cli.cmd("rmf", "Remove a file", [
+    Cli.arg("-f, --force", "Force", []),
+    Cli.arg("<FILE>", "File to remove", []),
+  ])
+
+# G-TIP: every tip that applies is shown, in table order.
+law g_tip_order:
+  {Cli.outcome(rmf(), host(), ["--forse"]) == Cli.Shown{2, "", page([
+    "error: unexpected argument '--forse' found",
+    "",
+    "  tip: a similar argument exists: '--force'",
+    "  tip: to pass '--forse' as a value, use '-- --forse'",
+    "",
+    "Usage: rmf [OPTIONS] <FILE>",
+    "",
+    "For more information, try '--help'.",
+  ])} : Cli.Outcome}
+
+def neg() -> Cli.Cmd:
+  Cli.cmd("neg", "Negation", [Cli.arg("--[no-]safe", "Safety checks", [])])
+
+# G-TIP: argument candidates include long aliases and no- forms, not hidden
+# args.
+law g_tip_candidates:
+  {Cli.outcome(feat(), host(), ["--sped"]) ==
+    report("unexpected argument '--sped' found",
+      ["a similar argument exists: '--speed'"], "feat [OPTIONS]")
+    : Cli.Outcome} &
+  {Cli.outcome(neg(), host(), ["--no-sfe"]) ==
+    report("unexpected argument '--no-sfe' found",
+      ["a similar argument exists: '--no-safe'"], "neg [OPTIONS]")
+    : Cli.Outcome} &
+  {Cli.outcome(feat(), host(), ["--secrt"]) ==
+    report("unexpected argument '--secrt' found", [], "feat [OPTIONS]")
+    : Cli.Outcome}
+
+# G-TIP: a candidate qualifies within max(1, n / 3) edits of optimal string
+# alignment, n counting the typed name without dashes (n = 2, 3, 6); at most
+# 3 are shown, by distance, then declaration order.
+law g_tip_distance:
+  {Cli.suggest("ab", ["ax", "xy", "abc"]) == ["ax", "abc"]
+    : List<&2, String>} &
+  {Cli.suggest("abc", ["abd", "axy", "ab"]) == ["abd", "ab"]
+    : List<&2, String>} &
+  {Cli.suggest("abc", ["bac"]) == ["bac"] : List<&2, String>} &
+  {Cli.suggest("abcdef", ["abcxyz", "abcdxy", "abcdex", "bacdef"])
+    == ["abcdex", "bacdef", "abcdxy"] : List<&2, String>} &
+  {Cli.suggest("cat", ["bat", "cot", "cap", "car"]) == ["bat", "cot", "cap"]
+    : List<&2, String>} &
+  {Cli.suggest("--forse", ["--force", "--help"]) == ["--force"]
+    : List<&2, String>}
+
+def painted() -> Cli.Cmd:
+  Cli.cmd("painted", "Paint test", [Cli.arg("-f, --force", "Force", [])])
+
+def tty() -> Cli.Host:
+  Cli.host_tty(host(), True{}, True{})
+
+# G-COLOR: rule 7 colors each stream that is a TTY; Term keeps the host
+# width unclamped.
+law g_color_tty:
+  {Cli.term(painted(), host(), [])
+    == Cli.Term{False{}, False{}, 80n} : Cli.Term} &
+  {Cli.term(painted(), tty(), [])
+    == Cli.Term{True{}, True{}, 80n} : Cli.Term} &
+  {Cli.term(painted(), Cli.host_tty(host(), True{}, False{}), [])
+    == Cli.Term{True{}, False{}, 80n} : Cli.Term} &
+  {Cli.term(painted(), Cli.host_tty(host(), False{}, True{}), [])
+    == Cli.Term{False{}, True{}, 80n} : Cli.Term} &
+  {Cli.term(painted(), Cli.host(120n), [])
+    == Cli.Term{False{}, False{}, 120n} : Cli.Term} &
+  {Cli.term(painted(), Cli.host(20n), [])
+    == Cli.Term{False{}, False{}, 20n} : Cli.Term}
+
+def env_colors(h: Cli.Host) -> (Bool & Bool):
+  colors(Cli.term(painted(), h, []))
+
+# G-COLOR: rules 3-6 apply in order; an empty variable counts as unset.
+law g_color_env:
+  {env_colors(Cli.host_var(tty(), "NO_COLOR", "1"))
+    == (False{}, False{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(tty(), "NO_COLOR", ""))
+    == (True{}, True{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(Cli.host_var(host(), "CLICOLOR_FORCE", "1"),
+    "NO_COLOR", "1")) == (False{}, False{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(host(), "CLICOLOR_FORCE", "1"))
+    == (True{}, True{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(host(), "CLICOLOR_FORCE", "0"))
+    == (False{}, False{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(tty(), "CLICOLOR_FORCE", "0"))
+    == (True{}, True{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(host(), "CLICOLOR_FORCE", ""))
+    == (False{}, False{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(Cli.host_var(host(), "CLICOLOR", "0"),
+    "CLICOLOR_FORCE", "1")) == (True{}, True{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(Cli.host_var(host(), "TERM", "dumb"),
+    "CLICOLOR_FORCE", "1")) == (True{}, True{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(tty(), "CLICOLOR", "0"))
+    == (False{}, False{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(tty(), "CLICOLOR", "1"))
+    == (True{}, True{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(tty(), "TERM", "dumb"))
+    == (False{}, False{}) : (Bool & Bool)} &
+  {env_colors(Cli.host_var(tty(), "TERM", "xterm"))
+    == (True{}, True{}) : (Bool & Bool)}
+
+def pkg_colors(h: Cli.Host, argv: List<&2, String>) -> (Bool & Bool):
+  colors(Cli.term(Demo.cli(), h, argv))
+
+# G-COLOR: with color(), the last --color before `--` beats the environment,
+# after a subcommand too; auto, an invalid value, or one after `--` falls
+# through. Without color(), --color is ignored.
+law g_color_flag:
+  {pkg_colors(Cli.host_var(tty(), "NO_COLOR", "1"), ["--color=always"])
+    == (True{}, True{}) : (Bool & Bool)} &
+  {pkg_colors(tty(), ["--color", "never"])
+    == (False{}, False{}) : (Bool & Bool)} &
+  {pkg_colors(Cli.host_var(host(), "CLICOLOR_FORCE", "1"), ["--color=never"])
+    == (False{}, False{}) : (Bool & Bool)} &
+  {pkg_colors(host(), ["--color=always", "--color=never"])
+    == (False{}, False{}) : (Bool & Bool)} &
+  {pkg_colors(host(), ["--color=never", "add", "--color", "always"])
+    == (True{}, True{}) : (Bool & Bool)} &
+  {pkg_colors(tty(), ["--color=auto"])
+    == (True{}, True{}) : (Bool & Bool)} &
+  {pkg_colors(tty(), ["--color=never", "--color=sometimes"])
+    == (True{}, True{}) : (Bool & Bool)} &
+  {pkg_colors(host(), ["run", "s", "--", "--color=always"])
+    == (False{}, False{}) : (Bool & Bool)} &
+  {colors(Cli.term(painted(), host(), ["--color=always"]))
+    == (False{}, False{}) : (Bool & Bool)}
+
+def need() -> Cli.Cmd:
+  Cli.cmd("need", "Need test", [Cli.arg("<X>", "Input", [])])
+
+def painted_page() -> String:
+  page([
+    "Paint test",
+    "",
+    "\u{1B}[1;4mUsage:\u{1B}[0m \u{1B}[1mpainted\u{1B}[0m [OPTIONS]",
+    "",
+    "\u{1B}[1;4mOptions:\u{1B}[0m",
+    "  \u{1B}[1m-f\u{1B}[0m, \u{1B}[1m--force\u{1B}[0m  Force",
+    "  \u{1B}[1m-h\u{1B}[0m, \u{1B}[1m--help\u{1B}[0m   Print help",
+  ])
+
+# G-COLOR: help paints in the decision for its stream: titles and Usage: in
+# bold underline, the command path and option names in bold; placeholders,
+# separators and descriptions stay plain. help uses the stdout decision.
+law g_color_help:
+  {Cli.outcome(painted(), Cli.host_tty(host(), True{}, False{}), ["-h"])
+    == Cli.Shown{0, painted_page(), ""} : Cli.Outcome} &
+  {Cli.help(painted(), [], False{}, Cli.host_tty(host(), True{}, False{}))
+    == painted_page() : String} &
+  {Cli.outcome(painted(), Cli.host_tty(host(), False{}, True{}), ["-h"])
+    == Cli.Shown{0, page([
+    "Paint test",
+    "",
+    "Usage: painted [OPTIONS]",
+    "",
+    "Options:",
+    "  -f, --force  Force",
+    "  -h, --help   Print help",
+  ]), ""} : Cli.Outcome} &
+  {Cli.outcome(need(), Cli.host_tty(host(), False{}, True{}), [])
+    == Cli.Shown{2, "", page([
+    "Need test",
+    "",
+    "\u{1B}[1;4mUsage:\u{1B}[0m \u{1B}[1mneed\u{1B}[0m <X>",
+    "",
+    "\u{1B}[1;4mArguments:\u{1B}[0m",
+    "  <X>         Input",
+    "",
+    "\u{1B}[1;4mOptions:\u{1B}[0m",
+    "  \u{1B}[1m-h\u{1B}[0m, \u{1B}[1m--help\u{1B}[0m  Print help",
+  ])} : Cli.Outcome}
+
+# G-COLOR: an error paints in the stderr decision: error: in bold red, the
+# user's token in yellow, tip: in bold green, a suggestion in green, and the
+# usage and '--help' as in help.
+law g_color_error:
+  {Cli.outcome(painted(), Cli.host_tty(host(), False{}, True{}), ["--forse"])
+    == Cli.Shown{2, "", page([
+    "\u{1B}[1;31merror:\u{1B}[0m unexpected argument '\u{1B}[33m--forse\u{1B}[0m' found",
+    "",
+    "  \u{1B}[1;32mtip:\u{1B}[0m a similar argument exists: '\u{1B}[32m--force\u{1B}[0m'",
+    "",
+    "\u{1B}[1;4mUsage:\u{1B}[0m \u{1B}[1mpainted\u{1B}[0m [OPTIONS]",
+    "",
+    "For more information, try '\u{1B}[1m--help\u{1B}[0m'.",
+  ])} : Cli.Outcome} &
+  {Cli.outcome(painted(), Cli.host_tty(host(), True{}, False{}), ["--forse"])
+    == report("unexpected argument '--forse' found",
+      ["a similar argument exists: '--force'"], "painted [OPTIONS]")
+    : Cli.Outcome}
+
+# G-LINT: each problem is one line, indented 2, led by the command path.
+# A BadUsage column is shown counting from 1.
+law g_lint_lines:
+  {Cli.problem_line(Cli.BadUsage{"tool", "--quiet.", 7n})
+    == "  tool: usage '--quiet.' is invalid at column 8" : String} &
+  {Cli.problem_line(Cli.BadName{"tool", "bad name"})
+    == "  tool: 'bad name' is not a valid name" : String} &
+  {Cli.problem_line(Cli.Dup{"tool run", "-v"})
+    == "  tool run: '-v' is declared more than once" : String} &
+  {Cli.problem_line(Cli.Reserved{"tool", "--help"})
+    == "  tool: '--help' is reserved" : String} &
+  {Cli.problem_line(Cli.Misplaced{"tool", "global"})
+    == "  tool: 'global' is not allowed here" : String} &
+  {Cli.problem_line(Cli.NoHelp{"tool", "-o, --output <FILE>"})
+    == "  tool: '-o, --output <FILE>' has no help text" : String} &
+  {Cli.problem_line(Cli.BadDefault{"tool", "count", "nope"})
+    == "  tool: 'count' cannot have the default 'nope'" : String} &
+  {Cli.problem_line(Cli.BadRef{"tool", "missing"})
+    == "  tool: 'missing' is an unknown id or an unused or empty group"
+    : String} &
+  {Cli.problem_line(Cli.BadPositional{"tool", "b",
+    "required positional follows an optional positional"})
+    == "  tool: positional 'b': required positional follows an optional positional"
+    : String} &
+  {Cli.problem_line(Cli.Mixed{"tool"})
+    == "  tool: has both positionals and subcommands" : String} &
+  {Cli.problem_line(Cli.BadChoices{"tool", "mode"})
+    == "  tool: one_of for 'mode' is empty or repeats a value" : String} &
+  {Cli.problem_line(Cli.NeedBare{"tool", "color"})
+    == "  tool: 'color' needs [=<V>] and bare() together, with no short"
+    : String} &
+  {Cli.problem_line(Cli.DecodeBug{"tool",
+    "'nope' is not an argument of 'tool'"})
+    == "  tool: decoder bug: 'nope' is not an argument of 'tool'" : String}
+
+# G-LINT: a default on a flag or count is Misplaced, and also a BadDefault
+# when its value is not a bool or a nat.
+law g_lint_flag_default:
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("--quiet", "Quiet output", [Cli.default("x")]),
+  ])) == [Cli.Misplaced{"tool", "default"},
+    Cli.BadDefault{"tool", "quiet", "x"}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("--quiet", "Quiet output", [Cli.default("true")]),
+  ])) == [Cli.Misplaced{"tool", "default"}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("-v...", "Verbosity", [Cli.default("x")]),
+  ])) == [Cli.Misplaced{"tool", "default"},
+    Cli.BadDefault{"tool", "v", "x"}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("-v...", "Verbosity", [Cli.default("2")]),
+  ])) == [Cli.Misplaced{"tool", "default"}] : List<&2, Cli.Problem>}

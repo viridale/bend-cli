@@ -3871,3 +3871,1169 @@ def check(~A: Type, ~decode: @+m: Matches -> Dec(A), +c: Cmd) ->
     List<&2, Problem>:
   List.append(&2, Problem, problems(c),
     sample_bugs(~A, ~decode, sample_paths(c), c))
+# ---- Color (§10.6) ----
+
+type Term is Data:
+  Term{out_color: Bool, err_color: Bool, width: Nat}
+
+def host_tty(h: Host, out: Bool, err: Bool) -> Host:
+  match h:
+    case Host{width, vars, out_tty, err_tty}: Host{width, vars, out, err}
+
+# Rules 1 and 2 apply only to color() exactly as declared.
+def color_attrs(attrs: List<&2, Item>) -> Bool:
+  match attrs:
+    case Con{OneOf{values}, Con{AttrDefault{value}, Con{Global{}, Nil{}}}}:
+      Bool.and(String.eq(String.join(values, " "), "auto always never"),
+        String.eq(value, "auto"))
+    case _: False{}
+
+def is_color(item: Item) -> Bool:
+  match item:
+    case Arg{usage, help, attrs}:
+      Bool.and(String.eq(usage, "--color <WHEN>"),
+        Bool.and(String.eq(help, "When to use color"), color_attrs(attrs)))
+    case _: False{}
+
+def has_color(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case item <> tail: Bool.or(is_color(item), has_color(tail))
+
+# The pre-scan of argv: the last --color value before `--`, "" for a bare
+# --color before a hyphen token.
+type Prescan is Data:
+  ColorSeek{last: Maybe<&2, String>}
+  ColorWant{}
+  ColorStop{last: Maybe<&2, String>}
+
+def color_seek(dash: Bool, bare: Bool, attached: Bool, token: String,
+    last: Maybe<&2, String>) -> Prescan:
+  match dash bare attached:
+    case True{} _ _: ColorStop{last}
+    case False{} True{} _: ColorWant{}
+    case False{} False{} True{}: ColorSeek{Some{String.drop(token, 8n)}}
+    case False{} False{} False{}: ColorSeek{last}
+
+def color_want(hyphen: Bool, +token: String) -> Prescan:
+  match hyphen:
+    case False{}: ColorSeek{Some{token}}
+    case True{}:
+      color_seek(String.eq(token, "--"), String.eq(token, "--color"),
+        String.starts_with(token, "--color="), token, Some{""})
+
+def color_step(state: Prescan, +token: String) -> Prescan:
+  match state:
+    case ColorSeek{last}:
+      color_seek(String.eq(token, "--"), String.eq(token, "--color"),
+        String.starts_with(token, "--color="), token, last)
+    case ColorWant{}: color_want(String.starts_with(token, "-"), token)
+    case ColorStop{last}: ColorStop{last}
+
+def color_scan(argv: List<&2, String>, state: Prescan) -> Prescan:
+  match argv:
+    case Nil{}: state
+    case token <> tail: color_scan(tail, color_step(state, token))
+
+def color_word(always: Bool, never: Bool) -> Maybe<&2, Bool>:
+  match always never:
+    case True{} _: Some{True{}}
+    case False{} True{}: Some{False{}}
+    case False{} False{}: None{}
+
+def color_value(found: Maybe<&2, String>) -> Maybe<&2, Bool>:
+  match found:
+    case None{}: None{}
+    case Some{+value}:
+      color_word(String.eq(value, "always"), String.eq(value, "never"))
+
+def color_pick(state: Prescan) -> Maybe<&2, Bool>:
+  match state:
+    case ColorSeek{last}: color_value(last)
+    case ColorWant{}: None{}
+    case ColorStop{last}: color_value(last)
+
+def color_flag(enabled: Bool, argv: List<&2, String>) -> Maybe<&2, Bool>:
+  match enabled:
+    case True{}: color_pick(color_scan(argv, ColorSeek{None{}}))
+    case False{}: None{}
+
+# An empty variable counts as unset.
+def var_set(found: Maybe<&2, String>) -> Bool:
+  match found:
+    case None{}: False{}
+    case Some{value}: Bool.not(String.is_empty(value))
+
+def var_is(found: Maybe<&2, String>, text: String) -> Bool:
+  match found:
+    case None{}: False{}
+    case Some{value}: String.eq(value, text)
+
+def force_set(found: Maybe<&2, String>) -> Bool:
+  match found:
+    case None{}: False{}
+    case Some{+value}:
+      Bool.and(Bool.not(String.is_empty(value)),
+        Bool.not(String.eq(value, "0")))
+
+def env_off(off: Bool) -> Maybe<&2, Bool>:
+  match off:
+    case True{}: Some{False{}}
+    case False{}: None{}
+
+def env_force(force: Bool, +vars: List<&2, Var>) -> Maybe<&2, Bool>:
+  match force:
+    case True{}: Some{True{}}
+    case False{}:
+      env_off(Bool.or(var_is(var_value(vars, "CLICOLOR"), "0"),
+        var_is(var_value(vars, "TERM"), "dumb")))
+
+def env_rules(no_color: Bool, +vars: List<&2, Var>) -> Maybe<&2, Bool>:
+  match no_color:
+    case True{}: Some{False{}}
+    case False{}:
+      env_force(force_set(var_value(vars, "CLICOLOR_FORCE")), vars)
+
+# Rules 3-6; None leaves rule 7, each stream's TTY.
+def env_color(+vars: List<&2, Var>) -> Maybe<&2, Bool>:
+  env_rules(var_set(var_value(vars, "NO_COLOR")), vars)
+
+def term_env(found: Maybe<&2, Bool>, out_tty: Bool, err_tty: Bool,
+    width: Nat) -> Term:
+  match found:
+    case Some{+on}: Term{on, on, width}
+    case None{}: Term{out_tty, err_tty, width}
+
+def term_for(flag: Maybe<&2, Bool>, vars: List<&2, Var>, out_tty: Bool,
+    err_tty: Bool, width: Nat) -> Term:
+  match flag:
+    case Some{+on}: Term{on, on, width}
+    case None{}: term_env(env_color(vars), out_tty, err_tty, width)
+
+def term(c: Cmd, h: Host, argv: List<&2, String>) -> Term:
+  match c h:
+    case Cmd{name, about, items} Host{width, vars, out_tty, err_tty}:
+      term_for(color_flag(has_color(items), argv), vars, out_tty, err_tty,
+        width)
+
+# ---- Help (§10.2, §10.3) ----
+
+def plain(text: String) -> Segment:
+  Segment{text, []}
+
+def page_width(width: Nat) -> Nat:
+  Nat.min(100n, Nat.max(40n, width))
+
+# The first paragraph: the text before the first blank line.
+def summary(s: String) -> String:
+  match s:
+    case SNil{}: SNil{}
+    case SCon{Chr{10}, SCon{Chr{10}, tail}}: SNil{}
+    case SCon{head, tail}: SCon{head, summary(tail)}
+
+def shown_text(long: Bool, text: String) -> String:
+  match long:
+    case True{}: text
+    case False{}: summary(text)
+
+def filled(s: String) -> Bool:
+  Bool.not(String.is_empty(s))
+
+def join_filled(parts: List<&2, String>) -> String:
+  String.join(List.filter(~String, ~filled, parts), " ")
+
+# The command at the longest valid prefix of a path, with the globals it
+# inherits, root first; stuck once a step names no subcommand.
+type View is Data:
+  View{path: String, about: String, items: List<&2, Item>,
+    globals: List<&2, Item>, root: Bool, stuck: Bool}
+
+def find_command(items: List<&2, Item>, +query: String,
+    found: Maybe<&2, Item>) -> Maybe<&2, Item>:
+  match items found:
+    case _ Some{item}: Some{item}
+    case Nil{} None{}: None{}
+    case Sub{+name, about, +children} <> tail None{}:
+      find_command(tail, query, Bool.pick(Maybe<&2, Item>,
+        Bool.or(String.eq(query, name),
+          List.contains(~String, ~String.eq, find_aliases(children), query)),
+        Some{Sub{name, about, children}}, None{}))
+    case head <> tail None{}: find_command(tail, query, None{})
+
+def view_enter(found: Maybe<&2, Item>, path: String, about: String,
+    items: List<&2, Item>, globals: List<&2, Item>, root: Bool) -> View:
+  match found:
+    case Some{Sub{name, sub_about, children}}:
+      View{String.concat([path, " ", name]), sub_about, children,
+        List.append(&2, Item, globals, global_items(items)), False{}, False{}}
+    case _: View{path, about, items, globals, root, True{}}
+
+def view_step(view: View, step: String) -> View:
+  match view:
+    case View{path, about, items, globals, root, True{}}:
+      View{path, about, items, globals, root, True{}}
+    case View{path, about, +items, globals, root, False{}}:
+      view_enter(find_command(items, step, None{}), path, about, items,
+        globals, root)
+
+def view_walk(steps: List<&2, String>, view: View) -> View:
+  match steps:
+    case Nil{}: view
+    case step <> tail: view_walk(tail, view_step(view, step))
+
+def view_of(c: Cmd, path: List<&2, String>) -> View:
+  match c:
+    case Cmd{name, about, items}:
+      view_walk(path, View{name, about, items, [], True{}, False{}})
+
+def arg_pos(usage: String) -> Bool:
+  usage_kind(~kind_pos, parse_usage(usage))
+
+def has_plain_option(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case Arg{usage, help, +attrs} <> tail:
+      Bool.or(Bool.and(Bool.not(arg_pos(usage)),
+        Bool.and(Bool.not(has_hidden(attrs)), Bool.not(has_required(attrs)))),
+        has_plain_option(tail))
+    case head <> tail: has_plain_option(tail)
+
+def required_elem(required: Bool, usage: String, attrs: List<&2, Item>) ->
+    List<&2, Segment>:
+  match required:
+    case True{}: [plain(arg_display(arg_info(usage, attrs)))]
+    case False{}: []
+
+def required_options(items: List<&2, Item>) -> List<&2, Segment>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      List.append(&2, Segment,
+        required_elem(Bool.and(Bool.not(arg_pos(usage)), has_required(attrs)),
+          usage, attrs),
+        required_options(tail))
+    case head <> tail: required_options(tail)
+
+def group_elems(items: List<&2, Item>, +args: List<&2, Item>) ->
+    List<&2, Segment>:
+  match items:
+    case Nil{}: Nil{}
+    case NeedOne{group} <> tail:
+      plain(group_display(args, group)) <> group_elems(tail, args)
+    case head <> tail: group_elems(tail, args)
+
+def positional_elems(items: List<&2, Item>) -> List<&2, Segment>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, attrs} <> tail:
+      +rest = positional_elems(tail)
+      Bool.pick(List<&2, Segment>, arg_pos(usage), plain(usage) <> rest, rest)
+    case head <> tail: positional_elems(tail)
+
+def command_elems(subs: Bool, need: Bool) -> List<&2, Segment>:
+  match subs need:
+    case False{} _: []
+    case True{} True{}: [plain("<COMMAND>")]
+    case True{} False{}: [plain("[COMMAND]")]
+
+def options_elem(present: Bool) -> List<&2, Segment>:
+  match present:
+    case True{}: [plain("[OPTIONS]")]
+    case False{}: []
+
+# The path, [OPTIONS], required options, need_one groups as E06 writes them,
+# positionals, then the subcommand slot.
+def usage_elems(path: String, +items: List<&2, Item>,
+    +globals: List<&2, Item>) -> List<&2, Segment>:
+  +args = List.append(&2, Item, items, globals)
+  List.concat(&2, Segment, [
+    [Segment{path, [Bold{}]}],
+    options_elem(has_plain_option(args)),
+    required_options(args),
+    group_elems(items, List.append(&2, Item, globals, items)),
+    positional_elems(items),
+    command_elems(has_sub_item(items), needs_sub(items)),
+  ])
+
+def segment_texts(segs: List<&2, Segment>) -> List<&2, String>:
+  match segs:
+    case Nil{}: Nil{}
+    case Segment{text, styles} <> tail: text <> segment_texts(tail)
+
+def usage_view(view: View) -> String:
+  match view:
+    case View{path, about, items, globals, root, stuck}:
+      String.join(segment_texts(usage_elems(path, items, globals)), " ")
+
+def usage(c: Cmd, path: List<&2, String>) -> String:
+  usage_view(view_of(c, path))
+
+# Usage wraps between elements and continues at column 7.
+def usage_rest(elems: List<&2, Segment>, +w: Nat, +col: Nat) ->
+    List<&2, Segment>:
+  match elems:
+    case Nil{}: Nil{}
+    case Segment{+text, styles} <> tail:
+      +ew = width(text)
+      +fits = Nat.is_le((col + 1n + ew : Nat), w)
+      plain(Bool.pick(String, fits, " ", "\n       ")) <>
+        Segment{text, styles} <> usage_rest(tail, w,
+          Bool.pick(Nat, fits, (col + 1n + ew : Nat), (7n + ew : Nat)))
+
+def usage_block(elems: List<&2, Segment>, w: Nat) -> List<&2, Segment>:
+  match elems:
+    case Nil{}: [Segment{"Usage:", [Bold{}, Under{}]}]
+    case Segment{+text, styles} <> tail:
+      Segment{"Usage:", [Bold{}, Under{}]} <> plain(" ") <>
+        Segment{text, styles} <> usage_rest(tail, w, (7n + width(text) : Nat))
+
+# A help row: its left cell, whether it is an option with a short or a
+# long-only option, and its right text.
+type Row is Data:
+  Row{left: List<&2, Segment>, short: Bool, long_only: Bool, right: String}
+
+type Section is Data:
+  Section{title: String, rows: List<&2, Row>}
+
+def tag(name: String, values: List<&2, String>) -> String:
+  match values:
+    case Nil{}: ""
+    case head <> tail:
+      String.concat(["[", name, ": ", String.join(head <> tail, ", "), "]"])
+
+def maybe_list(found: Maybe<&2, String>) -> List<&2, String>:
+  match found:
+    case None{}: Nil{}
+    case Some{value}: [value]
+
+def list_or_none(found: Maybe<&2, List<&2, String>>) -> List<&2, String>:
+  match found:
+    case None{}: Nil{}
+    case Some{values}: values
+
+def right_text(long: Bool, help: String, +attrs: List<&2, Item>) -> String:
+  join_filled([
+    shown_text(long, help),
+    tag("env", maybe_list(find_env(attrs))),
+    tag("default", maybe_list(find_default(attrs))),
+    tag("possible values", list_or_none(find_one_of(attrs))),
+    tag("aliases", find_aliases(attrs)),
+  ])
+
+def bold_names(names: List<&2, String>, first: Bool) -> List<&2, Segment>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail:
+      List.append(&2, Segment,
+        Bool.pick(List<&2, Segment>, first, [], [plain(", ")]),
+        Segment{String.trim_start(name), [Bold{}]} <> bold_names(tail, False{}))
+
+# Where an option's value or repeat starts: " <", "[=", or a final "...".
+def value_cut(s: String) -> Nat:
+  match s:
+    case SNil{}: 0n
+    case SCon{Chr{32}, SCon{Chr{60}, tail}}: 0n
+    case SCon{Chr{91}, SCon{Chr{61}, tail}}: 0n
+    case SCon{Chr{46}, SCon{Chr{46}, SCon{Chr{46}, SNil{}}}}: 0n
+    case SCon{head, tail}: 1n+value_cut(tail)
+
+# Option names bold; separators, value and repeat plain.
+def option_left(+usage: String) -> List<&2, Segment>:
+  +cut = value_cut(usage)
+  List.append(&2, Segment,
+    bold_names(String.split(String.take(usage, cut), ','), True{}),
+    [plain(String.drop(usage, cut))])
+
+def arg_row(parsed: Usage, usage: String, help: String,
+    attrs: List<&2, Item>, long: Bool) -> Row:
+  match parsed:
+    case Parsed{id, +short, name, kind}:
+      Row{option_left(usage), filled(short), String.is_empty(short),
+        right_text(long, help, attrs)}
+    case Invalid{col}:
+      Row{[plain(usage)], False{}, False{}, right_text(long, help, attrs)}
+
+def find_heading(attrs: List<&2, Item>) -> String:
+  match attrs:
+    case Nil{}: ""
+    case Heading{title} <> tail: title
+    case head <> tail: find_heading(tail)
+
+def option_row(shown: Bool, +usage: String, help: String,
+    attrs: List<&2, Item>, long: Bool) -> List<&2, Row>:
+  match shown:
+    case True{}: [arg_row(parse_usage(usage), usage, help, attrs, long)]
+    case False{}: []
+
+# The visible options under a heading, "" for Options.
+def option_rows(items: List<&2, Item>, +long: Bool, +heading: String) ->
+    List<&2, Row>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      List.append(&2, Row,
+        option_row(Bool.and(Bool.not(arg_pos(usage)),
+          Bool.and(Bool.not(has_hidden(attrs)),
+            String.eq(find_heading(attrs), heading))),
+          usage, help, attrs, long),
+        option_rows(tail, long, heading))
+    case head <> tail: option_rows(tail, long, heading)
+
+def positional_row(shown: Bool, usage: String, help: String,
+    attrs: List<&2, Item>, long: Bool) -> List<&2, Row>:
+  match shown:
+    case True{}:
+      [Row{[plain(usage)], False{}, False{}, right_text(long, help, attrs)}]
+    case False{}: []
+
+def positional_rows(items: List<&2, Item>, +long: Bool) -> List<&2, Row>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      List.append(&2, Row,
+        positional_row(Bool.and(arg_pos(usage), Bool.not(has_hidden(attrs))),
+          usage, help, attrs, long),
+        positional_rows(tail, long))
+    case head <> tail: positional_rows(tail, long)
+
+def command_row(hidden: Bool, name: String, about: String,
+    children: List<&2, Item>) -> List<&2, Row>:
+  match hidden:
+    case True{}: []
+    case False{}:
+      [Row{[Segment{name, [Bold{}]}], False{}, False{},
+        join_filled([summary(about), tag("aliases", find_aliases(children))])}]
+
+def command_rows(items: List<&2, Item>) -> List<&2, Row>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{name, about, +children} <> tail:
+      List.append(&2, Row,
+        command_row(has_hidden(children), name, about, children),
+        command_rows(tail))
+    case head <> tail: command_rows(tail)
+
+def help_sub_row(present: Bool) -> List<&2, Row>:
+  match present:
+    case True{}:
+      [Row{[Segment{"help", [Bold{}]}], False{}, False{},
+        "Print this message or the help of the given subcommand(s)"}]
+    case False{}: []
+
+# A built-in option row, without its short when an app arg took it.
+def builtin_row(taken: Bool, short: String, long: String,
+    text: String) -> Row:
+  match taken:
+    case True{}: Row{bold_names([long], True{}), False{}, True{}, text}
+    case False{}:
+      Row{bold_names([short, long], True{}), True{}, False{}, text}
+
+def help_text(differs: Bool, long: Bool) -> String:
+  match differs long:
+    case False{} _: "Print help"
+    case True{} False{}: "Print help (see more with '--help')"
+    case True{} True{}: "Print help (see a summary with '-h')"
+
+def version_row(present: Bool, args: List<&2, Item>) -> List<&2, Row>:
+  match present:
+    case True{}:
+      [builtin_row(Maybe.is_some(&2, OptFound, find_option(args, "-V")),
+        "-V", "--version", "Print version")]
+    case False{}: []
+
+# Headings of visible args, in order of first use.
+def heading_titles(items: List<&2, Item>, +seen: List<&2, String>) ->
+    List<&2, String>:
+  match items:
+    case Nil{}: seen
+    case Arg{usage, help, +attrs} <> tail:
+      +title = find_heading(attrs)
+      heading_titles(tail, Bool.pick(List<&2, String>,
+        Bool.or(String.is_empty(title), Bool.or(has_hidden(attrs),
+          List.contains(~String, ~String.eq, seen, title))),
+        seen, List.append(&2, String, seen, [title])))
+    case head <> tail: heading_titles(tail, seen)
+
+def heading_sections(titles: List<&2, String>, +args: List<&2, Item>,
+    +long: Bool) -> List<&2, Section>:
+  match titles:
+    case Nil{}: Nil{}
+    case +title <> tail:
+      Section{title, option_rows(args, long, title)} <>
+        heading_sections(tail, args, long)
+
+# Whether a visible arg's help has more than one paragraph.
+def args_paragraphs(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case Arg{usage, help, attrs} <> tail:
+      Bool.or(Bool.and(Bool.not(has_hidden(attrs)),
+        String.contains(help, "\n\n")), args_paragraphs(tail))
+    case head <> tail: args_paragraphs(tail)
+
+def indent_cell(indent: Bool, left: List<&2, Segment>) -> List<&2, Segment>:
+  match indent:
+    case True{}: plain("    ") <> left
+    case False{}: left
+
+# A left cell; long-only options indent 4 more on a page with a short.
+def row_cell(row: Row, shorted: Bool) -> List<&2, Segment>:
+  match row:
+    case Row{left, short, long_only, right}:
+      indent_cell(Bool.and(long_only, shorted), left)
+
+def cell_width(cell: List<&2, Segment>) -> Nat:
+  match cell:
+    case Nil{}: 0n
+    case Segment{text, styles} <> tail: Nat.add(width(text), cell_width(tail))
+
+def row_short(row: Row) -> Bool:
+  match row:
+    case Row{left, short, long_only, right}: short
+
+def any_short(rows: List<&2, Row>) -> Bool:
+  match rows:
+    case Nil{}: False{}
+    case row <> tail: Bool.or(row_short(row), any_short(tail))
+
+# L, the widest left cell w with 2 + w + 2 <= K.
+def widest(rows: List<&2, Row>, +shorted: Bool, +k: Nat, +best: Nat) -> Nat:
+  match rows:
+    case Nil{}: best
+    case row <> tail:
+      +w = cell_width(row_cell(row, shorted))
+      widest(tail, shorted, k,
+        Bool.pick(Nat, Nat.is_le((w + 4n : Nat), k), Nat.max(w, best), best))
+
+def pad_line(line: String, col: Nat) -> String:
+  match line:
+    case SNil{}: "\n"
+    case SCon{head, tail}:
+      String.concat(["\n", String.repeat(" ", col), SCon{head, tail}])
+
+def pad_lines(lines: List<&2, String>, +col: Nat) -> List<&2, Segment>:
+  match lines:
+    case Nil{}: Nil{}
+    case line <> tail: plain(pad_line(line, col)) <> pad_lines(tail, col)
+
+def first_then(lines: List<&2, String>, col: Nat) -> List<&2, Segment>:
+  match lines:
+    case Nil{}: Nil{}
+    case line <> tail: plain(line) <> pad_lines(tail, col)
+
+# A cell that fits takes its text after padding to C; one that does not
+# stands alone, its text on the next lines at max(C, 10).
+def row_form(fits: Bool, cell: List<&2, Segment>, lw: Nat, right: String,
+    w: Nat, +c: Nat) -> List<&2, Segment>:
+  match fits:
+    case True{}:
+      plain("  ") <> List.append(&2, Segment, cell,
+        plain(String.repeat(" ", (c - 2n - lw : Nat))) <>
+          first_then(String.lines(wrap(right, (w - c : Nat))), c))
+    case False{}:
+      +col = Nat.max(c, 10n)
+      plain("  ") <> List.append(&2, Segment, cell,
+        pad_lines(String.lines(wrap(right, (w - col : Nat))), col))
+
+def row_lines(row: Row, shorted: Bool, w: Nat, k: Nat, c: Nat) ->
+    List<&2, Segment>:
+  match row:
+    case Row{left, short, long_only, right}:
+      +cell = indent_cell(Bool.and(long_only, shorted), left)
+      +lw = cell_width(cell)
+      row_form(Nat.is_le((lw + 4n : Nat), k), cell, lw, right, w, c)
+
+def rows_lines(rows: List<&2, Row>, +shorted: Bool, +w: Nat, +k: Nat,
+    +c: Nat) -> List<&2, Segment>:
+  match rows:
+    case Nil{}: Nil{}
+    case row <> tail:
+      plain("\n") <> List.append(&2, Segment, row_lines(row, shorted, w, k, c),
+        rows_lines(tail, shorted, w, k, c))
+
+def section_rows(sections: List<&2, Section>) -> List<&2, Row>:
+  match sections:
+    case Nil{}: Nil{}
+    case Section{title, rows} <> tail:
+      List.append(&2, Row, rows, section_rows(tail))
+
+def section_blocks(sections: List<&2, Section>, +shorted: Bool, +w: Nat,
+    +k: Nat, +c: Nat) -> List<&2, List<&2, Segment>>:
+  match sections:
+    case Nil{}: Nil{}
+    case Section{title, Nil{}} <> tail: section_blocks(tail, shorted, w, k, c)
+    case Section{title, rows} <> tail:
+      (Segment{String.append(title, ":"), [Bold{}, Under{}]} <>
+        rows_lines(rows, shorted, w, k, c)) <>
+        section_blocks(tail, shorted, w, k, c)
+
+# One column for the page: C = L + 4, with K = 2W/5.
+def sections_blocks(+sections: List<&2, Section>, +w: Nat) ->
+    List<&2, List<&2, Segment>>:
+  +rows = section_rows(sections)
+  +shorted = any_short(rows)
+  +k = Nat.div((2n * w : Nat), 5n)
+  section_blocks(sections, shorted, w, k,
+    (widest(rows, shorted, k, 0n) + 4n : Nat))
+
+def text_block(text: String, w: Nat) -> List<&2, List<&2, Segment>>:
+  match text:
+    case SNil{}: Nil{}
+    case SCon{head, tail}: [[plain(wrap(SCon{head, tail}, w))]]
+
+def example_lines(items: List<&2, Item>) -> List<&2, Segment>:
+  match items:
+    case Nil{}: Nil{}
+    case Example{line, what} <> tail:
+      plain(String.concat(["\n  ", what, ":\n    $ ", line])) <>
+        example_lines(tail)
+    case head <> tail: example_lines(tail)
+
+def examples_block(lines: List<&2, Segment>) -> List<&2, List<&2, Segment>>:
+  match lines:
+    case Nil{}: Nil{}
+    case head <> tail: [Segment{"Examples:", [Bold{}, Under{}]} <> head <> tail]
+
+def after_texts(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case After{text} <> tail: text <> after_texts(tail)
+    case head <> tail: after_texts(tail)
+
+def more_blocks(blocks: List<&2, List<&2, Segment>>) -> List<&2, Segment>:
+  match blocks:
+    case Nil{}: [plain("\n")]
+    case block <> tail:
+      plain("\n\n") <> List.append(&2, Segment, block, more_blocks(tail))
+
+# Blocks apart by one blank line; the page ends with a newline.
+def join_blocks(blocks: List<&2, List<&2, Segment>>) -> List<&2, Segment>:
+  match blocks:
+    case Nil{}: Nil{}
+    case block <> tail: List.append(&2, Segment, block, more_blocks(tail))
+
+def help_page(view: View, +long: Bool, +w: Nat) -> List<&2, Segment>:
+  match view:
+    case View{path, +about, +items, +globals, root, stuck}:
+      +args = List.append(&2, Item, items, globals)
+      join_blocks(List.concat(&2, List<&2, Segment>, [
+        text_block(shown_text(long, about), w),
+        [usage_block(usage_elems(path, items, globals), w)],
+        sections_blocks(List.append(&2, Section, [
+          Section{"Commands", List.append(&2, Row, command_rows(items),
+            help_sub_row(has_sub_item(items)))},
+          Section{"Arguments", positional_rows(items, long)},
+          Section{"Options", List.concat(&2, Row, [
+            option_rows(args, long, ""),
+            [builtin_row(Maybe.is_some(&2, OptFound, find_option(args, "-h")),
+              "-h", "--help", help_text(Bool.or(String.contains(about, "\n\n"),
+                args_paragraphs(args)), long))],
+            version_row(Bool.and(root, has_version_item(items)), args),
+          ])},
+        ], heading_sections(heading_titles(args, []), args, long)), w),
+        examples_block(example_lines(items)),
+        text_block(String.join(after_texts(items), "\n\n"), w),
+      ]))
+
+def help_out(t: Term, view: View, long: Bool) -> String:
+  match t:
+    case Term{out_color, err_color, width}:
+      emit(out_color, help_page(view, long, page_width(width)))
+
+# The help page for the longest valid prefix of path, in stdout's colors.
+def help(+c: Cmd, path: List<&2, String>, long: Bool, h: Host) -> String:
+  help_out(term(c, h, []), view_of(c, path), long)
+
+# ---- Suggestions (§10.4) ----
+
+type Scored is Data:
+  Scored{dist: Nat, name: String}
+
+def row_zero(b: String, +k: Nat) -> List<&2, Nat>:
+  match b:
+    case SNil{}: [k]
+    case SCon{head, tail}: k <> row_zero(tail, (k + 1n : Nat))
+
+def head_nat(xs: List<&2, Nat>) -> Nat:
+  match xs:
+    case Nil{}: 0n
+    case head <> tail: head
+
+def tail_nats(xs: List<&2, Nat>) -> List<&2, Nat>:
+  match xs:
+    case Nil{}: Nil{}
+    case head <> tail: tail
+
+def same_char(found: Maybe<&2, Char>, c: Char) -> Bool:
+  match found:
+    case None{}: False{}
+    case Some{d}: Char.is_eq(d, c)
+
+# Row i of optimal string alignment for a[i]: up starts at d[i-1][j-1], up2
+# at d[i-2][j-2], and left is d[i][j-1].
+def osa_row(bs: String, bp: Maybe<&2, Char>, +a: Char,
+    +ap: Maybe<&2, Char>, +up: List<&2, Nat>, +up2: List<&2, Nat>,
+    left: Nat) -> List<&2, Nat>:
+  match bs:
+    case SNil{}: Nil{}
+    case SCon{+b, tail}:
+      +diag = head_nat(up)
+      +rest = tail_nats(up)
+      +edit = Nat.min(Nat.min((head_nat(rest) + 1n : Nat), (left + 1n : Nat)),
+        Bool.pick(Nat, Char.is_eq(a, b), diag, (diag + 1n : Nat)))
+      +best = Bool.pick(Nat, Bool.and(same_char(bp, a), same_char(ap, b)),
+        Nat.min(edit, (head_nat(up2) + 1n : Nat)), edit)
+      best <> osa_row(tail, Some{b}, a, ap, rest, tail_nats(up2), best)
+
+def osa_rows(s: String, ap: Maybe<&2, Char>, +i: Nat, +b: String,
+    +prev: List<&2, Nat>, prev2: List<&2, Nat>) -> List<&2, Nat>:
+  match s:
+    case SNil{}: prev
+    case SCon{+a, tail}:
+      osa_rows(tail, Some{a}, (i + 1n : Nat), b,
+        i <> osa_row(b, None{}, a, ap, prev, 0n <> prev2, i), prev)
+
+def last_nat(xs: List<&2, Nat>, last: Nat) -> Nat:
+  match xs:
+    case Nil{}: last
+    case head <> tail: last_nat(tail, head)
+
+def osa(a: String, +b: String) -> Nat:
+  +first = row_zero(b, 0n)
+  last_nat(osa_rows(a, None{}, 1n, b, first, first), 0n)
+
+def undashed(s: String) -> String:
+  match s:
+    case SCon{Chr{45}, tail}: undashed(tail)
+    case _: s
+
+def scored(names: List<&2, String>, +typed: String, +limit: Nat) ->
+    List<&2, Scored>:
+  match names:
+    case Nil{}: Nil{}
+    case +name <> tail:
+      +dist = osa(typed, String.take(name, 64n))
+      +rest = scored(tail, typed, limit)
+      Bool.pick(List<&2, Scored>, Nat.is_le(dist, limit),
+        Scored{dist, name} <> rest, rest)
+
+def at_distance(found: List<&2, Scored>, +d: Nat) -> List<&2, String>:
+  match found:
+    case Nil{}: Nil{}
+    case Scored{dist, name} <> tail:
+      +rest = at_distance(tail, d)
+      Bool.pick(List<&2, String>, Nat.is_eq(dist, d), name <> rest, rest)
+
+def by_distance(levels: Nat, +d: Nat, +found: List<&2, Scored>) ->
+    List<&2, String>:
+  match levels:
+    case 0n: Nil{}
+    case 1n+more:
+      List.append(&2, String, at_distance(found, d),
+        by_distance(more, (d + 1n : Nat), found))
+
+# At most 3 names within max(1, n / 3) edits, by distance, then order.
+# key is bound because a temporary argument makes String.length take its
+# string, adding a keep to each caller that reuses one (nat_fits, arg_display).
+def suggest(+typed: String, names: List<&2, String>) -> List<&2, String>:
+  key = undashed(typed)
+  +limit = Nat.max(1n, Nat.div(String.length(key), 3n))
+  List.take(&2, String, by_distance((limit + 1n : Nat), 0n,
+    scored(names, String.take(typed, 64n), limit)), 3n)
+
+# ---- Errors (§10.4) ----
+
+def quoted(text: String, styles: List<&2, Style>) -> List<&2, Segment>:
+  [plain("'"), Segment{text, styles}, plain("'")]
+
+def missing_lines(missing: List<&2, String>) -> String:
+  match missing:
+    case Nil{}: ""
+    case head <> tail: String.concat(["\n  ", head, missing_lines(tail)])
+
+def visible_subs(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: ["help"]
+    case Sub{name, about, children} <> tail:
+      +rest = visible_subs(tail)
+      Bool.pick(List<&2, String>, has_hidden(children), rest, name <> rest)
+    case head <> tail: visible_subs(tail)
+
+def fault_message(fault: ScanFault, path: String,
+    items: List<&2, Item>) -> List<&2, Segment>:
+  match fault:
+    case E01{token}:
+      List.concat(&2, Segment, [[plain("unexpected argument ")],
+        quoted(token, [Yellow{}]), [plain(" found")]])
+    case E02{name}:
+      plain("unrecognized subcommand ") <> quoted(name, [Yellow{}])
+    case E03{arg}:
+      [plain(String.concat(["a value is required for '", arg,
+        "' but none was supplied"]))]
+    case E04{arg, value, reason}:
+      List.concat(&2, Segment, [[plain("invalid value ")],
+        quoted(value, [Yellow{}]),
+        [plain(String.concat([" for '", arg, "': ", reason]))]])
+    case E05{arg, value}:
+      List.concat(&2, Segment, [[plain("unexpected value ")],
+        quoted(value, [Yellow{}]),
+        [plain(String.concat([" for '", arg,
+          "' found; no more were expected"]))]])
+    case E06{missing}:
+      [plain(String.append(
+        "the following required arguments were not provided:",
+        missing_lines(missing)))]
+    case E07{a, b}:
+      [plain(String.concat(["the argument '", a, "' cannot be used with '", b,
+        "'"]))]
+    case E08{a, b}:
+      [plain(String.concat(["the argument '", a, "' requires '", b, "'"]))]
+    case E09{token}:
+      List.concat(&2, Segment, [[plain("unexpected argument ")],
+        quoted(token, [Yellow{}]), [plain(" found")]])
+    case E10{}:
+      [plain(String.concat(["'", path,
+        "' requires a subcommand but none was provided\n  [subcommands: ",
+        String.join(visible_subs(items), ", "), "]"]))]
+    case E11{arg, value, name, reason}:
+      List.concat(&2, Segment, [[plain("invalid value ")],
+        quoted(value, [Yellow{}]),
+        [plain(String.concat([" for '", arg, "' from environment variable ",
+          name, ": ", reason]))]])
+
+def green_names(names: List<&2, String>, first: Bool) -> List<&2, Segment>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail:
+      List.concat(&2, Segment, [
+        Bool.pick(List<&2, Segment>, first, [], [plain(", ")]),
+        quoted(name, [Green{}]), green_names(tail, False{})])
+
+def tip(text: String) -> List<&2, List<&2, Segment>>:
+  [[plain(text)]]
+
+# T4: one suggestion or several.
+def similar(kind: String, found: List<&2, String>) ->
+    List<&2, List<&2, Segment>>:
+  match found:
+    case Nil{}: Nil{}
+    case name <> Nil{}:
+      [plain(String.concat(["a similar ", kind, " exists: "])) <>
+        quoted(name, [Green{}])]
+    case name <> more:
+      [plain(String.concat(["some similar ", kind, "s exist: "])) <>
+        green_names(name <> more, True{})]
+
+def long_name(s: String) -> Bool:
+  String.starts_with(s, "--")
+
+def option_names(parsed: Usage, attrs: List<&2, Item>) -> List<&2, String>:
+  match parsed:
+    case Parsed{id, short, +long, kind}:
+      List.concat(&2, String, [
+        Bool.pick(List<&2, String>, String.is_empty(long), [], [long]),
+        Bool.pick(List<&2, String>,
+          Bool.and(kind_negatable(kind), filled(long)),
+          [negated_long(long)], []),
+        List.filter(~String, ~long_name, find_aliases(attrs)),
+      ])
+    case Invalid{col}: []
+
+def visible_names(hidden: Bool, usage: String, attrs: List<&2, Item>) ->
+    List<&2, String>:
+  match hidden:
+    case True{}: []
+    case False{}: option_names(parse_usage(usage), attrs)
+
+# T4 for E01: visible longs, their no- forms and long aliases.
+def long_candidates(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, +attrs} <> tail:
+      List.append(&2, String, visible_names(has_hidden(attrs), usage, attrs),
+        long_candidates(tail))
+    case head <> tail: long_candidates(tail)
+
+# T4 for E02: visible subcommand names and aliases, then help.
+def sub_candidates(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: ["help"]
+    case Sub{name, about, +children} <> tail:
+      List.append(&2, String,
+        Bool.pick(List<&2, String>, has_hidden(children), [],
+          name <> find_aliases(children)),
+        sub_candidates(tail))
+    case head <> tail: sub_candidates(tail)
+
+# T4 for E04: the one_of values of the arg E04 names.
+def display_choices(items: List<&2, Item>, +arg: String,
+    found: List<&2, String>) -> List<&2, String>:
+  match items found:
+    case _ head <> tail: head <> tail
+    case Nil{} Nil{}: Nil{}
+    case Arg{usage, help, +attrs} <> tail Nil{}:
+      display_choices(tail, arg, Bool.pick(List<&2, String>,
+        String.eq(arg_display(arg_info(usage, attrs)), arg),
+        list_or_none(find_one_of(attrs)), []))
+    case head <> tail Nil{}: display_choices(tail, arg, [])
+
+def owned(found: Maybe<&2, OptFound>, text: String) -> Maybe<&2, String>:
+  match found:
+    case None{}: None{}
+    case Some{option}: Some{text}
+
+def owned_by(hit: Maybe<&2, OptFound>, token: String, prefix: String,
+    step: String, found: Maybe<&2, String>) -> Maybe<&2, String>:
+  match hit:
+    case None{}: found
+    case Some{option}:
+      Some{String.concat(["'", token, "' belongs to '", prefix,
+        "'; place it before '", step, "'"])}
+
+# T1: the deepest ancestor whose args take the long, and its child on path.
+def owner(path: List<&2, String>, +items: List<&2, Item>, +prefix: String,
+    +token: String, +long: String, found: Maybe<&2, String>) ->
+    Maybe<&2, String>:
+  match path:
+    case Nil{}: found
+    case +step <> tail:
+      owner(tail, sub_items(find_sub(items, step)),
+        String.concat([prefix, " ", step]), token, long,
+        owned_by(find_option(items, long), token, prefix, step, found))
+
+# T2: the first subcommand in pre-order whose args take the long.
+def descendant(items: List<&2, Item>, +prefix: String, +long: String,
+    found: Maybe<&2, String>) -> Maybe<&2, String>:
+  match items found:
+    case _ Some{path}: Some{path}
+    case Nil{} None{}: None{}
+    case Sub{name, about, +children} <> tail None{}:
+      +path = String.concat([prefix, " ", name])
+      descendant(tail, prefix, long, descendant(children, path, long,
+        owned(find_option(children, long), path)))
+    case head <> tail None{}: descendant(tail, prefix, long, None{})
+
+def maybe_tip(found: Maybe<&2, String>) -> List<&2, List<&2, Segment>>:
+  match found:
+    case None{}: Nil{}
+    case Some{text}: tip(text)
+
+def belongs(found: Maybe<&2, String>, token: String) ->
+    List<&2, List<&2, Segment>>:
+  match found:
+    case None{}: Nil{}
+    case Some{path}:
+      tip(String.concat(["'", token, "' belongs to subcommand '", path, "'"]))
+
+def sub_exists(found: Maybe<&2, SubFound>, name: String) ->
+    List<&2, List<&2, Segment>>:
+  match found:
+    case None{}: Nil{}
+    case Some{sub}:
+      tip(String.concat(["subcommand '", name,
+        "' exists; to use it, remove the '--'"]))
+
+def before_eq(s: String) -> String:
+  match s:
+    case SNil{}: SNil{}
+    case SCon{Chr{61}, tail}: SNil{}
+    case SCon{head, tail}: SCon{head, before_eq(tail)}
+
+# T1, T2 and T3, for E01 on a long; --name=value looks up --name.
+def long_tips(is_long: Bool, +token: String, root: String,
+    path: List<&2, String>, +items: List<&2, Item>,
+    root_items: List<&2, Item>, here: String) ->
+    List<&2, List<&2, Segment>>:
+  match is_long:
+    case False{}: Nil{}
+    case True{}:
+      +long = before_eq(token)
+      +name = String.drop(long, 2n)
+      List.concat(&2, List<&2, Segment>, [
+        maybe_tip(owner(path, root_items, root, token, long, None{})),
+        belongs(descendant(items, here, long, None{}), token),
+        sub_exists(find_sub(items, name), name),
+      ])
+
+def operand_count(events: List<&2, ScanEvent>, count: Nat) -> Nat:
+  match events:
+    case Nil{}: count
+    case Enter{name} <> tail: operand_count(tail, 0n)
+    case Operand{token} <> tail: operand_count(tail, (count + 1n : Nat))
+    case event <> tail: operand_count(tail, count)
+
+def trace_operands(trace: ScanTrace) -> Nat:
+  match trace:
+    case ScanTrace{path, events, ended, external, issue}:
+      operand_count(events, 0n)
+
+def dash_slot(open: Bool, +token: String) -> List<&2, List<&2, Segment>>:
+  match open:
+    case False{}: Nil{}
+    case True{}:
+      tip(String.concat(["to pass '", token, "' as a value, use '-- ", token,
+        "'"]))
+
+# T5: a hyphen token that the next positional slot could take after `--`;
+# only then is argv scanned again to count the operands in scope.
+def dash_tip(hyphen: Bool, token: String, items: List<&2, Item>, c: Cmd,
+    argv: List<&2, String>) -> List<&2, List<&2, Segment>>:
+  match hyphen:
+    case False{}: Nil{}
+    case True{}:
+      dash_slot(positional_can_take(items, trace_operands(scan(c, argv))),
+        token)
+
+def cmd_items(c: Cmd) -> List<&2, Item>:
+  match c:
+    case Cmd{name, about, items}: items
+
+# Every tip that applies, in table order.
+def fault_tips(fault: ScanFault, +c: Cmd, +path: List<&2, String>,
+    argv: List<&2, String>, here: String, +items: List<&2, Item>,
+    globals: List<&2, Item>) -> List<&2, List<&2, Segment>>:
+  match fault:
+    case E01{+token}:
+      List.concat(&2, List<&2, Segment>, [
+        long_tips(long_name(token), token, cmd_name(c), path, items,
+          cmd_items(c), here),
+        similar("argument", suggest(token, List.concat(&2, String, [
+          long_candidates(List.append(&2, Item, items, globals)),
+          ["--help"],
+          Bool.pick(List<&2, String>, Bool.and(List.is_empty(&2, String, path),
+            has_version_item(items)), ["--version"], []),
+        ]))),
+        dash_tip(String.starts_with(token, "-"), token, items, c, argv),
+      ])
+    case E02{+name}: similar("subcommand", suggest(name, sub_candidates(items)))
+    case E04{+arg, +value, reason}:
+      similar("value", suggest(value,
+        display_choices(List.append(&2, Item, items, globals), arg, [])))
+    case E09{+token}:
+      dash_tip(String.starts_with(token, "-"), token, items, c, argv)
+    case _: Nil{}
+
+def tip_spans(tips: List<&2, List<&2, Segment>>) -> List<&2, Segment>:
+  match tips:
+    case Nil{}: Nil{}
+    case line <> tail:
+      List.concat(&2, Segment, [
+        [plain("  "), Segment{"tip:", [Bold{}, Green{}]}, plain(" ")],
+        line, [plain("\n")], tip_spans(tail)])
+
+def tip_block(tips: List<&2, List<&2, Segment>>) -> List<&2, Segment>:
+  match tips:
+    case Nil{}: Nil{}
+    case head <> tail: plain("\n") <> tip_spans(head <> tail)
+
+def error_page(message: List<&2, Segment>,
+    tips: List<&2, List<&2, Segment>>, usage: List<&2, Segment>) ->
+    List<&2, Segment>:
+  List.concat(&2, Segment, [
+    [Segment{"error:", [Bold{}, Red{}]}, plain(" ")], message, [plain("\n")],
+    tip_block(tips), [plain("\n")], usage,
+    [plain("\n\nFor more information, try '"), Segment{"--help", [Bold{}]},
+      plain("'.\n")],
+  ])
+
+def fault_view(view: View, +fault: ScanFault, c: Cmd, path: List<&2, String>,
+    argv: List<&2, String>, w: Nat) -> List<&2, Segment>:
+  match view:
+    case View{+here, about, +items, +globals, root, stuck}:
+      error_page(fault_message(fault, here, items),
+        fault_tips(fault, c, path, argv, here, items, globals),
+        usage_block(usage_elems(here, items, globals), w))
+
+# An error at the scope where scanning stopped, in stderr's colors.
+def fault_err(t: Term, fault: ScanFault, +c: Cmd, +path: List<&2, String>,
+    argv: List<&2, String>) -> String:
+  match t:
+    case Term{out_color, err_color, width}:
+      emit(err_color, fault_view(view_of(c, path), fault, c, path, argv,
+        page_width(width)))
+
+def summary_err(t: Term, view: View) -> String:
+  match t:
+    case Term{out_color, err_color, width}:
+      emit(err_color, help_page(view, False{}, page_width(width)))
+
+# ---- Lint lines (§9) ----
+
+def problem_line(p: Problem) -> String:
+  match p:
+    case BadUsage{at, usage, col}:
+      String.concat(["  ", at, ": usage '", usage, "' is invalid at column ",
+        Nat.show((col + 1n : Nat))])
+    case BadName{at, name}:
+      String.concat(["  ", at, ": '", name, "' is not a valid name"])
+    case Dup{at, name}:
+      String.concat(["  ", at, ": '", name, "' is declared more than once"])
+    case Reserved{at, name}:
+      String.concat(["  ", at, ": '", name, "' is reserved"])
+    case Misplaced{at, attr}:
+      String.concat(["  ", at, ": '", attr, "' is not allowed here"])
+    case NoHelp{at, what}:
+      String.concat(["  ", at, ": '", what, "' has no help text"])
+    case BadDefault{at, id, value}:
+      String.concat(["  ", at, ": '", id, "' cannot have the default '", value,
+        "'"])
+    case BadRef{at, id}:
+      String.concat(["  ", at, ": '", id,
+        "' is an unknown id or an unused or empty group"])
+    case BadPositional{at, id, why}:
+      String.concat(["  ", at, ": positional '", id, "': ", why])
+    case Mixed{at}:
+      String.concat(["  ", at, ": has both positionals and subcommands"])
+    case BadChoices{at, id}:
+      String.concat(["  ", at, ": one_of for '", id,
+        "' is empty or repeats a value"])
+    case NeedBare{at, id}:
+      String.concat(["  ", at, ": '", id,
+        "' needs [=<V>] and bare() together, with no short"])
+    case DecodeBug{at, msg}:
+      String.concat(["  ", at, ": decoder bug: ", msg])
+
+def problem_lines(found: List<&2, Problem>) -> String:
+  match found:
+    case Nil{}: ""
+    case p <> tail: String.concat([problem_line(p), "\n", problem_lines(tail)])
+
+# ---- Outcome (§8.7, V1-V5) ----
+
+type Outcome is Data:
+  Shown{code: U32, out: String, err: String}
+  Matched{m: Matches}
+
+def find_version(items: List<&2, Item>) -> String:
+  match items:
+    case Nil{}: ""
+    case Version{value} <> tail: value
+    case head <> tail: find_version(tail)
+
+def outcome_parse(result: ParseResult, +c: Cmd, h: Host,
+    +argv: List<&2, String>) -> Outcome:
+  match result:
+    case Accepted{path, fields, external}:
+      Matched{Matches{c, path, fields, external}}
+    case HelpRequested{path, long}:
+      Shown{0, help_out(term(c, h, argv), view_of(c, path), long), ""}
+    case VersionRequested{}:
+      Shown{0, String.concat([cmd_name(c), " ", find_version(cmd_items(c)),
+        "\n"]), ""}
+    case SummaryRequired{}:
+      Shown{2, "", summary_err(term(c, h, argv), view_of(c, []))}
+    case Rejected{path, fault}:
+      Shown{2, "", fault_err(term(c, h, argv), fault, c, path, argv)}
+
+def outcome_lint(found: List<&2, Problem>, +c: Cmd, +h: Host,
+    +argv: List<&2, String>) -> Outcome:
+  match found:
+    case Nil{}: outcome_parse(parse(c, h, argv), c, h, argv)
+    case p <> tail:
+      Shown{70, "", String.append("bug: invalid command-line definition\n",
+        problem_lines(p <> tail))}
+
+# eval through V5: a lint failure, help, version, the V3 summary or an
+# error is Shown; Matched is a parse left to decode.
+def outcome(+c: Cmd, h: Host, argv: List<&2, String>) -> Outcome:
+  outcome_lint(problems(c), c, h, argv)
