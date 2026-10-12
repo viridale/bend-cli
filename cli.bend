@@ -708,6 +708,7 @@ type Item is Data:
   Conflicts{id: String}
   Requires{id: String}
   Group{name: String}
+  Builtin{}
 
 type Cmd is Data:
   Cmd{name: String, about: String, items: List<&2, Item>}
@@ -826,11 +827,12 @@ def group(name: String) -> Item:
 def color() -> Item:
   arg("--color <WHEN>", "When to use color", [one_of(["auto", "always", "never"]), default("auto"), global()])
 
+# Builtin{} marks the subcommands that only eval acts on (§6.4).
 def completions() -> Item:
-  sub("completions", "Print a shell completion script", [arg("<SHELL>", "Shell to generate for", [one_of(["bash", "zsh", "fish"])])])
+  sub("completions", "Print a shell completion script", [Builtin{}, arg("<SHELL>", "Shell to generate for", [one_of(["bash", "zsh", "fish"])])])
 
 def man() -> Item:
-  sub("man", "Print the man page", [hidden(), arg("[COMMAND]...", "Subcommand path", [])])
+  sub("man", "Print the man page", [Builtin{}, hidden(), arg("[COMMAND]...", "Subcommand path", [])])
 
 type UsageKind is Data:
   FlagKind{}
@@ -1167,6 +1169,7 @@ def command_attr_name(attr: Item, root: Bool) -> Maybe<&2, String>:
     case Conflicts{id}: Some{"conflicts"}
     case Requires{id}: Some{"requires"}
     case Group{name}: Some{"group"}
+    case Builtin{}: None{}
 
 def has_rest(items: List<&2, Item>) -> Bool:
   match items:
@@ -1179,6 +1182,12 @@ def has_hidden(items: List<&2, Item>) -> Bool:
     case Nil{}: False{}
     case Hidden{} <> tail: True{}
     case head <> tail: has_hidden(tail)
+
+def has_builtin(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case Builtin{} <> tail: True{}
+    case head <> tail: has_builtin(tail)
 
 def has_bare(items: List<&2, Item>) -> Bool:
   match items:
@@ -1212,6 +1221,26 @@ def find_default(items: List<&2, Item>) -> Maybe<&2, String>:
     case Nil{}: None{}
     case AttrDefault{value} <> tail: Some{value}
     case head <> tail: find_default(tail)
+
+def find_delim(attrs: List<&2, Item>) -> Maybe<&2, Char>:
+  match attrs:
+    case Nil{}: None{}
+    case Delim{sep} <> tail: Some{sep}
+    case head <> tail: find_delim(tail)
+
+def split_each(values: List<&2, String>, +sep: Char) ->
+    List<&2, String>:
+  match values:
+    case Nil{}: Nil{}
+    case head <> tail:
+      List.append(&2, String, String.split(head, sep),
+        split_each(tail, sep))
+
+def apply_delim(found: Maybe<&2, Char>,
+    values: List<&2, String>) -> List<&2, String>:
+  match found:
+    case None{}: values
+    case Some{sep}: split_each(values, sep)
 
 def find_id(items: List<&2, Item>) -> Maybe<&2, String>:
   match items:
@@ -1566,36 +1595,108 @@ def find_one_of(items: List<&2, Item>) -> Maybe<&2, List<&2, String>>:
     case OneOf{values} <> tail: Some{values}
     case head <> tail: find_one_of(tail)
 
-def choice_accept(found: Maybe<&2, List<&2, String>>,
-    value: String) -> Bool:
-  match found:
-    case None{}: True{}
-    case Some{values}:
-      List.contains(~String, ~String.eq, values, value)
+# The first element of a value that fails to convert, and why.
+type Bad is Data:
+  Bad{value: String, reason: String}
 
-def type_accepts(t: ValueType, +value: String) -> Bool:
-  match t:
-    case TNat{}: valid_nat(value)
-    case TU32{}: valid_u32(value)
-    case TF32{}: valid_f32(value)
-    case TBool{}: valid_bool(value)
-    case _: True{}
-
-def types_accept(attrs: List<&2, Item>, +value: String) -> Bool:
+def find_as(attrs: List<&2, Item>) -> Maybe<&2, ValueType>:
   match attrs:
-    case Nil{}: True{}
-    case As{t} <> tail:
-      Bool.and(type_accepts(t, value), types_accept(tail, value))
-    case head <> tail: types_accept(tail, value)
+    case Nil{}: None{}
+    case As{kind} <> tail: Some{kind}
+    case head <> tail: find_as(tail)
 
-def default_valid(kind: UsageKind, +attrs: List<&2, Item>,
-    +value: String) -> Bool:
+def type_reason(kind: ValueType, value: String) -> Maybe<&2, String>:
   match kind:
-    case NegatableKind{}:
-      valid_bool(value)
-    case _:
-      Bool.and(types_accept(attrs, value),
-        choice_accept(find_one_of(attrs), value))
+    case TNat{}:
+      Bool.pick(Maybe<&2, String>, valid_nat(value), None{},
+        Some{"expected a whole number from 0 to 281474976710655"})
+    case TU32{}:
+      Bool.pick(Maybe<&2, String>, valid_u32(value), None{},
+        Some{"expected a whole number from 0 to 4294967295"})
+    case TF32{}:
+      Bool.pick(Maybe<&2, String>, valid_f32(value), None{},
+        Some{"expected a decimal number"})
+    case TBool{}:
+      Bool.pick(Maybe<&2, String>, valid_bool(value), None{},
+        Some{"expected true or false"})
+    case TFile{}: None{}
+    case TDir{}: None{}
+
+def quoted_choices(values: List<&2, String>) -> List<&2, String>:
+  match values:
+    case Nil{}: Nil{}
+    case head <> tail:
+      String.concat(["'", head, "'"]) <> quoted_choices(tail)
+
+def choices_reason(values: List<&2, String>) -> String:
+  String.append("expected one of ",
+    String.join(quoted_choices(values), ", "))
+
+def choice_reason(found: Maybe<&2, List<&2, String>>,
+    value: String) -> Maybe<&2, String>:
+  match found:
+    case None{}: None{}
+    case Some{+values}:
+      Bool.pick(Maybe<&2, String>,
+        List.contains(~String, ~String.eq, values, value),
+        None{}, Some{choices_reason(values)})
+
+def reason_from_type(found: Maybe<&2, ValueType>,
+    value: String) -> Maybe<&2, String>:
+  match found:
+    case None{}: None{}
+    case Some{kind}: type_reason(kind, value)
+
+def first_reason(found: Maybe<&2, String>,
+    other: Maybe<&2, String>) -> Maybe<&2, String>:
+  match found:
+    case None{}: other
+    case Some{reason}: Some{reason}
+
+def value_reason(+attrs: List<&2, Item>, +value: String) ->
+    Maybe<&2, String>:
+  first_reason(reason_from_type(find_as(attrs), value),
+    choice_reason(find_one_of(attrs), value))
+
+def bad_value(reason: Maybe<&2, String>, value: String) ->
+    Maybe<&2, Bad>:
+  match reason:
+    case None{}: None{}
+    case Some{why}: Some{Bad{value, why}}
+
+def first_bad(values: List<&2, String>, +attrs: List<&2, Item>) ->
+    Maybe<&2, Bad>:
+  match values:
+    case Nil{}: None{}
+    case +head <> tail:
+      Maybe.or(&2, Bad, bad_value(value_reason(attrs, head), head),
+        first_bad(tail, attrs))
+
+def split_bad(found: Maybe<&2, Char>, attrs: List<&2, Item>,
+    +value: String) -> Maybe<&2, Bad>:
+  match found:
+    case None{}: bad_value(value_reason(attrs, value), value)
+    case Some{sep}: first_bad(String.split(value, sep), attrs)
+
+# A delimited value splits first; the first element that fails (§8.2).
+def value_bad(+attrs: List<&2, Item>, value: String) -> Maybe<&2, Bad>:
+  split_bad(find_delim(attrs), attrs, value)
+
+# A value from env or a default converts each element on its own (§8.2).
+def value_issue(kind: UsageKind, attrs: List<&2, Item>,
+    +value: String) -> Maybe<&2, Bad>:
+  match kind:
+    case FlagKind{}: bad_value(type_reason(TBool{}, value), value)
+    case NegatableKind{}: bad_value(type_reason(TBool{}, value), value)
+    case CountKind{}: bad_value(type_reason(TNat{}, value), value)
+    case _: value_bad(attrs, value)
+
+def bad_default(required: Bool, issue: Maybe<&2, Bad>, value: String,
+    id: String, at: String) -> List<&2, Problem>:
+  match required issue:
+    case True{} _: [BadDefault{at, id, value}]
+    case False{} Some{Bad{bad, why}}: [BadDefault{at, id, bad}]
+    case False{} None{}: Nil{}
 
 def check_default(found: Maybe<&2, String>, kind: UsageKind,
     +attrs: List<&2, Item>, id: String, at: String) -> List<&2, Problem>:
@@ -1603,9 +1704,8 @@ def check_default(found: Maybe<&2, String>, kind: UsageKind,
     case None{}:
       Nil{}
     case Some{+value}:
-      when_problem(Bool.or(has_required(attrs),
-        Bool.not(default_valid(kind, attrs, value))),
-        BadDefault{at, id, value})
+      bad_default(has_required(attrs), value_issue(kind, attrs, value),
+        value, id, at)
 
 def positional_issue(+kind: UsageKind, +id: String,
     attrs: List<&2, Item>, rest_items: List<&2, Item>,
@@ -2146,80 +2246,24 @@ def scan_external(state: ScanState, name: String,
       ScanState{scope, events, resting, positional_count,
         Some{ExternalArgs{name, args}}, issue}
 
-def find_as(attrs: List<&2, Item>) -> Maybe<&2, ValueType>:
-  match attrs:
-    case Nil{}: None{}
-    case As{kind} <> tail: Some{kind}
-    case head <> tail: find_as(tail)
-
-def type_reason(kind: ValueType, value: String) -> Maybe<&2, String>:
-  match kind:
-    case TNat{}:
-      Bool.pick(Maybe<&2, String>, valid_nat(value), None{},
-        Some{"expected a whole number from 0 to 281474976710655"})
-    case TU32{}:
-      Bool.pick(Maybe<&2, String>, valid_u32(value), None{},
-        Some{"expected a whole number from 0 to 4294967295"})
-    case TF32{}:
-      Bool.pick(Maybe<&2, String>, valid_f32(value), None{},
-        Some{"expected a decimal number"})
-    case TBool{}:
-      Bool.pick(Maybe<&2, String>, valid_bool(value), None{},
-        Some{"expected true or false"})
-    case TFile{}: None{}
-    case TDir{}: None{}
-
-def quoted_choices(values: List<&2, String>) -> List<&2, String>:
-  match values:
-    case Nil{}: Nil{}
-    case head <> tail:
-      String.concat(["'", head, "'"]) <> quoted_choices(tail)
-
-def choices_reason(values: List<&2, String>) -> String:
-  String.append("expected one of ",
-    String.join(quoted_choices(values), ", "))
-
-def choice_reason(found: Maybe<&2, List<&2, String>>,
-    value: String) -> Maybe<&2, String>:
-  match found:
-    case None{}: None{}
-    case Some{+values}:
-      Bool.pick(Maybe<&2, String>,
-        List.contains(~String, ~String.eq, values, value),
-        None{}, Some{choices_reason(values)})
-
-def reason_from_type(found: Maybe<&2, ValueType>,
-    value: String) -> Maybe<&2, String>:
-  match found:
-    case None{}: None{}
-    case Some{kind}: type_reason(kind, value)
-
-def first_reason(found: Maybe<&2, String>,
-    other: Maybe<&2, String>) -> Maybe<&2, String>:
-  match found:
-    case None{}: other
-    case Some{reason}: Some{reason}
-
-def arg_reason(info: ArgInfo, +value: String) ->
-    Maybe<&2, String>:
+def info_attrs(info: ArgInfo) -> List<&2, Item>:
   match info:
-    case ArgInfo{id, usage, short, long, kind, +attrs}:
-      first_reason(reason_from_type(find_as(attrs), value),
-        choice_reason(find_one_of(attrs), value))
+    case ArgInfo{id, usage, short, long, kind, attrs}: attrs
 
-def scan_value_result(reason: Maybe<&2, String>, state: ScanState,
+# E04 quotes the first element that fails.
+def scan_value_result(found: Maybe<&2, Bad>, state: ScanState,
     info: ArgInfo, value: String) -> ScanState:
-  match reason:
+  match found:
     case None{}:
       match info:
         case ArgInfo{id, usage, short, long, kind, attrs}:
           scan_event(state, ValueHit{id, value})
-    case Some{why}:
-      scan_error(state, E04{arg_display(info), value, why})
+    case Some{Bad{bad, why}}:
+      scan_error(state, E04{arg_display(info), bad, why})
 
 def scan_value(state: ScanState, +info: ArgInfo,
     +value: String) -> ScanState:
-  scan_value_result(arg_reason(info, value), state, info, value)
+  scan_value_result(value_bad(info_attrs(info), value), state, info, value)
 
 def scan_simple_hit(state: ScanState, info: ArgInfo,
     polarity: Bool) -> ScanState:
@@ -2630,12 +2674,15 @@ def scope_path(scope: Scope) -> List<&2, String>:
   match scope:
     case Scope{path, items, globals}: path
 
+# A command that cannot complete without a subcommand (§8.4).
+def needs_sub(+items: List<&2, Item>) -> Bool:
+  Bool.and(has_sub_item(items),
+    Bool.and(Bool.not(has_sub_optional(items)),
+      Bool.not(has_external(items))))
+
 def scope_needs_sub(scope: Scope) -> Bool:
   match scope:
-    case Scope{path, +items, globals}:
-      Bool.and(has_sub_item(items),
-        Bool.and(Bool.not(has_sub_optional(items)),
-          Bool.not(has_external(items))))
+    case Scope{path, items, globals}: needs_sub(items)
 
 def bool_text(value: Bool) -> String:
   Bool.pick(String, value, "true", "false")
@@ -2698,26 +2745,6 @@ def find_env(attrs: List<&2, Item>) -> Maybe<&2, String>:
     case AttrEnv{name} <> tail: Some{name}
     case head <> tail: find_env(tail)
 
-def find_delim(attrs: List<&2, Item>) -> Maybe<&2, Char>:
-  match attrs:
-    case Nil{}: None{}
-    case Delim{sep} <> tail: Some{sep}
-    case head <> tail: find_delim(tail)
-
-def split_each(values: List<&2, String>, +sep: Char) ->
-    List<&2, String>:
-  match values:
-    case Nil{}: Nil{}
-    case head <> tail:
-      List.append(&2, String, String.split(head, sep),
-        split_each(tail, sep))
-
-def apply_delim(found: Maybe<&2, Char>,
-    values: List<&2, String>) -> List<&2, String>:
-  match found:
-    case None{}: values
-    case Some{sep}: split_each(values, sep)
-
 def env_present(name: String, found: Maybe<&2, String>) ->
     Maybe<&2, EnvValue>:
   match found:
@@ -2733,49 +2760,32 @@ def host_env(found: Maybe<&2, String>, h: Host) ->
     case Some{+name}:
       env_present(name, host_value(h, name))
 
-def env_reason(kind: UsageKind, info: ArgInfo,
-    value: String) -> Maybe<&2, String>:
-  match kind:
-    case FlagKind{}: type_reason(TBool{}, value)
-    case NegatableKind{}: type_reason(TBool{}, value)
-    case CountKind{}: type_reason(TNat{}, value)
-    case _: arg_reason(info, value)
-
 def env_bool_true(value: String) -> Bool:
   List.contains(~String, ~String.eq,
     ["true", "yes", "on", "1"], String.to_lower(value))
 
-def info_delim(info: ArgInfo) -> Maybe<&2, Char>:
-  match info:
-    case ArgInfo{id, usage, short, long, kind, attrs}:
-      find_delim(attrs)
-
-def env_values(kind: UsageKind, info: ArgInfo,
+def env_values(kind: UsageKind, attrs: List<&2, Item>,
     value: String) -> List<&2, String>:
   match kind:
     case FlagKind{}: [bool_text(env_bool_true(value))]
     case NegatableKind{}: [bool_text(env_bool_true(value))]
     case CountKind{}: [value]
-    case _:
-      apply_delim(info_delim(info), [value])
+    case _: apply_delim(find_delim(attrs), [value])
 
-def resolve_env_valid(reason: Maybe<&2, String>, info: ArgInfo,
+def resolve_env_valid(found: Maybe<&2, Bad>, info: ArgInfo,
     name: String, value: String) -> FieldBuild:
-  match reason:
-    case Some{why}:
-      BuildFault{E11{arg_display(info), value, name, why}}
+  match found:
+    case Some{Bad{bad, why}}:
+      BuildFault{E11{arg_display(info), bad, name, why}}
     case None{}:
       match info:
-        case ArgInfo{+id, usage, short, long, +kind, attrs}:
-          Built{[Field{id,
-            env_values(kind,
-              ArgInfo{id, usage, short, long, kind, attrs}, value),
-            Env{}}]}
+        case ArgInfo{id, usage, short, long, kind, attrs}:
+          Built{[Field{id, env_values(kind, attrs, value), Env{}}]}
 
 def resolve_env(+info: ArgInfo, env: EnvValue) -> FieldBuild:
   match env:
     case EnvValue{name, +value}:
-      resolve_env_valid(env_reason(info_kind(info), info, value),
+      resolve_env_valid(value_issue(info_kind(info), info_attrs(info), value),
         info, name, value)
 
 def resolve_default(found: Maybe<&2, String>,
@@ -2784,11 +2794,8 @@ def resolve_default(found: Maybe<&2, String>,
     case None{}: Built{[]}
     case Some{value}:
       match info:
-        case ArgInfo{+id, usage, short, long, +kind, attrs}:
-          Built{[Field{id,
-            env_values(kind,
-              ArgInfo{id, usage, short, long, kind, attrs}, value),
-            Default{}}]}
+        case ArgInfo{id, usage, short, long, kind, attrs}:
+          Built{[Field{id, env_values(kind, attrs, value), Default{}}]}
 
 def info_default(info: ArgInfo) -> Maybe<&2, String>:
   match info:
@@ -2868,36 +2875,15 @@ def position_take_count(kind: UsageKind,
     case _:
       Bool.pick(Nat, List.is_empty(&2, String, tokens), 0n, 1n)
 
-def pos_reason_fault(reason: Maybe<&2, String>,
-    info: ArgInfo, value: String) -> Maybe<&2, ScanFault>:
-  match reason:
-    case None{}: None{}
-    case Some{why}:
-      Some{E04{arg_display(info), value, why}}
-
-def first_fault(found: Maybe<&2, ScanFault>,
-    other: Maybe<&2, ScanFault>) -> Maybe<&2, ScanFault>:
-  match found:
-    case None{}: other
-    case Some{fault}: Some{fault}
-
-def validate_pos_values(values: List<&2, String>,
-    +info: ArgInfo) -> Maybe<&2, ScanFault>:
-  match values:
-    case Nil{}: None{}
-    case +head <> tail:
-      first_fault(pos_reason_fault(arg_reason(info, head), info, head),
-        validate_pos_values(tail, info))
-
-def pos_valid_result(fault: Maybe<&2, ScanFault>,
+def pos_valid_result(found: Maybe<&2, Bad>,
     info: ArgInfo, values: List<&2, String>) -> FieldBuild:
-  match fault:
-    case Some{problem}: BuildFault{problem}
+  match found:
+    case Some{Bad{bad, why}}:
+      BuildFault{E04{arg_display(info), bad, why}}
     case None{}:
       match info:
         case ArgInfo{id, usage, short, long, kind, attrs}:
-          Built{[Field{id, apply_delim(find_delim(attrs), values),
-            Argv{}}]}
+          Built{[Field{id, values, Argv{}}]}
 
 def resolve_pos(+info: ArgInfo,
     +values: List<&2, String>, h: Host) -> FieldBuild:
@@ -2905,7 +2891,9 @@ def resolve_pos(+info: ArgInfo,
     case Nil{}:
       resolve_env_default(host_env(info_env(info), h), info)
     case head <> tail:
-      pos_valid_result(validate_pos_values(values, info), info, values)
+      +attrs = info_attrs(info)
+      +split = apply_delim(find_delim(attrs), values)
+      pos_valid_result(first_bad(split, attrs), info, split)
 
 def resolve_positions(slots: List<&2, Item>,
     +tokens: List<&2, String>, +h: Host) -> FieldBuild:
@@ -3088,10 +3076,6 @@ def exclusive_groups(items: List<&2, Item>) -> List<&2, String>:
     case Exclusive{name} <> tail:
       name <> exclusive_groups(tail)
     case head <> tail: exclusive_groups(tail)
-
-def info_attrs(info: ArgInfo) -> List<&2, Item>:
-  match info:
-    case ArgInfo{id, usage, short, long, kind, attrs}: attrs
 
 def common_exclusive(groups: List<&2, String>,
     +left: List<&2, String>, +right: List<&2, String>) -> Bool:
@@ -3288,3 +3272,602 @@ def parse_from_state(state: ScanState, h: Host,
 def parse(c: Cmd, h: Host, +argv: List<&2, String>) -> ParseResult:
   parse_from_state(scan_close(scan_go(argv, Open{scan_start(c)})),
     h, List.is_empty(&2, String, argv))
+
+# ---- Reading values (§6.5) ----
+
+type Fault is Data:
+  Bug{msg: String}
+  Usage{msg: String}
+
+def Dec(-A: Type) -> Type:
+  Result<&2, &1, Fault, A>
+
+def Dec.pure(-A: Type, x: A) -> Dec(A):
+  Done{x}
+
+def Dec.bind(-A: Type, -B: Type, r: Dec(A), f: A -> Dec(B)) -> Dec(B):
+  match r:
+    case Fail{e}: Fail{e}
+    case Done{x}: f(x)
+
+type Matches is Data:
+  Matches{cmd: Cmd, path: List<&2, String>, fields: List<&2, Field>,
+    external: Maybe<&2, ExternalArgs>}
+
+def matches(c: Cmd, r: ParseResult) -> Maybe<&2, Matches>:
+  match r:
+    case Accepted{path, fields, external}:
+      Some{Matches{c, path, fields, external}}
+    case _: None{}
+
+def path(m: Matches) -> List<&2, String>:
+  match m:
+    case Matches{cmd, path, fields, external}: path
+
+def external_args(m: Matches) -> Maybe<(String & List<&2, String>)>:
+  match m:
+    case Matches{cmd, path, fields, None{}}: None{}
+    case Matches{cmd, path, fields, Some{ExternalArgs{name, args}}}:
+      Some{(name, args)}
+
+def fail(-A: Type, msg: String) -> Dec(A):
+  Fail{Usage{msg}}
+
+def bug(-A: Type, msg: String) -> Dec(A):
+  Fail{Bug{msg}}
+
+def keep(+m: Matches) -> Dec(Matches):
+  Done{m}
+
+# A command path as lint writes it: the root name, then each subcommand.
+def path_text(name: String, path: List<&2, String>) -> String:
+  String.join(name <> path, " ")
+
+def sub_items(found: Maybe<&2, SubFound>) -> List<&2, Item>:
+  match found:
+    case None{}: Nil{}
+    case Some{SubFound{name, items}}: items
+
+# The args in scope at path (§8.1), as parse orders them: globals first.
+def scope_args(path: List<&2, String>, +items: List<&2, Item>,
+    globals: List<&2, Item>) -> List<&2, Item>:
+  match path:
+    case Nil{}: List.append(&2, Item, globals, items)
+    case name <> tail:
+      scope_args(tail, sub_items(find_sub(items, name)),
+        List.append(&2, Item, global_items(items), globals))
+
+type Form is Data:
+  ReadOne{}
+  ReadOpt{}
+  ReadMany{}
+
+# What a reader asks of an arg; Q-static checks it against the spec.
+type Want is Data:
+  WFlag{}
+  WCount{}
+  WValue{stem: String, form: Form}
+  WAny{}
+  WChoose{opt: Bool, keys: List<&2, String>}
+
+def kind_flag(kind: UsageKind) -> Bool:
+  match kind:
+    case FlagKind{}: True{}
+    case NegatableKind{}: True{}
+    case _: False{}
+
+def kind_count(kind: UsageKind) -> Bool:
+  match kind:
+    case CountKind{}: True{}
+    case _: False{}
+
+# The reader name a value type reads with: str, nat, u32, f32 or bool.
+def type_stem(found: Maybe<&2, ValueType>) -> String:
+  match found:
+    case Some{TNat{}}: "nat"
+    case Some{TU32{}}: "u32"
+    case Some{TF32{}}: "f32"
+    case Some{TBool{}}: "bool"
+    case _: "str"
+
+def stem_noun(+stem: String) -> String:
+  Bool.pick(String, String.eq(stem, "str"), "string", stem)
+
+def stem_article(+stem: String) -> String:
+  Bool.pick(String, String.eq(stem, "f32"), "an ", "a ")
+
+def always_present(kind: UsageKind, +attrs: List<&2, Item>) -> Bool:
+  Bool.or(has_required(attrs), Bool.or(
+    Maybe.is_some(&2, String, find_default(attrs)), kind_required_pos(kind)))
+
+def may_absent(+kind: UsageKind, attrs: List<&2, Item>) -> Bool:
+  Bool.and(Bool.not(kind_many(kind)),
+    Bool.not(always_present(kind, attrs)))
+
+def kind_text(kind: UsageKind, +stem: String) -> String:
+  match kind:
+    case FlagKind{}: "a flag"
+    case NegatableKind{}: "a flag"
+    case CountKind{}: "a count"
+    case _:
+      Bool.pick(String, kind_many(kind),
+        String.concat(["a list of ", stem_noun(stem), " values"]),
+        String.concat([stem_article(stem), stem_noun(stem), " value"]))
+
+def fit_name(+kind: UsageKind, attrs: List<&2, Item>,
+    +stem: String) -> String:
+  match kind:
+    case FlagKind{}: "flag"
+    case NegatableKind{}: "flag"
+    case CountKind{}: "count"
+    case _:
+      Bool.pick(String, kind_many(kind), String.append(stem, "s"),
+        Bool.pick(String, always_present(kind, attrs), stem,
+          String.append(stem, "_opt")))
+
+def kind_verdict(fits: Bool, id: String, +kind: UsageKind,
+    +attrs: List<&2, Item>) -> Maybe<&2, String>:
+  match fits:
+    case True{}: None{}
+    case False{}:
+      +stem = type_stem(find_as(attrs))
+      Some{String.concat(["'", id, "' is ", kind_text(kind, stem),
+        "; read it with Cli.", fit_name(kind, attrs, stem)])}
+
+def absent_verdict(absent: Bool, id: String,
+    reader: String) -> Maybe<&2, String>:
+  match absent:
+    case True{}:
+      Some{String.concat(["'", id, "' may be absent; read it with Cli.",
+        reader, "_opt"])}
+    case False{}: None{}
+
+def all_in(xs: List<&2, String>, +ys: List<&2, String>) -> Bool:
+  match xs:
+    case Nil{}: True{}
+    case head <> tail:
+      Bool.and(List.contains(~String, ~String.eq, ys, head),
+        all_in(tail, ys))
+
+def keys_issue(same: Bool, id: String) -> Maybe<&2, String>:
+  match same:
+    case True{}: None{}
+    case False{}:
+      Some{String.concat(["choose table for '", id,
+        "' does not match its values"])}
+
+def keys_verdict(found: Maybe<&2, List<&2, String>>,
+    +keys: List<&2, String>, id: String) -> Maybe<&2, String>:
+  match found:
+    case None{}: None{}
+    case Some{+values}:
+      keys_issue(Bool.and(Bool.not(List.is_empty(&2, String, keys)),
+        Bool.and(all_in(keys, values), all_in(values, keys))), id)
+
+def form_fits(form: Form, many: Bool) -> Bool:
+  match form:
+    case ReadMany{}: many
+    case _: Bool.not(many)
+
+def form_one(form: Form) -> Bool:
+  match form:
+    case ReadOne{}: True{}
+    case _: False{}
+
+def value_fits(stem: String, form: Form, +kind: UsageKind,
+    attrs: List<&2, Item>) -> Bool:
+  Bool.and(kind_valued(kind), Bool.and(
+    String.eq(stem, type_stem(find_as(attrs))),
+    form_fits(form, kind_many(kind))))
+
+def choose_fits(+kind: UsageKind, attrs: List<&2, Item>) -> Bool:
+  Bool.and(kind_valued(kind), Bool.and(Bool.not(kind_many(kind)),
+    Maybe.is_some(&2, List<&2, String>, find_one_of(attrs))))
+
+# The first Q-static message for an arg in scope: kind, absence, then keys.
+def want_verdict(want: Want, +id: String, +kind: UsageKind,
+    +attrs: List<&2, Item>) -> Maybe<&2, String>:
+  match want:
+    case WFlag{}:
+      kind_verdict(kind_flag(kind), id, kind, attrs)
+    case WCount{}:
+      kind_verdict(kind_count(kind), id, kind, attrs)
+    case WValue{+stem, +form}:
+      Maybe.or(&2, String,
+        kind_verdict(value_fits(stem, form, kind, attrs), id, kind, attrs),
+        absent_verdict(Bool.and(form_one(form), may_absent(kind, attrs)),
+          id, stem))
+    case WAny{}:
+      None{}
+    case WChoose{opt, keys}:
+      Maybe.or(&2, String,
+        kind_verdict(choose_fits(kind, attrs), id, kind, attrs),
+        Maybe.or(&2, String,
+          absent_verdict(Bool.and(Bool.not(opt), may_absent(kind, attrs)),
+            id, "choose"),
+          keys_verdict(find_one_of(attrs), keys, id)))
+
+def arg_verdict(found: Maybe<&2, ArgInfo>, id: String, name: String,
+    path: List<&2, String>, want: Want) -> Maybe<&2, String>:
+  match found:
+    case None{}:
+      Some{String.concat(["'", id, "' is not an argument of '",
+        path_text(name, path), "'"])}
+    case Some{ArgInfo{key, usage, short, long, kind, attrs}}:
+      want_verdict(want, id, kind, attrs)
+
+# Q-static: depends only on the spec, the path, the id and the want.
+def verdict(cmd: Cmd, +path: List<&2, String>, +id: String,
+    want: Want) -> Maybe<&2, String>:
+  match cmd:
+    case Cmd{name, about, items}:
+      arg_verdict(find_arg_info(scope_args(path, items, []), id), id, name,
+        path, want)
+
+# The field for id, or an absent one.
+def field_find(fields: List<&2, Field>, +id: String) -> Field:
+  match fields:
+    case Nil{}: Field{id, [], Absent{}}
+    case Field{+key, values, source} <> tail:
+      Bool.pick(Field, String.eq(key, id), Field{key, values, source},
+        field_find(tail, id))
+
+# Validation first; reading a validated value never fails (§6.5).
+def read_check(~T: Data, ~get: Field -> T, verdict: Maybe<&2, String>,
+    fields: List<&2, Field>, id: String) -> Dec(T):
+  match verdict:
+    case None{}: Done{get(field_find(fields, id))}
+    case Some{msg}: Fail{Bug{msg}}
+
+def read_with(~T: Data, ~get: Field -> T, want: Want, m: Matches,
+    +id: String) -> Dec(T):
+  match m:
+    case Matches{cmd, path, fields, external}:
+      read_check(~T, ~get, verdict(cmd, path, id, want), fields, id)
+
+def get_one(~T: Data, ~conv: String -> T, f: Field) -> T:
+  match f:
+    case Field{id, head <> tail, source}: conv(head)
+    case _: conv("")
+
+def get_opt(~T: Data, ~conv: String -> T, f: Field) -> Maybe<&2, T>:
+  match f:
+    case Field{id, head <> tail, source}: Some{conv(head)}
+    case _: None{}
+
+def convert_all(~T: Data, ~conv: String -> T, values: List<&2, String>) ->
+    List<&2, T>:
+  match values:
+    case Nil{}: Nil{}
+    case head <> tail: conv(head) <> convert_all(~T, ~conv, tail)
+
+def get_many(~T: Data, ~conv: String -> T, f: Field) -> List<&2, T>:
+  match f:
+    case Field{id, values, source}: convert_all(~T, ~conv, values)
+
+def true_of(s: String) -> Bool:
+  String.eq(s, "true")
+
+def nat_of(s: String) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(s), 0n)
+
+def u32_of(s: String) -> U32:
+  Maybe.default(&2, U32, U32.read(s), 0)
+
+def f32_of(s: String) -> F32:
+  Maybe.default(&2, F32, F32.read(s), 0.0)
+
+def flag(m: Matches, id: String) -> Dec(Bool):
+  read_with(~Bool, ~(f => get_one(~Bool, ~true_of, f)), WFlag{}, m, id)
+
+def count(m: Matches, id: String) -> Dec(Nat):
+  read_with(~Nat, ~(f => get_one(~Nat, ~nat_of, f)),
+    WCount{}, m, id)
+
+def str(m: Matches, id: String) -> Dec(String):
+  read_with(~String, ~(f => get_one(~String, ~(s => s), f)),
+    WValue{"str", ReadOne{}}, m, id)
+
+def str_opt(m: Matches, id: String) -> Dec(Maybe<&2, String>):
+  read_with(~Maybe<&2, String>, ~(f => get_opt(~String, ~(s => s), f)),
+    WValue{"str", ReadOpt{}}, m, id)
+
+def strs(m: Matches, id: String) -> Dec(List<&2, String>):
+  read_with(~List<&2, String>, ~(f => get_many(~String, ~(s => s), f)),
+    WValue{"str", ReadMany{}}, m, id)
+
+def nat(m: Matches, id: String) -> Dec(Nat):
+  read_with(~Nat, ~(f => get_one(~Nat, ~nat_of, f)),
+    WValue{"nat", ReadOne{}}, m, id)
+
+def nat_opt(m: Matches, id: String) -> Dec(Maybe<&2, Nat>):
+  read_with(~Maybe<&2, Nat>, ~(f => get_opt(~Nat, ~nat_of, f)),
+    WValue{"nat", ReadOpt{}}, m, id)
+
+def nats(m: Matches, id: String) -> Dec(List<&2, Nat>):
+  read_with(~List<&2, Nat>, ~(f => get_many(~Nat, ~nat_of, f)),
+    WValue{"nat", ReadMany{}}, m, id)
+
+def u32(m: Matches, id: String) -> Dec(U32):
+  read_with(~U32, ~(f => get_one(~U32, ~u32_of, f)),
+    WValue{"u32", ReadOne{}}, m, id)
+
+def u32_opt(m: Matches, id: String) -> Dec(Maybe<&2, U32>):
+  read_with(~Maybe<&2, U32>, ~(f => get_opt(~U32, ~u32_of, f)),
+    WValue{"u32", ReadOpt{}}, m, id)
+
+def u32s(m: Matches, id: String) -> Dec(List<&2, U32>):
+  read_with(~List<&2, U32>, ~(f => get_many(~U32, ~u32_of, f)),
+    WValue{"u32", ReadMany{}}, m, id)
+
+def f32(m: Matches, id: String) -> Dec(F32):
+  read_with(~F32, ~(f => get_one(~F32, ~f32_of, f)),
+    WValue{"f32", ReadOne{}}, m, id)
+
+def f32_opt(m: Matches, id: String) -> Dec(Maybe<&2, F32>):
+  read_with(~Maybe<&2, F32>, ~(f => get_opt(~F32, ~f32_of, f)),
+    WValue{"f32", ReadOpt{}}, m, id)
+
+def f32s(m: Matches, id: String) -> Dec(List<&2, F32>):
+  read_with(~List<&2, F32>, ~(f => get_many(~F32, ~f32_of, f)),
+    WValue{"f32", ReadMany{}}, m, id)
+
+def bool(m: Matches, id: String) -> Dec(Bool):
+  read_with(~Bool, ~(f => get_one(~Bool, ~env_bool_true, f)),
+    WValue{"bool", ReadOne{}}, m, id)
+
+def bool_opt(m: Matches, id: String) -> Dec(Maybe<&2, Bool>):
+  read_with(~Maybe<&2, Bool>, ~(f => get_opt(~Bool, ~env_bool_true, f)),
+    WValue{"bool", ReadOpt{}}, m, id)
+
+def bools(m: Matches, id: String) -> Dec(List<&2, Bool>):
+  read_with(~List<&2, Bool>, ~(f => get_many(~Bool, ~env_bool_true, f)),
+    WValue{"bool", ReadMany{}}, m, id)
+
+def field_src(f: Field) -> Src:
+  match f:
+    case Field{id, values, source}: source
+
+def given(m: Matches, id: String) -> Dec(Bool):
+  read_with(~Bool, ~(f => source_given(field_src(f))), WAny{}, m, id)
+
+def source(m: Matches, id: String) -> Dec(Src):
+  read_with(~Src, ~field_src, WAny{}, m, id)
+
+# The value under the first key equal to key.
+def find_by_key(a, -A: Kind(a), keys: List<&2, String>, values: List<a, A>,
+    +key: String) -> Maybe<a, A>:
+  match keys:
+    case Nil{}: None{}
+    case head <> tail:
+      match values:
+        case Nil{}: None{}
+        case value <> rest:
+          Bool.pick(Maybe<a, A>, String.eq(head, key), Some{value},
+            find_by_key(a, A, tail, rest, key))
+
+def keyed_cons(a, -A: Kind(a), key: String, value: A,
+    rest: (List<&2, String> & List<a, A>)) -> (List<&2, String> & List<a, A>):
+  (keys, values) = rest
+  (key <> keys, value <> values)
+
+# A choose or route table as its keys and its values.
+def unzip_keyed(a, -A: Kind(a), table: List<(String & A)>) ->
+    (List<&2, String> & List<a, A>):
+  match table:
+    case Nil{}: ([], [])
+    case entry <> tail:
+      (key, value) = entry
+      keyed_cons(a, A, key, value, unzip_keyed(a, A, tail))
+
+# After validation the key exists: parse and samples keep one_of values.
+def choice_dec(-A: Data, found: Maybe<&2, A>) -> Dec(Maybe<&2, A>):
+  match found:
+    case Some{value}: Done{Some{value}}
+    case None{}: Fail{Usage{"the value has no choose entry"}}
+
+def choose_read(-A: Data, keys: List<&2, String>, values: List<&2, A>,
+    f: Field) -> Dec(Maybe<&2, A>):
+  match f:
+    case Field{id, head <> tail, source}:
+      choice_dec(A, find_by_key(&2, A, keys, values, head))
+    case _: Done{None{}}
+
+def choose_check(-A: Data, verdict: Maybe<&2, String>,
+    keys: List<&2, String>, values: List<&2, A>,
+    fields: List<&2, Field>, id: String) -> Dec(Maybe<&2, A>):
+  match verdict:
+    case None{}: choose_read(A, keys, values, field_find(fields, id))
+    case Some{msg}: Fail{Bug{msg}}
+
+def choose_pick(-A: Data, opt: Bool,
+    choices: (List<&2, String> & List<&2, A>), m: Matches,
+    +id: String) -> Dec(Maybe<&2, A>):
+  (+keys, values) = choices
+  match m:
+    case Matches{cmd, path, fields, external}:
+      choose_check(A, verdict(cmd, path, id, WChoose{opt, keys}),
+        keys, values, fields, id)
+
+def choose_opt(-A: Data, m: Matches, id: String,
+    table: List<(String & A)>) -> Dec(Maybe<&2, A>):
+  choose_pick(A, True{}, unzip_keyed(&2, A, table), m, id)
+
+# After validation a bare choose always has a value.
+def choice_must(-A: Data, d: Dec(Maybe<&2, A>)) -> Dec(A):
+  match d:
+    case Fail{e}: Fail{e}
+    case Done{Some{value}}: Done{value}
+    case Done{None{}}: Fail{Usage{"the value is absent"}}
+
+def choose(-A: Data, m: Matches, id: String,
+    table: List<(String & A)>) -> Dec(A):
+  choice_must(A, choose_pick(A, False{}, unzip_keyed(&2, A, table), m, id))
+
+def Call(-A: Type) -> Type:
+  @+m: Matches -> Dec(A)
+
+# The declared subcommand name leads to; built-ins are not commands (§6.4).
+def sub_children(items: List<&2, Item>, +name: String) ->
+    Maybe<&2, List<&2, Item>>:
+  match items:
+    case Nil{}: None{}
+    case Sub{key, about, children} <> tail:
+      Bool.pick(Maybe<&2, List<&2, Item>>, String.eq(key, name),
+        Some{children}, sub_children(tail, name))
+    case head <> tail: sub_children(tail, name)
+
+def user_children(found: Maybe<&2, List<&2, Item>>) ->
+    Maybe<&2, List<&2, Item>>:
+  match found:
+    case None{}: None{}
+    case Some{+children}:
+      Bool.pick(Maybe<&2, List<&2, Item>>, has_builtin(children), None{},
+        Some{children})
+
+def user_sub(items: List<&2, Item>, name: String) ->
+    Maybe<&2, List<&2, Item>>:
+  user_children(sub_children(items, name))
+
+def is_command(names: List<&2, String>,
+    found: Maybe<&2, List<&2, Item>>) -> Bool:
+  match names found:
+    case Nil{} None{}: False{}
+    case Nil{} Some{items}: True{}
+    case name <> tail None{}: False{}
+    case name <> tail Some{items}: is_command(tail, user_sub(items, name))
+
+# A route key's subcommand names; "" is the root.
+def key_names(+key: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(key), [], String.split(key, ' '))
+
+def non_command(keys: List<&2, String>, +items: List<&2, Item>) ->
+    Maybe<&2, String>:
+  match keys:
+    case Nil{}: None{}
+    case +key <> tail:
+      Bool.pick(Maybe<&2, String>, is_command(key_names(key), Some{items}),
+        non_command(tail, items), Some{key})
+
+def route_call(-A: Type, bad: Maybe<&2, String>, call: Call(A),
+    m: Matches) -> Dec(A):
+  match bad:
+    case None{}: call(m)
+    case Some{key}:
+      Fail{Bug{String.concat(["route '", key, "' is not a command"])}}
+
+# No route for the path is checked first, then every key names a command.
+def route_found(-A: Type, found: Maybe<Call(A)>, keys: List<&2, String>,
+    cmd: Cmd, path: List<&2, String>, m: Matches) -> Dec(A):
+  match found cmd:
+    case None{} Cmd{name, about, items}:
+      Fail{Bug{String.concat(["no route for '", path_text(name, path), "'"])}}
+    case Some{call} Cmd{name, about, items}:
+      route_call(A, non_command(keys, items), call, m)
+
+def route_pick(-A: Type, routes: (List<&2, String> & List<Call(A)>),
+    m: Matches) -> Dec(A):
+  (+keys, calls) = routes
+  match m:
+    case Matches{+cmd, +path, fields, external}:
+      route_found(A,
+        find_by_key(&1, Call(A), keys, calls, String.join(path, " ")),
+        keys, cmd, path, Matches{cmd, path, fields, external})
+
+def route(-A: Type, m: Matches, table: List<(String & Call(A))>) -> Dec(A):
+  route_pick(A, unzip_keyed(&1, Call(A), table), m)
+
+# ---- Samples and check (§6.6) ----
+
+def sample_typed(found: Maybe<&2, ValueType>) -> String:
+  match found:
+    case Some{TNat{}}: "0"
+    case Some{TU32{}}: "0"
+    case Some{TF32{}}: "0.0"
+    case Some{TBool{}}: "false"
+    case _: "x"
+
+def sample_choice(found: Maybe<&2, List<&2, String>>,
+    attrs: List<&2, Item>) -> String:
+  match found:
+    case Some{head <> tail}: head
+    case _: sample_typed(find_as(attrs))
+
+def sample_value(kind: UsageKind, +attrs: List<&2, Item>) -> String:
+  match kind:
+    case FlagKind{}: "true"
+    case NegatableKind{}: "true"
+    case CountKind{}: "1"
+    case _: sample_choice(find_one_of(attrs), attrs)
+
+def sample_field(build: FieldBuild, info: ArgInfo) -> List<&2, Field>:
+  match build:
+    case Built{Nil{}}:
+      match info:
+        case ArgInfo{id, usage, short, long, kind, attrs}:
+          [Field{id, [sample_value(kind, attrs)], Argv{}}]
+    case Built{fields}: fields
+    case BuildFault{fault}: Nil{}
+
+# Each arg in scope: its default as parse resolves it, else a sample value.
+def sample_args(items: List<&2, Item>) -> List<&2, Field>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, attrs} <> tail:
+      +info = arg_info(usage, attrs)
+      List.append(&2, Field,
+        sample_field(resolve_default(info_default(info), info), info),
+        sample_args(tail))
+    case head <> tail: sample_args(tail)
+
+def sample_fields(c: Cmd, path: List<&2, String>) -> List<&2, Field>:
+  match c:
+    case Cmd{name, about, items}: sample_args(scope_args(path, items, []))
+
+def sample(+c: Cmd, +path: List<&2, String>) -> Matches:
+  Matches{c, path, sample_fields(c, path), None{}}
+
+# The paths below prefix that can complete, in pre-order, without built-ins.
+def sub_paths(items: List<&2, Item>, +prefix: List<&2, String>) ->
+    List<&2, List<&2, String>>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{name, about, +children} <> tail:
+      +path = List.append(&2, String, prefix, [name])
+      List.concat(&2, List<&2, String>, [
+        Bool.pick(List<&2, List<&2, String>>,
+          Bool.or(has_builtin(children), needs_sub(children)), [], [path]),
+        sub_paths(children, path),
+        sub_paths(tail, prefix),
+      ])
+    case head <> tail: sub_paths(tail, prefix)
+
+def sample_paths(c: Cmd) -> List<&2, List<&2, String>>:
+  match c:
+    case Cmd{name, about, +items}:
+      List.append(&2, List<&2, String>,
+        Bool.pick(List<&2, List<&2, String>>, needs_sub(items), [], [[]]),
+        sub_paths(items, []))
+
+def decode_bug(-A: Type, d: Dec(A), at: String) -> List<&2, Problem>:
+  match d:
+    case Fail{Bug{msg}}: [DecodeBug{at, msg}]
+    case _: Nil{}
+
+def cmd_name(c: Cmd) -> String:
+  match c:
+    case Cmd{name, about, items}: name
+
+def sample_bugs(~A: Type, ~decode: @+m: Matches -> Dec(A),
+    paths: List<&2, List<&2, String>>, +c: Cmd) -> List<&2, Problem>:
+  match paths:
+    case Nil{}: Nil{}
+    case +path <> tail:
+      List.append(&2, Problem,
+        decode_bug(A, decode(sample(c, path)), path_text(cmd_name(c), path)),
+        sample_bugs(~A, ~decode, tail, c))
+
+def check(~A: Type, ~decode: @+m: Matches -> Dec(A), +c: Cmd) ->
+    List<&2, Problem>:
+  List.append(&2, Problem, problems(c),
+    sample_bugs(~A, ~decode, sample_paths(c), c))

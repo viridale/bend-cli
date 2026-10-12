@@ -2717,6 +2717,9 @@ def Laws.g_val_one_of():
 def Laws.g_val_delim():
   ({==}, {==})
 
+def Laws.g_val_delim_typed():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
+
 def Laws.g_src_env():
   {==}
 
@@ -2746,3 +2749,398 @@ def Laws.g_rel_requires():
 
 def Laws.g_rel_defaults():
   ({==}, {==})
+
+def check_same(~T: Data, ~get: Cli.Field -> T, v: Maybe<&2, String>,
+    f1: List<&2, Cli.Field>, f2: List<&2, Cli.Field>, id: String) ->
+    {Laws.bug_of(T, Cli.read_check(~T, ~get, v, f1, id)) ==
+      Laws.bug_of(T, Cli.read_check(~T, ~get, v, f2, id))
+      : Maybe<&2, String>}:
+  match v:
+    case None{}: {==}
+    case Some{msg}: {==}
+
+def read_same(~T: Data, ~get: Cli.Field -> T, want: Cli.Want, c: Cli.Cmd,
+    path: List<&2, String>, f1: List<&2, Cli.Field>,
+    x1: Maybe<&2, Cli.ExternalArgs>, f2: List<&2, Cli.Field>,
+    x2: Maybe<&2, Cli.ExternalArgs>, +id: String) ->
+    {Laws.bug_of(T, Cli.read_with(~T, ~get, want,
+      Cli.Matches{c, path, f1, x1}, id)) ==
+      Laws.bug_of(T, Cli.read_with(~T, ~get, want,
+        Cli.Matches{c, path, f2, x2}, id)) : Maybe<&2, String>}:
+  check_same(~T, ~get, Cli.verdict(c, path, id, want), f1, f2, id)
+
+def opt_choice_ok(-A: Data, found: Maybe<&2, A>) ->
+    {None{} == Laws.bug_of(Maybe<&2, A>, Cli.choice_dec(A, found))
+      : Maybe<&2, String>}:
+  match found:
+    case Some{value}: {==}
+    case None{}: {==}
+
+def opt_ok(-A: Data, keys: List<&2, String>, values: List<&2, A>,
+    f: Cli.Field) ->
+    {None{} == Laws.bug_of(Maybe<&2, A>,
+      Cli.choose_read(A, keys, values, f)) : Maybe<&2, String>}:
+  match f:
+    case Cli.Field{id, head <> tail, source}:
+      opt_choice_ok(A, Cli.find_by_key(&2, A, keys, values, head))
+    case Cli.Field{id, Nil{}, source}: {==}
+
+def must_bug(-A: Data, d: Cli.Dec(Maybe<&2, A>)) ->
+    {Laws.bug_of(Maybe<&2, A>, d) == Laws.bug_of(A, Cli.choice_must(A, d))
+      : Maybe<&2, String>}:
+  match d:
+    case Fail{Cli.Bug{msg}}: {==}
+    case Fail{Cli.Usage{msg}}: {==}
+    case Done{Some{value}}: {==}
+    case Done{None{}}: {==}
+
+def choose_opt_same(-A: Data, v: Maybe<&2, String>,
+    +keys: List<&2, String>, +values: List<&2, A>,
+    f1: List<&2, Cli.Field>, f2: List<&2, Cli.Field>, +id: String) ->
+    {Laws.bug_of(Maybe<&2, A>, Cli.choose_check(A, v, keys, values, f1, id))
+      == Laws.bug_of(Maybe<&2, A>,
+        Cli.choose_check(A, v, keys, values, f2, id))
+      : Maybe<&2, String>}:
+  match v:
+    case Some{msg}: {==}
+    case None{}:
+      %opt_ok(A, keys, values, Cli.field_find(f1, id)) :
+        {_ == Laws.bug_of(Maybe<&2, A>,
+          Cli.choose_read(A, keys, values, Cli.field_find(f2, id)))
+          : Maybe<&2, String>}
+      opt_ok(A, keys, values, Cli.field_find(f2, id))
+
+def unzip_choose(keys: List<&2, String>) ->
+    {(keys, keys) == Cli.unzip_keyed(&2, String, Laws.choose_table(keys))
+      : (List<&2, String> & List<&2, String>)}:
+  match keys:
+    case Nil{}: {==}
+    case key <> tail:
+      %unzip_choose(tail) :
+        {(key <> tail, key <> tail) ==
+          Cli.keyed_cons(&2, String, key, key, _)
+          : (List<&2, String> & List<&2, String>)}
+      {==}
+
+def keep_calls(keys: List<&2, String>) -> List<Cli.Call(Cli.Matches)>:
+  match keys:
+    case Nil{}: Nil{}
+    case key <> tail: (+m => Cli.keep(m)) <> keep_calls(tail)
+
+def unzip_keep(keys: List<&2, String>) ->
+    {(keys, keep_calls(keys)) ==
+      Cli.unzip_keyed(&1, Cli.Call(Cli.Matches), Laws.keep_table(keys))
+      : (List<&2, String> & List<Cli.Call(Cli.Matches)>)}:
+  match keys:
+    case Nil{}: {==}
+    case key <> tail:
+      %unzip_keep(tail) :
+        {(key <> tail, keep_calls(key <> tail)) ==
+          Cli.keyed_cons(&1, Cli.Call(Cli.Matches), key, +m => Cli.keep(m), _)
+          : (List<&2, String> & List<Cli.Call(Cli.Matches)>)}
+      {==}
+
+def call_same(bad: Maybe<&2, String>, +m1: Cli.Matches, +m2: Cli.Matches) ->
+    {Laws.bug_of(Cli.Matches,
+      Cli.route_call(Cli.Matches, bad, +n => Cli.keep(n), m1)) ==
+      Laws.bug_of(Cli.Matches,
+        Cli.route_call(Cli.Matches, bad, +n => Cli.keep(n), m2))
+      : Maybe<&2, String>}:
+  match bad:
+    case None{}: {==}
+    case Some{key}: {==}
+
+def keep_pick(hit: Bool, keys: List<&2, String>, +all: List<&2, String>,
+    +key: String, c: Cli.Cmd, +path: List<&2, String>, +m1: Cli.Matches,
+    +m2: Cli.Matches,
+    rest: {Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+      Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+        key), all, c, path, m1)) ==
+      Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+        Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+          key), all, c, path, m2)) : Maybe<&2, String>}) ->
+    {Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+      Bool.pick(Maybe<Cli.Call(Cli.Matches)>, hit, Some{+n => Cli.keep(n)},
+        Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+          key)), all, c, path, m1)) ==
+      Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+        Bool.pick(Maybe<Cli.Call(Cli.Matches)>, hit, Some{+n => Cli.keep(n)},
+          Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+            key)), all, c, path, m2)) : Maybe<&2, String>}:
+  match hit c:
+    case True{} Cli.Cmd{name, about, items}:
+      call_same(Cli.non_command(all, items), m1, m2)
+    case False{} _: rest
+
+def keep_ok(keys: List<&2, String>, +all: List<&2, String>, +key: String,
+    +c: Cli.Cmd, +path: List<&2, String>, +m1: Cli.Matches,
+    +m2: Cli.Matches) ->
+    {Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+      Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+        key), all, c, path, m1)) ==
+      Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+        Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+          key), all, c, path, m2)) : Maybe<&2, String>}:
+  match keys:
+    case Nil{}:
+      match c:
+        case Cli.Cmd{name, about, items}: {==}
+    case +head <> +tail:
+      keep_pick(String.eq(head, key), tail, all, key, c, path, m1, m2,
+        keep_ok(tail, all, key, c, path, m1, m2))
+
+type Rd is Data:
+  RFlag{}
+  RCount{}
+  RStr{}
+  RStrOpt{}
+  RStrs{}
+  RNat{}
+  RNatOpt{}
+  RNats{}
+  RU32{}
+  RU32Opt{}
+  RU32s{}
+  RF32{}
+  RF32Opt{}
+  RF32s{}
+  RBool{}
+  RBoolOpt{}
+  RBools{}
+  RGiven{}
+  RSource{}
+  RChoose{}
+  RChooseOpt{}
+  RRoute{}
+
+def entry(r: Rd, +m: Cli.Matches, +id: String, +keys: List<&2, String>) ->
+    Maybe<&2, String>:
+  match r:
+    case RFlag{}: Laws.bug_of(Bool, Cli.flag(m, id))
+    case RCount{}: Laws.bug_of(Nat, Cli.count(m, id))
+    case RStr{}: Laws.bug_of(String, Cli.str(m, id))
+    case RStrOpt{}: Laws.bug_of(Maybe<&2, String>, Cli.str_opt(m, id))
+    case RStrs{}: Laws.bug_of(List<&2, String>, Cli.strs(m, id))
+    case RNat{}: Laws.bug_of(Nat, Cli.nat(m, id))
+    case RNatOpt{}: Laws.bug_of(Maybe<&2, Nat>, Cli.nat_opt(m, id))
+    case RNats{}: Laws.bug_of(List<&2, Nat>, Cli.nats(m, id))
+    case RU32{}: Laws.bug_of(U32, Cli.u32(m, id))
+    case RU32Opt{}: Laws.bug_of(Maybe<&2, U32>, Cli.u32_opt(m, id))
+    case RU32s{}: Laws.bug_of(List<&2, U32>, Cli.u32s(m, id))
+    case RF32{}: Laws.bug_of(F32, Cli.f32(m, id))
+    case RF32Opt{}: Laws.bug_of(Maybe<&2, F32>, Cli.f32_opt(m, id))
+    case RF32s{}: Laws.bug_of(List<&2, F32>, Cli.f32s(m, id))
+    case RBool{}: Laws.bug_of(Bool, Cli.bool(m, id))
+    case RBoolOpt{}: Laws.bug_of(Maybe<&2, Bool>, Cli.bool_opt(m, id))
+    case RBools{}: Laws.bug_of(List<&2, Bool>, Cli.bools(m, id))
+    case RGiven{}: Laws.bug_of(Bool, Cli.given(m, id))
+    case RSource{}: Laws.bug_of(Cli.Src, Cli.source(m, id))
+    case RChoose{}:
+      Laws.bug_of(String, Cli.choose(String, m, id, Laws.choose_table(keys)))
+    case RChooseOpt{}:
+      Laws.bug_of(Maybe<&2, String>,
+        Cli.choose_opt(String, m, id, Laws.choose_table(keys)))
+    case RRoute{}:
+      Laws.bug_of(Cli.Matches,
+        Cli.route(Cli.Matches, m, Laws.keep_table(keys)))
+
+def entries(rs: List<&2, Rd>, +m: Cli.Matches, +id: String,
+    +keys: List<&2, String>) -> List<&2, Maybe<&2, String>>:
+  match rs:
+    case Nil{}: Nil{}
+    case r <> tail: entry(r, m, id, keys) <> entries(tail, m, id, keys)
+
+def readers() -> List<&2, Rd>:
+  [RFlag{}, RCount{}, RStr{}, RStrOpt{}, RStrs{}, RNat{}, RNatOpt{}, RNats{}, RU32{}, RU32Opt{}, RU32s{}, RF32{}, RF32Opt{}, RF32s{}, RBool{}, RBoolOpt{}, RBools{}, RGiven{}, RSource{}, RChoose{}, RChooseOpt{}, RRoute{}]
+
+def entry_same(r: Rd, +c: Cli.Cmd, +path: List<&2, String>,
+    +f1: List<&2, Cli.Field>, x1: Maybe<&2, Cli.ExternalArgs>,
+    +f2: List<&2, Cli.Field>, x2: Maybe<&2, Cli.ExternalArgs>, +id: String,
+    +keys: List<&2, String>) ->
+    {entry(r, Cli.Matches{c, path, f1, x1}, id, keys) ==
+      entry(r, Cli.Matches{c, path, f2, x2}, id, keys) : Maybe<&2, String>}:
+  match r:
+    case RFlag{}:
+      read_same(~Bool, ~(f => Cli.get_one(~Bool, ~Cli.true_of, f)), Cli.WFlag{},
+        c, path, f1, x1, f2, x2, id)
+    case RCount{}:
+      read_same(~Nat, ~(f => Cli.get_one(~Nat, ~Cli.nat_of, f)), Cli.WCount{},
+        c, path, f1, x1, f2, x2, id)
+    case RStr{}:
+      read_same(~String, ~(f => Cli.get_one(~String, ~(s => s), f)), Cli.WValue{"str", Cli.ReadOne{}},
+        c, path, f1, x1, f2, x2, id)
+    case RStrOpt{}:
+      read_same(~Maybe<&2, String>, ~(f => Cli.get_opt(~String, ~(s => s), f)), Cli.WValue{"str", Cli.ReadOpt{}},
+        c, path, f1, x1, f2, x2, id)
+    case RStrs{}:
+      read_same(~List<&2, String>, ~(f => Cli.get_many(~String, ~(s => s), f)), Cli.WValue{"str", Cli.ReadMany{}},
+        c, path, f1, x1, f2, x2, id)
+    case RNat{}:
+      read_same(~Nat, ~(f => Cli.get_one(~Nat, ~Cli.nat_of, f)), Cli.WValue{"nat", Cli.ReadOne{}},
+        c, path, f1, x1, f2, x2, id)
+    case RNatOpt{}:
+      read_same(~Maybe<&2, Nat>, ~(f => Cli.get_opt(~Nat, ~Cli.nat_of, f)), Cli.WValue{"nat", Cli.ReadOpt{}},
+        c, path, f1, x1, f2, x2, id)
+    case RNats{}:
+      read_same(~List<&2, Nat>, ~(f => Cli.get_many(~Nat, ~Cli.nat_of, f)), Cli.WValue{"nat", Cli.ReadMany{}},
+        c, path, f1, x1, f2, x2, id)
+    case RU32{}:
+      read_same(~U32, ~(f => Cli.get_one(~U32, ~Cli.u32_of, f)), Cli.WValue{"u32", Cli.ReadOne{}},
+        c, path, f1, x1, f2, x2, id)
+    case RU32Opt{}:
+      read_same(~Maybe<&2, U32>, ~(f => Cli.get_opt(~U32, ~Cli.u32_of, f)), Cli.WValue{"u32", Cli.ReadOpt{}},
+        c, path, f1, x1, f2, x2, id)
+    case RU32s{}:
+      read_same(~List<&2, U32>, ~(f => Cli.get_many(~U32, ~Cli.u32_of, f)), Cli.WValue{"u32", Cli.ReadMany{}},
+        c, path, f1, x1, f2, x2, id)
+    case RF32{}:
+      read_same(~F32, ~(f => Cli.get_one(~F32, ~Cli.f32_of, f)), Cli.WValue{"f32", Cli.ReadOne{}},
+        c, path, f1, x1, f2, x2, id)
+    case RF32Opt{}:
+      read_same(~Maybe<&2, F32>, ~(f => Cli.get_opt(~F32, ~Cli.f32_of, f)), Cli.WValue{"f32", Cli.ReadOpt{}},
+        c, path, f1, x1, f2, x2, id)
+    case RF32s{}:
+      read_same(~List<&2, F32>, ~(f => Cli.get_many(~F32, ~Cli.f32_of, f)), Cli.WValue{"f32", Cli.ReadMany{}},
+        c, path, f1, x1, f2, x2, id)
+    case RBool{}:
+      read_same(~Bool, ~(f => Cli.get_one(~Bool, ~Cli.env_bool_true, f)), Cli.WValue{"bool", Cli.ReadOne{}},
+        c, path, f1, x1, f2, x2, id)
+    case RBoolOpt{}:
+      read_same(~Maybe<&2, Bool>, ~(f => Cli.get_opt(~Bool, ~Cli.env_bool_true, f)), Cli.WValue{"bool", Cli.ReadOpt{}},
+        c, path, f1, x1, f2, x2, id)
+    case RBools{}:
+      read_same(~List<&2, Bool>, ~(f => Cli.get_many(~Bool, ~Cli.env_bool_true, f)), Cli.WValue{"bool", Cli.ReadMany{}},
+        c, path, f1, x1, f2, x2, id)
+    case RGiven{}:
+      read_same(~Bool, ~(f => Cli.source_given(Cli.field_src(f))), Cli.WAny{},
+        c, path, f1, x1, f2, x2, id)
+    case RSource{}:
+      read_same(~Cli.Src, ~(Cli.field_src), Cli.WAny{},
+        c, path, f1, x1, f2, x2, id)
+    case RChoose{}:
+      %unzip_choose(keys) :
+        {Laws.bug_of(String, Cli.choice_must(String, Cli.choose_pick(String,
+          False{}, _, Cli.Matches{c, path, f1, x1}, id))) ==
+          Laws.bug_of(String, Cli.choice_must(String, Cli.choose_pick(String,
+            False{}, _, Cli.Matches{c, path, f2, x2}, id)))
+          : Maybe<&2, String>}
+      %must_bug(String, Cli.choose_check(String,
+          Cli.verdict(c, path, id, Cli.WChoose{False{}, keys}),
+          keys, keys, f1, id)) :
+        {_ == Laws.bug_of(String, Cli.choice_must(String,
+          Cli.choose_check(String,
+            Cli.verdict(c, path, id, Cli.WChoose{False{}, keys}),
+            keys, keys, f2, id))) : Maybe<&2, String>}
+      %must_bug(String, Cli.choose_check(String,
+          Cli.verdict(c, path, id, Cli.WChoose{False{}, keys}),
+          keys, keys, f2, id)) :
+        {Laws.bug_of(Maybe<&2, String>, Cli.choose_check(String,
+          Cli.verdict(c, path, id, Cli.WChoose{False{}, keys}),
+          keys, keys, f1, id)) == _ : Maybe<&2, String>}
+      choose_opt_same(String,
+        Cli.verdict(c, path, id, Cli.WChoose{False{}, keys}),
+        keys, keys, f1, f2, id)
+    case RChooseOpt{}:
+      %unzip_choose(keys) :
+        {Laws.bug_of(Maybe<&2, String>, Cli.choose_pick(String, True{}, _,
+          Cli.Matches{c, path, f1, x1}, id)) ==
+          Laws.bug_of(Maybe<&2, String>, Cli.choose_pick(String, True{}, _,
+            Cli.Matches{c, path, f2, x2}, id)) : Maybe<&2, String>}
+      choose_opt_same(String,
+        Cli.verdict(c, path, id, Cli.WChoose{True{}, keys}),
+        keys, keys, f1, f2, id)
+    case RRoute{}:
+      %unzip_keep(keys) :
+        {Laws.bug_of(Cli.Matches, Cli.route_pick(Cli.Matches, _,
+          Cli.Matches{c, path, f1, x1})) ==
+          Laws.bug_of(Cli.Matches, Cli.route_pick(Cli.Matches, _,
+            Cli.Matches{c, path, f2, x2})) : Maybe<&2, String>}
+      keep_ok(keys, keys, String.join(path, " "), c, path,
+        Cli.Matches{c, path, f1, x1}, Cli.Matches{c, path, f2, x2})
+
+def entries_same(rs: List<&2, Rd>, +c: Cli.Cmd, +path: List<&2, String>,
+    +f1: List<&2, Cli.Field>, +x1: Maybe<&2, Cli.ExternalArgs>,
+    +f2: List<&2, Cli.Field>, +x2: Maybe<&2, Cli.ExternalArgs>, +id: String,
+    +keys: List<&2, String>) ->
+    {entries(rs, Cli.Matches{c, path, f1, x1}, id, keys) ==
+      entries(rs, Cli.Matches{c, path, f2, x2}, id, keys)
+      : List<&2, Maybe<&2, String>>}:
+  match rs:
+    case Nil{}: {==}
+    case r <> tail:
+      %entry_same(r, c, path, f1, x1, f2, x2, id, keys) :
+        {entry(r, Cli.Matches{c, path, f1, x1}, id, keys) <>
+          entries(tail, Cli.Matches{c, path, f1, x1}, id, keys) ==
+          _ <> entries(tail, Cli.Matches{c, path, f2, x2}, id, keys)
+          : List<&2, Maybe<&2, String>>}
+      %entries_same(tail, c, path, f1, x1, f2, x2, id, keys) :
+        {entry(r, Cli.Matches{c, path, f1, x1}, id, keys) <>
+          entries(tail, Cli.Matches{c, path, f1, x1}, id, keys) ==
+          entry(r, Cli.Matches{c, path, f1, x1}, id, keys) <> _
+          : List<&2, Maybe<&2, String>>}
+      {==}
+
+def p12_found(+c: Cli.Cmd, r: Cli.ParseResult, +id: String,
+    +keys: List<&2, String>) -> Laws.p12_at(c, Cli.matches(c, r), id, keys):
+  match r:
+    case Cli.Accepted{+path, fields, external}:
+      entries_same(readers(), c, path, fields, external,
+        Cli.sample_fields(c, path), None{}, id, keys)
+    case Cli.Rejected{path, fault}: Unit{}
+    case Cli.HelpRequested{path, long}: Unit{}
+    case Cli.VersionRequested{}: Unit{}
+    case Cli.SummaryRequired{}: Unit{}
+
+def Laws.p12(c, h, argv, id, keys):
+  p12_found(c, Cli.parse(c, h, argv), id, keys)
+
+def Laws.g_check_wrong_id():
+  ({==}, ({==}, {==}))
+
+def Laws.g_check_wrong_reader():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
+def Laws.g_check_absent():
+  ({==}, ({==}, {==}))
+
+def Laws.g_check_choose():
+  ({==}, ({==}, {==}))
+
+def Laws.g_check_route():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_check_samples():
+  ({==}, {==})
+
+def Laws.g_check_builtins():
+  ({==}, {==})
+
+def Laws.g_check_sample_values():
+  {==}
+
+def Laws.g_check_pkg():
+  {==}
+
+def Laws.g_lint_decode_bug():
+  {==}
+
+def Laws.g_read_values():
+  ({==}, {==})
+
+def Laws.g_read_absent():
+  ({==}, {==})
+
+def Laws.g_read_route():
+  ({==}, ({==}, {==}))
+
+def Laws.g_read_first_match():
+  ({==}, {==})
+
+def Laws.g_read_route_faults():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_read_external():
+  ({==}, {==})
+
+def Laws.g_read_pkg():
+  ({==}, ({==}, ({==}, {==})))

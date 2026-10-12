@@ -3,6 +3,9 @@
 # Run: bend PROOF.bend --verdict
 # Scope: P13 bounds visible line widths; P14 preserves words in order. Neither
 # pins whitespace normalization; G-TEXT pins representative wrapped content.
+# P12 fixes when readers, choose and route raise their own validation Bug,
+# not what they return; G-READ fixes values, except a given f32 (K8), and
+# what route's selected callback returns.
 
 import Base
 import ./cli.bend as Cli
@@ -745,6 +748,54 @@ law g_val_delim:
     field("tag", ["a", "b", "c"], Cli.Argv{}),
   ]) : Cli.ParseResult}
 
+def numbers(attrs: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--n <N>...", "Numbers", attrs),
+  ])
+
+def number_operands(attrs: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("<N>...", "Numbers", attrs),
+  ])
+
+# G-VAL: delim splits before conversion, in argv, env and defaults; E04, E11
+# and BadDefault quote the first element that fails.
+law g_val_delim_typed:
+  {Cli.parse(numbers([Cli.as_nat(), Cli.delim(',')]), host(),
+    ["--n=1,2", "--n", "3"]) == ok([
+      field("n", ["1", "2", "3"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(number_operands([Cli.as_u32(), Cli.delim(',')]), host(),
+    ["1,2"]) == ok([
+      field("n", ["1", "2"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(numbers([Cli.as_bool(), Cli.delim(','), Cli.env("N")]),
+    Cli.host_var(host(), "N", "yes,0"), []) == ok([
+      field("n", ["yes", "0"], Cli.Env{}),
+    ]) : Cli.ParseResult} &
+  {Cli.problems(numbers([Cli.one_of(["a", "b"]), Cli.delim(','),
+    Cli.default("b,a")])) == [] : List<&2, Cli.Problem>} &
+  {Cli.parse(numbers([Cli.one_of(["a", "b"]), Cli.delim(','),
+    Cli.default("b,a")]), host(), []) == ok([
+      field("n", ["b", "a"], Cli.Default{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(numbers([Cli.as_nat(), Cli.delim(',')]), host(),
+    ["--n=1,x"]) == Cli.Rejected{[], Cli.E04{"--n <N>...", "x",
+      "expected a whole number from 0 to 281474976710655"}}
+    : Cli.ParseResult} &
+  {Cli.parse(numbers([Cli.as_nat(), Cli.delim(','), Cli.env("N")]),
+    Cli.host_var(host(), "N", "1,x"), []) ==
+    Cli.Rejected{[], Cli.E11{"--n <N>...", "x", "N",
+      "expected a whole number from 0 to 281474976710655"}}
+    : Cli.ParseResult} &
+  {Cli.parse(number_operands([Cli.as_u32(), Cli.delim(',')]), host(),
+    ["1,x,y"]) == Cli.Rejected{[], Cli.E04{"<N>...", "x",
+      "expected a whole number from 0 to 4294967295"}}
+    : Cli.ParseResult} &
+  {Cli.problems(numbers([Cli.as_nat(), Cli.delim(','),
+    Cli.default("1,x,y")])) == [Cli.BadDefault{"tool", "n", "x"}]
+    : List<&2, Cli.Problem>}
+
 def sourced() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
     Cli.arg("--flag", "Flag", [Cli.env("TOOL_FLAG")]),
@@ -893,3 +944,515 @@ law g_rel_defaults:
   ]), host(), ["--a"]) ==
     Cli.Rejected{[], Cli.E08{"--a", "--b <B>"}}
     : Cli.ParseResult}
+
+# A decoder's Bug message, if it raises one.
+def bug_of(-A: Type, d: Cli.Dec(A)) -> Maybe<&2, String>:
+  match d:
+    case Fail{Cli.Bug{msg}}: Some{msg}
+    case _: None{}
+
+def choose_table(keys: List<&2, String>) -> List<(String & String)>:
+  match keys:
+    case Nil{}: Nil{}
+    case +key <> tail: (key, key) <> choose_table(tail)
+
+def keep_table(keys: List<&2, String>) ->
+    List<(String & (@+m: Cli.Matches -> Cli.Dec(Cli.Matches)))>:
+  match keys:
+    case Nil{}: Nil{}
+    case key <> tail: (key, +m => Cli.keep(m)) <> keep_table(tail)
+
+# Every reader's Bug for id; keys build the choose and route tables.
+def reader_bugs(+m: Cli.Matches, +id: String,
+    +keys: List<&2, String>) -> List<&2, Maybe<&2, String>>:
+  [
+    bug_of(Bool, Cli.flag(m, id)),
+    bug_of(Nat, Cli.count(m, id)),
+    bug_of(String, Cli.str(m, id)),
+    bug_of(Maybe<&2, String>, Cli.str_opt(m, id)),
+    bug_of(List<&2, String>, Cli.strs(m, id)),
+    bug_of(Nat, Cli.nat(m, id)),
+    bug_of(Maybe<&2, Nat>, Cli.nat_opt(m, id)),
+    bug_of(List<&2, Nat>, Cli.nats(m, id)),
+    bug_of(U32, Cli.u32(m, id)),
+    bug_of(Maybe<&2, U32>, Cli.u32_opt(m, id)),
+    bug_of(List<&2, U32>, Cli.u32s(m, id)),
+    bug_of(F32, Cli.f32(m, id)),
+    bug_of(Maybe<&2, F32>, Cli.f32_opt(m, id)),
+    bug_of(List<&2, F32>, Cli.f32s(m, id)),
+    bug_of(Bool, Cli.bool(m, id)),
+    bug_of(Maybe<&2, Bool>, Cli.bool_opt(m, id)),
+    bug_of(List<&2, Bool>, Cli.bools(m, id)),
+    bug_of(Bool, Cli.given(m, id)),
+    bug_of(Cli.Src, Cli.source(m, id)),
+    bug_of(String, Cli.choose(String, m, id, choose_table(keys))),
+    bug_of(Maybe<&2, String>,
+      Cli.choose_opt(String, m, id, choose_table(keys))),
+    bug_of(Cli.Matches, Cli.route(Cli.Matches, m, keep_table(keys))),
+  ]
+
+def p12_at(c: Cli.Cmd, found: Maybe<&2, Cli.Matches>, +id: String,
+    +keys: List<&2, String>) -> Type:
+  match found:
+    case None{}: Unit
+    case Some{+m}:
+      {reader_bugs(m, id, keys)
+        == reader_bugs(Cli.sample(c, Cli.path(m)), id, keys)
+        : List<&2, Maybe<&2, String>>}
+
+# P12: after any successful parse, each reader, choose and route raises the
+# same validation Bug, or none, as on the parsed path's sample, whatever the
+# argv. These route callbacks always succeed, so P12 covers route-table
+# validation; G-READ pins what a selected callback returns.
+law p12:
+  for +c: Cli.Cmd
+  for h: Cli.Host
+  for argv: List<&2, String>
+  for id: String
+  for keys: List<&2, String>
+  p12_at(c, Cli.matches(c, Cli.parse(c, h, argv)), id, keys)
+
+def kinds() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("-f, --flag", "Flag", []),
+    Cli.arg("--[no-]neg", "Negatable", [Cli.default("true")]),
+    Cli.arg("-v, --verbose...", "Verbosity", []),
+    Cli.arg("--key <K>", "Key", [Cli.required()]),
+    Cli.arg("--out <O>", "Output", []),
+    Cli.arg("--name <N>", "Name", [Cli.default("anon")]),
+    Cli.arg("--tag <T>...", "Tags", [Cli.delim(',')]),
+    Cli.arg("--jobs <N>", "Jobs", [Cli.as_nat(), Cli.default("4")]),
+    Cli.arg("--port <P>", "Port", [Cli.as_u32()]),
+    Cli.arg("--pid <P>...", "Process ids", [Cli.as_u32()]),
+    Cli.arg("--ok <B>", "Ok", [Cli.as_bool(), Cli.env("TOOL_OK")]),
+    Cli.arg("--format <F>", "Format",
+      [Cli.one_of(["text", "json"]), Cli.default("text")]),
+    Cli.arg("--mode <M>", "Mode", [Cli.one_of(["fast", "slow"])]),
+    Cli.arg("--rate <R>", "Rate", [Cli.as_f32()]),
+    Cli.arg("<FILE>", "File", []),
+  ])
+
+# G-CHECK: an id must be in the sample's scope; on descent a parent's
+# non-global args leave the scope and its globals stay.
+law g_check_wrong_id:
+  {Cli.check(~Bool, ~(+m => Cli.flag(m, "nope")), flags()) == [
+    Cli.DecodeBug{"tool", "'nope' is not an argument of 'tool'"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~(+m => Cli.flag(m, "child")), sub_tool()) == [
+    Cli.DecodeBug{"tool alpha beta",
+      "'child' is not an argument of 'tool alpha beta'"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~(+m => Cli.flag(m, "global")), sub_tool()) ==
+    [] : List<&2, Cli.Problem>}
+
+# G-CHECK: a reader that does not fit names the arg's kind and the reader
+# that fits it.
+law g_check_wrong_reader:
+  {Cli.check(~Nat, ~(+m => Cli.count(m, "flag")), kinds()) == [
+    Cli.DecodeBug{"tool", "'flag' is a flag; read it with Cli.flag"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~(+m => Cli.flag(m, "verbose")), kinds()) == [
+    Cli.DecodeBug{"tool", "'verbose' is a count; read it with Cli.count"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~(+m => Cli.str(m, "tag")), kinds()) == [
+    Cli.DecodeBug{"tool",
+      "'tag' is a list of string values; read it with Cli.strs"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~(+m => Cli.str(m, "jobs")), kinds()) == [
+    Cli.DecodeBug{"tool", "'jobs' is a nat value; read it with Cli.nat"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Nat, ~(+m => Cli.nat(m, "port")), kinds()) == [
+    Cli.DecodeBug{"tool", "'port' is a u32 value; read it with Cli.u32_opt"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Maybe<&2, U32>, ~(+m => Cli.u32_opt(m, "rate")), kinds()) == [
+    Cli.DecodeBug{"tool", "'rate' is an f32 value; read it with Cli.f32_opt"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~(+m => Cli.choose(String, m, "name",
+    [("anon", "anon")])), kinds()) == [
+    Cli.DecodeBug{"tool", "'name' is a string value; read it with Cli.str"},
+  ] : List<&2, Cli.Problem>}
+
+def always(+m: Cli.Matches) -> Cli.Dec(String):
+  do Cli.Dec<String>:
+    key : String <- Cli.str(m, "key")
+    name : String <- Cli.str(m, "name")
+    jobs : Nat <- Cli.nat(m, "jobs")
+    format : String <- Cli.choose(String, m, "format",
+      [("text", "text"), ("json", "json")])
+    file : String <- Cli.str(m, "file")
+    named : Maybe<&2, String> <- Cli.str_opt(m, "name")
+    return file
+
+# G-CHECK: a bare reader needs a value on every parse: required(), a default,
+# or a required positional. _opt fits any single-valued arg.
+law g_check_absent:
+  {Cli.check(~String, ~(+m => Cli.str(m, "out")), kinds()) == [
+    Cli.DecodeBug{"tool", "'out' may be absent; read it with Cli.str_opt"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~(+m => Cli.choose(String, m, "mode",
+    [("fast", "fast"), ("slow", "slow")])), kinds()) == [
+    Cli.DecodeBug{"tool",
+      "'mode' may be absent; read it with Cli.choose_opt"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~always, kinds()) == [] : List<&2, Cli.Problem>}
+
+# G-CHECK: choose keys must equal the one_of values as a set, in any order,
+# repeats allowed.
+law g_check_choose:
+  {Cli.check(~String, ~(+m => Cli.choose(String, m, "format",
+    [("text", "text")])), kinds()) == [
+    Cli.DecodeBug{"tool", "choose table for 'format' does not match its values"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~(+m => Cli.choose(String, m, "format",
+    [("text", "text"), ("json", "json"), ("xml", "xml")])), kinds()) == [
+    Cli.DecodeBug{"tool", "choose table for 'format' does not match its values"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~String, ~(+m => Cli.choose(String, m, "format",
+    [("json", "json"), ("text", "first"), ("text", "second")])), kinds()) ==
+    [] : List<&2, Cli.Problem>}
+
+def routed() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.sub("a", "A", [Cli.alias("x")]),
+    Cli.sub("b", "B", [Cli.sub("c", "C", [])]),
+    Cli.completions(),
+  ])
+
+# G-CHECK: each sample's path needs a route key, checked first; every key must
+# name a declared command path, and may repeat. Aliases and completions()
+# are not routes.
+law g_check_route:
+  {Cli.check(~Cli.Matches, ~(+m => Cli.route(Cli.Matches, m,
+    keep_table(["a", "z"]))), routed()) == [
+    Cli.DecodeBug{"tool a", "route 'z' is not a command"},
+    Cli.DecodeBug{"tool b c", "no route for 'tool b c'"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Matches, ~(+m => Cli.route(Cli.Matches, m,
+    keep_table(["a", "b c", "b", "a"]))), routed()) ==
+    [] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Matches, ~(+m => Cli.route(Cli.Matches, m,
+    keep_table(["x", "b c"]))), routed()) == [
+    Cli.DecodeBug{"tool a", "no route for 'tool a'"},
+    Cli.DecodeBug{"tool b c", "route 'x' is not a command"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Matches, ~(+m => Cli.route(Cli.Matches, m,
+    keep_table(["a", "b c", "completions"]))), routed()) == [
+    Cli.DecodeBug{"tool a", "route 'completions' is not a command"},
+    Cli.DecodeBug{"tool b c", "route 'completions' is not a command"},
+  ] : List<&2, Cli.Problem>}
+
+def tree() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [Cli.sub_optional(),
+    Cli.sub("a", "A", [
+      Cli.sub("b", "B", []),
+      Cli.sub("c", "C", [Cli.external(),
+        Cli.sub("d", "D", [Cli.hidden()]),
+      ]),
+    ]),
+    Cli.completions(),
+    Cli.man(),
+  ])
+
+# G-CHECK: one sample per path that can complete, in pre-order, skipping the
+# completions() and man() built-ins; Usage faults are not problems.
+law g_check_samples:
+  {Cli.check(~Bool, ~(+m => Cli.bug(Bool, "b")), tree()) == [
+    Cli.DecodeBug{"tool", "b"},
+    Cli.DecodeBug{"tool a b", "b"},
+    Cli.DecodeBug{"tool a c", "b"},
+    Cli.DecodeBug{"tool a c d", "b"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~(+m => Cli.fail(Bool, "u")), tree()) ==
+    [] : List<&2, Cli.Problem>}
+
+def lookalikes() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.sub("man", "Manual pages", []),
+    Cli.sub("completions", "Completion data", []),
+  ])
+
+# G-CHECK: only completions() and man() are built-ins; a sub() that shares a
+# name with one is an ordinary command, with a sample and a route.
+law g_check_builtins:
+  {Cli.check(~Bool, ~(+m => Cli.bug(Bool, "b")), lookalikes()) == [
+    Cli.DecodeBug{"tool man", "b"},
+    Cli.DecodeBug{"tool completions", "b"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Matches, ~(+m => Cli.route(Cli.Matches, m,
+    keep_table(["man", "completions"]))), lookalikes()) ==
+    [] : List<&2, Cli.Problem>}
+
+def sampled() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("-v, --verbose...", "Verbosity", [Cli.global()]),
+    Cli.arg("--root <R>", "Root only", []),
+    Cli.sub("s", "S", [
+      Cli.arg("--flag", "Flag", []),
+      Cli.arg("--[no-]pos", "Positive", []),
+      Cli.arg("--[no-]neg", "Negatable", [Cli.default("false")]),
+      Cli.arg("--name <N>", "Name",
+        [Cli.env("TOOL_NAME"), Cli.default("anon")]),
+      Cli.arg("--mode <M>", "Mode", [Cli.one_of(["fast", "slow"])]),
+      Cli.arg("--num <N>", "Nat", [Cli.as_nat()]),
+      Cli.arg("--uint <U>", "U32", [Cli.as_u32()]),
+      Cli.arg("--real <F>", "F32", [Cli.as_f32()]),
+      Cli.arg("--yes <B>", "Bool", [Cli.as_bool()]),
+      Cli.arg("--tag <T>...", "Tags", [Cli.delim(','), Cli.default("a,b")]),
+      Cli.arg("<FILE>...", "Files", [Cli.as_file()]),
+    ]),
+  ])
+
+type Sampled is Data:
+  Sampled{verbose: Nat, flag: Bool, pos: Bool, neg: Bool, name: String,
+    mode: Maybe<&2, String>, num: Maybe<&2, Nat>, uint: Maybe<&2, U32>,
+    yes: Maybe<&2, Bool>, tags: List<&2, String>, files: List<&2, String>,
+    name_source: Cli.Src, mode_source: Cli.Src, real_source: Cli.Src}
+
+def read_sample(+m: Cli.Matches) -> Cli.Dec(Sampled):
+  do Cli.Dec<Sampled>:
+    verbose : Nat <- Cli.count(m, "verbose")
+    flag : Bool <- Cli.flag(m, "flag")
+    pos : Bool <- Cli.flag(m, "pos")
+    neg : Bool <- Cli.flag(m, "neg")
+    name : String <- Cli.str(m, "name")
+    mode : Maybe<&2, String> <- Cli.str_opt(m, "mode")
+    num : Maybe<&2, Nat> <- Cli.nat_opt(m, "num")
+    uint : Maybe<&2, U32> <- Cli.u32_opt(m, "uint")
+    yes : Maybe<&2, Bool> <- Cli.bool_opt(m, "yes")
+    tags : List<&2, String> <- Cli.strs(m, "tag")
+    files : List<&2, String> <- Cli.strs(m, "file")
+    name_source : Cli.Src <- Cli.source(m, "name")
+    mode_source : Cli.Src <- Cli.source(m, "mode")
+    real_source : Cli.Src <- Cli.source(m, "real")
+    return Sampled{verbose, flag, pos, neg, name, mode, num, uint, yes, tags,
+      files, name_source, mode_source, real_source}
+
+# G-CHECK: a sample holds every arg in scope, read here through readers. A
+# default resolves as parse resolves it; otherwise the first one_of value,
+# else a value by type; flags are true, counts 1, lists one element. A
+# sample f32 has no value golden (K8); its source shows it is present.
+law g_check_sample_values:
+  {read_sample(Cli.sample(sampled(), ["s"])) == Done{Sampled{1n, True{},
+    True{}, False{}, "anon", Some{"fast"}, Some{0n}, Some{0}, Some{False{}},
+    ["a", "b"], ["x"], Cli.Default{}, Cli.Argv{}, Cli.Argv{}}}
+    : Cli.Dec(Sampled)}
+
+# G-CHECK: the pkg demo's decoder raises no Bug on any sample.
+law g_check_pkg:
+  {Cli.check(~Demo.Action, ~Demo.decode, Demo.cli()) ==
+    [] : List<&2, Cli.Problem>}
+
+# G-LINT DecodeBug: check lists lint problems first, then decode bugs.
+law g_lint_decode_bug:
+  {Cli.check(~Bool, ~(+m => Cli.flag(m, "nope")), Cli.cmd("tool", "Tool", [
+    Cli.arg("--quiet", "", []),
+  ])) == [
+    Cli.NoHelp{"tool", "--quiet"},
+    Cli.DecodeBug{"tool", "'nope' is not an argument of 'tool'"},
+  ] : List<&2, Cli.Problem>}
+
+def decode_found(~A: Type, ~decode: @+m: Cli.Matches -> Cli.Dec(A),
+    found: Maybe<&2, Cli.Matches>) -> Maybe<Cli.Dec(A)>:
+  match found:
+    case None{}: None{}
+    case Some{+m}: Some{decode(m)}
+
+# What decode answers for argv, or None when the parse does not succeed.
+def decoded(~A: Type, ~decode: @+m: Cli.Matches -> Cli.Dec(A), +c: Cli.Cmd,
+    h: Cli.Host, argv: List<&2, String>) -> Maybe<Cli.Dec(A)>:
+  decode_found(~A, ~decode, Cli.matches(c, Cli.parse(c, h, argv)))
+
+type Readout is Data:
+  Readout{flag: Bool, neg: Bool, verbose: Nat, key: String,
+    out: Maybe<&2, String>, name: String, tags: List<&2, String>, jobs: Nat,
+    port: Maybe<&2, U32>, pids: List<&2, U32>, ok: Maybe<&2, Bool>,
+    format: String, mode: Maybe<&2, String>, rate: Maybe<&2, F32>,
+    file: String, ok_given: Bool, name_source: Cli.Src, ok_source: Cli.Src}
+
+def readout(+m: Cli.Matches) -> Cli.Dec(Readout):
+  do Cli.Dec<Readout>:
+    flag : Bool <- Cli.flag(m, "flag")
+    neg : Bool <- Cli.flag(m, "neg")
+    verbose : Nat <- Cli.count(m, "verbose")
+    key : String <- Cli.str(m, "key")
+    out : Maybe<&2, String> <- Cli.str_opt(m, "out")
+    name : String <- Cli.str(m, "name")
+    tags : List<&2, String> <- Cli.strs(m, "tag")
+    jobs : Nat <- Cli.nat(m, "jobs")
+    port : Maybe<&2, U32> <- Cli.u32_opt(m, "port")
+    pids : List<&2, U32> <- Cli.u32s(m, "pid")
+    ok : Maybe<&2, Bool> <- Cli.bool_opt(m, "ok")
+    format : String <- Cli.choose(String, m, "format",
+      [("text", "plain"), ("json", "structured")])
+    mode : Maybe<&2, String> <- Cli.choose_opt(String, m, "mode",
+      [("fast", "F"), ("slow", "S")])
+    rate : Maybe<&2, F32> <- Cli.f32_opt(m, "rate")
+    file : String <- Cli.str(m, "file")
+    ok_given : Bool <- Cli.given(m, "ok")
+    name_source : Cli.Src <- Cli.source(m, "name")
+    ok_source : Cli.Src <- Cli.source(m, "ok")
+    return Readout{flag, neg, verbose, key, out, name, tags, jobs, port, pids,
+      ok, format, mode, rate, file, ok_given, name_source, ok_source}
+
+def forms() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--depth <D>", "Depth", [Cli.as_nat()]),
+    Cli.arg("--size <N>...", "Sizes", [Cli.as_nat()]),
+    Cli.arg("--seed <S>", "Seed", [Cli.as_u32(), Cli.default("7")]),
+    Cli.arg("--strict <B>", "Strict", [Cli.as_bool(), Cli.default("off")]),
+    Cli.arg("--bit <B>...", "Bits", [Cli.as_bool(), Cli.delim(',')]),
+    Cli.arg("--level <L>", "Level",
+      [Cli.one_of(["low", "high"]), Cli.default("low")]),
+    Cli.arg("--ratio <R>...", "Ratios", [Cli.as_f32()]),
+  ])
+
+type Forms is Data:
+  Forms{depth: Maybe<&2, Nat>, sizes: List<&2, Nat>, seed: U32, strict: Bool,
+    bits: List<&2, Bool>, level: String, ratios: List<&2, F32>}
+
+def read_forms(+m: Cli.Matches) -> Cli.Dec(Forms):
+  do Cli.Dec<Forms>:
+    depth : Maybe<&2, Nat> <- Cli.nat_opt(m, "depth")
+    sizes : List<&2, Nat> <- Cli.nats(m, "size")
+    seed : U32 <- Cli.u32(m, "seed")
+    strict : Bool <- Cli.bool(m, "strict")
+    bits : List<&2, Bool> <- Cli.bools(m, "bit")
+    level : String <- Cli.str(m, "level")
+    ratios : List<&2, F32> <- Cli.f32s(m, "ratio")
+    return Forms{depth, sizes, seed, strict, bits, level, ratios}
+
+# G-READ: each reader returns its parsed value; choose returns the table's
+# value for the key. A given f32 has no golden: F32.read does not normalize
+# in the checker (K8), so end-to-end tests cover it.
+law g_read_values:
+  {decoded(~Readout, ~readout, kinds(), Cli.host_var(host(), "TOOL_OK", "yes"),
+    ["-f", "--no-neg", "-vv", "--key", "k", "--out", "o", "--tag=a,b",
+      "--tag", "c", "--jobs", "8", "--port", "8080", "--pid=1", "--pid=2",
+      "--format", "json", "--mode", "slow", "in"]) ==
+    Some{Done{Readout{True{}, False{}, 2n, "k", Some{"o"}, "anon",
+      ["a", "b", "c"], 8n, Some{8080}, [1, 2], Some{True{}}, "structured",
+      Some{"S"}, None{}, "in", True{}, Cli.Default{}, Cli.Env{}}}}
+    : Maybe<Cli.Dec(Readout)>} &
+  {decoded(~Forms, ~read_forms, forms(), host(),
+    ["--depth", "2", "--size=3", "--size", "5", "--seed", "4294967295",
+      "--strict=YES", "--bit=1,no,TRUE", "--level", "high"]) ==
+    Some{Done{Forms{Some{2n}, [3n, 5n], 4294967295, True{},
+      [True{}, False{}, True{}], "high", []}}}
+    : Maybe<Cli.Dec(Forms)>}
+
+# G-READ: absent args read as their default, else False, 0, None or [].
+law g_read_absent:
+  {decoded(~Readout, ~readout, kinds(), host(), ["--key", "k", "in"]) ==
+    Some{Done{Readout{False{}, True{}, 0n, "k", None{}, "anon", [], 4n,
+      None{}, [], None{}, "plain", None{}, None{}, "in", False{},
+      Cli.Default{}, Cli.Absent{}}}}
+    : Maybe<Cli.Dec(Readout)>} &
+  {decoded(~Forms, ~read_forms, forms(), host(), []) ==
+    Some{Done{Forms{None{}, [], 7, False{}, [], "low", []}}}
+    : Maybe<Cli.Dec(Forms)>}
+
+def rooted() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [Cli.sub_optional(),
+    Cli.sub("a", "A", [Cli.alias("x"), Cli.sub("b", "B", [])]),
+  ])
+
+def which(+m: Cli.Matches) -> Cli.Dec(String):
+  Cli.route(String, m, [
+    ("", +n => Done{"root"}),
+    ("a b", +n => Done{"a b"}),
+  ])
+
+def kept_path(+m: Cli.Matches) -> Cli.Dec(List<&2, String>):
+  do Cli.Dec<List<&2, String>>:
+    k : Cli.Matches <- Cli.keep(m)
+    return Cli.path(k)
+
+# G-READ: route dispatches on the canonical path, the root at "";
+# keep returns its input, whose path names the declared commands.
+law g_read_route:
+  {decoded(~String, ~which, rooted(), host(), []) ==
+    Some{Done{"root"}} : Maybe<Cli.Dec(String)>} &
+  {decoded(~String, ~which, rooted(), host(), ["x", "b"]) ==
+    Some{Done{"a b"}} : Maybe<Cli.Dec(String)>} &
+  {decoded(~List<&2, String>, ~kept_path, rooted(), host(), ["x", "b"]) ==
+    Some{Done{["a", "b"]}} : Maybe<Cli.Dec(List<&2, String>)>}
+
+def first_choice(+m: Cli.Matches) -> Cli.Dec(String):
+  Cli.choose(String, m, "format",
+    [("json", "json"), ("text", "first"), ("text", "second")])
+
+def first_route(+m: Cli.Matches) -> Cli.Dec(String):
+  Cli.route(String, m, [
+    ("a b", +n => Done{"a b"}),
+    ("", +n => Done{"first"}),
+    ("", +n => Done{"second"}),
+  ])
+
+# G-READ: when a choose or route key repeats, the first matching entry wins.
+law g_read_first_match:
+  {decoded(~String, ~first_choice, kinds(), host(), ["--key", "k", "in"]) ==
+    Some{Done{"first"}} : Maybe<Cli.Dec(String)>} &
+  {decoded(~String, ~first_route, rooted(), host(), []) ==
+    Some{Done{"first"}} : Maybe<Cli.Dec(String)>}
+
+def faults(+m: Cli.Matches) -> Cli.Dec(String):
+  Cli.route(String, m, [
+    ("", +n => Cli.bug(String, "root bug")),
+    ("a b", +n => Cli.fail(String, "a b usage")),
+  ])
+
+def bad_faults(+m: Cli.Matches) -> Cli.Dec(String):
+  Cli.route(String, m, [
+    ("", +n => Cli.bug(String, "root bug")),
+    ("a b", +n => Cli.fail(String, "a b usage")),
+    ("z", +n => Done{"z"}),
+  ])
+
+# G-READ: route validates its whole table, then returns the selected
+# callback's result unchanged, Bug and Usage included; check reports a
+# callback's Bug at its sample.
+law g_read_route_faults:
+  {decoded(~String, ~faults, rooted(), host(), []) ==
+    Some{Fail{Cli.Bug{"root bug"}}} : Maybe<Cli.Dec(String)>} &
+  {decoded(~String, ~faults, rooted(), host(), ["x", "b"]) ==
+    Some{Fail{Cli.Usage{"a b usage"}}} : Maybe<Cli.Dec(String)>} &
+  {decoded(~String, ~bad_faults, rooted(), host(), []) ==
+    Some{Fail{Cli.Bug{"route 'z' is not a command"}}}
+    : Maybe<Cli.Dec(String)>} &
+  {Cli.check(~String, ~faults, rooted()) == [
+    Cli.DecodeBug{"tool", "root bug"},
+  ] : List<&2, Cli.Problem>}
+
+# G-READ: external_args holds the unknown name and the tokens after it.
+law g_read_external:
+  {decoded(~Maybe<(String & List<&2, String>)>,
+    ~(+m => Done{Cli.external_args(m)}), external_tool(), host(),
+    ["plug", "--x"]) == Some{Done{Some{("plug", ["--x"])}}}
+    : Maybe<Cli.Dec(Maybe<(String & List<&2, String>)>)>} &
+  {decoded(~Maybe<(String & List<&2, String>)>,
+    ~(+m => Done{Cli.external_args(m)}), external_tool(), host(),
+    ["known"]) == Some{Done{None{}}}
+    : Maybe<Cli.Dec(Maybe<(String & List<&2, String>)>)>}
+
+# G-READ: pkg decodes globals before and after the subcommand, an env
+# registry, an alias, a choose, and rest() arguments.
+law g_read_pkg:
+  {decoded(~Demo.Action, ~Demo.decode, Demo.cli(),
+    Cli.host_var(host(), "PKG_REGISTRY", "https://mirror.example"),
+    ["-vv", "add", "-D", "left-pad"]) ==
+    Some{Done{Demo.Action{2n, None{}, Demo.Add{True{},
+      "https://mirror.example", ["left-pad"]}}}}
+    : Maybe<Cli.Dec(Demo.Action)>} &
+  {decoded(~Demo.Action, ~Demo.decode, Demo.cli(), host(),
+    ["rm", "a", "-C", "/srv", "b"]) ==
+    Some{Done{Demo.Action{0n, Some{"/srv"}, Demo.Remove{["a", "b"]}}}}
+    : Maybe<Cli.Dec(Demo.Action)>} &
+  {decoded(~Demo.Action, ~Demo.decode, Demo.cli(), host(),
+    ["list", "--format", "json", "-a"]) ==
+    Some{Done{Demo.Action{0n, None{}, Demo.Show{True{}, Demo.Json{}}}}}
+    : Maybe<Cli.Dec(Demo.Action)>} &
+  {decoded(~Demo.Action, ~Demo.decode, Demo.cli(), host(),
+    ["run", "build", "x", "--", "-y"]) ==
+    Some{Done{Demo.Action{0n, None{}, Demo.Script{"build",
+      ["x", "--", "-y"]}}}}
+    : Maybe<Cli.Dec(Demo.Action)>}
