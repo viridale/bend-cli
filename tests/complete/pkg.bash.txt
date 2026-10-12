@@ -27,6 +27,9 @@ pkg help add  =>
 pkg help - => --help -h
 pkg man  => 
 pkg --  => 
+pkg -v --  => 
+pkg help --  => 
+pkg -C --  => add completions help list remove rm run
 pkg bogus  => 
 pkg --color=  => add completions help list remove rm run
 pkg -C =  => add completions help list remove rm run

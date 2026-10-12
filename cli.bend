@@ -5758,6 +5758,23 @@ def zsh_help_arms(items: List<&2, Item>, +name: String,
         zsh_help_arms(tail, name, words, depth, ind))
     case head <> tail: zsh_help_arms(tail, name, words, depth, ind)
 
+# Ends a state that _arguments entered past a "--" it dropped, after which
+# no subcommand follows.
+def zsh_past_end(ind: String) -> String:
+  String.append(ind, "(( ${#${(M)words[1,CURRENT-1]:#--}} < ends )) && return 1")
+
+# At the top command (no words), the count of "--" before the cursor that
+# zsh_past_end compares with.
+def zsh_ends(words: List<&2, String>, +ind: String) -> List<&2, String>:
+  match words:
+    case Nil{}:
+      [String.append(ind,
+        "# _arguments -S drops a -- typed before a command's first word, so a"),
+        String.append(ind,
+          "# state whose words hold fewer -- than the line has is past one."),
+        String.append(ind, "local -i ends=${#${(M)words[2,CURRENT-1]:#--}}")]
+    case _: []
+
 # The body of a command with subcommands: its specs end in a state that
 # offers them, completes help's tree, or enters the arm of the one given.
 def zsh_branch(+entries: List<&2, Entry>, specs: List<&2, String>,
@@ -5768,10 +5785,12 @@ def zsh_branch(+entries: List<&2, Entry>, specs: List<&2, String>,
   +hstate = String.append(state, "-help")
   +label = zsh_label(name, words)
   List.concat(&2, String, [
+    zsh_ends(words, ind),
     last_with(zsh_args(ind, List.append(&2, String, specs,
       [String.append("*:: :->", state)])), " && return"),
     [String.append(ind, "case $state in"),
       String.concat([ind, "  ", Sh.quote(state), ")"]),
+      zsh_past_end(i2),
       String.append(i2, "if (( CURRENT == 1 )); then")],
     zsh_commands(entries, True{}, label, String.append(i2, "  ")),
     [String.append(i2, "else"), String.append(i2, "  case $words[1] in")],
@@ -5781,7 +5800,8 @@ def zsh_branch(+entries: List<&2, Entry>, specs: List<&2, String>,
       "(-h --help)--help[Print help]", String.append("*:: :->", hstate)]),
       " && return"),
     [String.append(i2, "      case $state in"),
-      String.concat([i2, "        ", Sh.quote(hstate), ")"])],
+      String.concat([i2, "        ", Sh.quote(hstate), ")"]),
+      zsh_past_end(String.append(i2, "          "))],
     last_with(zsh_help_tree(entries, label,
       zsh_help_arms(items, name, words, 1n,
         String.append(i2, "              ")),
@@ -6129,7 +6149,7 @@ def fish_engine(+id: String) -> List<&2, String>:
     "        set tags v",
     "    else",
     "        test $end = 0; and test $help = 0; and set -a tags n",
-    "        test $help = 1; and set -a tags h",
+    "        test $end = 0; and test $help = 1; and set -a tags h",
     "        test $shape[1] = 0; and test $help = 0; and set -a tags p(math $n + 1)",
     "    end",
     "    for tag in $argv[2..-1]",

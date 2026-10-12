@@ -17,3 +17,10 @@
 #   fields for cmd_items(c) and path for sub_at, and builtin_name's inlined
 #   walk adds a take and a seal. It runs once per process; no other def that
 #   M5 had rose.
+#
+# zsh's "--" guard, against M6's build (92c748f), both from main.bend:
+# FID_CLI_ZSH_CMD 30 2 71 -> 33 2 77, and the new FID_CLI_ZSH_ENDS 2 0 6:
+#   zsh_branch, inlined here, adds a guard line to each state and its help
+#   state, a keep of the indent and a seal per list cell, and zsh_ends builds
+#   the top command's three lines. Both run once per command path while
+#   printing a zsh script; no other def changed.

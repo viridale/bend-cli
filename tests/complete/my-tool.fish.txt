@@ -7,6 +7,7 @@ my-tool --output=sand/f => --output=sand/file1
 my-tool --out sand/ => sand/dir1/ sand/dir2/ sand/file1
 my-tool --key x  => 
 my-tool rem  => add help
+my-tool rem -q --  => 
 my-tool rem prune  => 
 my-tool rem add - => --help --no-quiet --quiet --tag -h -q -t
 my-tool rem add n sand/ => sand/dir1/ sand/dir2/
