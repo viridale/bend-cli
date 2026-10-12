@@ -850,8 +850,9 @@ type NameScan is Data:
   NameOK{name: String, rest: String, next: Nat}
   NameBad{col: Nat}
 
+# PhOK's name is reversed: only a positional's name is read.
 type PhScan is Data:
-  PhOK{name: String, rest: String, next: Nat}
+  PhOK{rev: String, rest: String, next: Nat}
   PhBad{col: Nat}
 
 def name_start(+c: Char) -> Bool:
@@ -861,53 +862,56 @@ def name_char(+c: Char) -> Bool:
   Bool.or(name_start(c), Bool.or(Char.is_eq(c, '-'),
     Bool.or(Char.is_eq(c, '_'), Char.is_eq(c, '.'))))
 
-def finish_name(name: String, rest: String, +pos: Nat,
+# rev is the name so far, reversed.
+def finish_name(rev: String, rest: String, +pos: Nat,
     +first: Bool, +dot_start: Nat) -> NameScan:
   Bool.pick(NameScan, Bool.or(first, Nat.is_lt(dot_start, pos)),
     NameBad{Bool.pick(Nat, first, pos, dot_start)},
-    NameOK{name, rest, pos})
+    NameOK{String.reverse(rev), rest, pos})
 
-def scan_name(s: String, +pos: Nat, name: String,
+def scan_name(s: String, +pos: Nat, rev: String,
     +first: Bool, dot_start: Nat) -> NameScan:
   match s:
     case SNil{}:
-      finish_name(name, SNil{}, pos, first, dot_start)
+      finish_name(rev, SNil{}, pos, first, dot_start)
     case SCon{Chr{32}, tail}:
-      finish_name(name, SCon{Char.from_u32(32), tail}, pos, first, dot_start)
+      finish_name(rev, SCon{Char.from_u32(32), tail}, pos, first, dot_start)
     case SCon{Chr{91}, tail}:
-      finish_name(name, SCon{Char.from_u32(91), tail}, pos, first, dot_start)
+      finish_name(rev, SCon{Char.from_u32(91), tail}, pos, first, dot_start)
     case SCon{+h, tail}:
       valid = Bool.pick(Bool, first, name_start(h), name_char(h))
       next_dot = Bool.pick(Nat, Char.is_eq(h, '.'), dot_start, Nat.add(pos, 1n))
       Bool.pick(NameScan, valid,
-        scan_name(tail, Nat.add(pos, 1n), String.append(name, Char.show(h)),
-          False{}, next_dot),
+        scan_name(tail, Nat.add(pos, 1n), SCon{h, rev}, False{}, next_dot),
         NameBad{pos})
 
-def ph_char(+c: Char) -> Bool:
-  Bool.not(Bool.or(Char.is_eq(c, ' '), Bool.or(Char.is_eq(c, '<'),
-    Bool.or(Char.is_eq(c, '>'), Bool.or(Char.is_eq(c, '['),
-    Bool.or(Char.is_eq(c, ']'), Char.is_eq(c, '=')))))))
+# A placeholder ends at a character no name holds: at close after a name,
+# else with an error there.
+def ph_stop(at_close: Bool, rev: String, rest: String, +pos: Nat) -> PhScan:
+  match at_close rev:
+    case True{} SCon{h, t}: PhOK{SCon{h, t}, rest, Nat.add(pos, 1n)}
+    case _ _: PhBad{pos}
 
-def scan_ph(s: String, +pos: Nat, +name: String, +close: Char) -> PhScan:
+# The placeholder name in s up to close, reversed in rev. A name holds no
+# space, '<', '>', '[', ']' or '=', and close is one of them.
+def scan_ph(s: String, +pos: Nat, rev: String, +close: Char) -> PhScan:
   match s:
-    case SNil{}:
-      PhBad{pos}
-    case SCon{+h, +tail}:
-      Bool.pick(PhScan, Char.is_eq(h, close),
-        Bool.pick(PhScan, String.is_empty(name), PhBad{pos},
-          PhOK{name, tail, Nat.add(pos, 1n)}),
-        Bool.pick(PhScan, ph_char(h),
-          scan_ph(tail, Nat.add(pos, 1n), String.append(name, Char.show(h)), close),
-          PhBad{pos}))
+    case SNil{}: PhBad{pos}
+    case SCon{Chr{32}, tail}: ph_stop(Char.is_eq(' ', close), rev, tail, pos)
+    case SCon{Chr{60}, tail}: ph_stop(Char.is_eq('<', close), rev, tail, pos)
+    case SCon{Chr{62}, tail}: ph_stop(Char.is_eq('>', close), rev, tail, pos)
+    case SCon{Chr{91}, tail}: ph_stop(Char.is_eq('[', close), rev, tail, pos)
+    case SCon{Chr{93}, tail}: ph_stop(Char.is_eq(']', close), rev, tail, pos)
+    case SCon{Chr{61}, tail}: ph_stop(Char.is_eq('=', close), rev, tail, pos)
+    case SCon{h, tail}: scan_ph(tail, Nat.add(pos, 1n), SCon{h, rev}, close)
 
 def finish_pos(found: PhScan, kind: UsageKind) -> Usage:
   match found:
     case PhBad{col}:
       Invalid{col}
-    case PhOK{name, SNil{}, next}:
-      Parsed{String.to_lower(name), "", "", kind}
-    case PhOK{name, rest, next}:
+    case PhOK{rev, SNil{}, next}:
+      Parsed{String.to_lower(String.reverse(rev)), "", "", kind}
+    case PhOK{rev, rest, next}:
       Invalid{next}
 
 def parse_pos(s: String, +repeat: Bool) -> Usage:
@@ -926,9 +930,9 @@ def finish_required_value(found: PhScan, id: String, short: String,
   match found:
     case PhBad{col}:
       Invalid{col}
-    case PhOK{name, SNil{}, next}:
+    case PhOK{rev, SNil{}, next}:
       Parsed{id, short, long, kind}
-    case PhOK{name, rest, next}:
+    case PhOK{rev, rest, next}:
       Invalid{next}
 
 def finish_optional_value(found: PhScan, id: String, short: String,
@@ -936,9 +940,9 @@ def finish_optional_value(found: PhScan, id: String, short: String,
   match found:
     case PhBad{col}:
       Invalid{col}
-    case PhOK{name, SCon{Chr{93}, SNil{}}, next}:
+    case PhOK{rev, SCon{Chr{93}, SNil{}}, next}:
       Parsed{id, short, long, BareOptionKind{}}
-    case PhOK{name, rest, next}:
+    case PhOK{rev, rest, next}:
       Invalid{next}
 
 def finish_long(found: NameScan, short: String,
@@ -962,15 +966,19 @@ def finish_long(found: NameScan, short: String,
     case NameOK{name, rest, next}:
       Invalid{next}
 
-def parse_long_prefixed(+s: String, +short: String,
-    +repeat: Bool, +start: Nat) -> Usage:
-  Bool.pick(Usage, String.starts_with(s, "--[no-]"),
-    finish_long(scan_name(String.drop(s, 7n), Nat.add(start, 7n),
-      "", True{}, Nat.add(start, 7n)), short, repeat, True{}),
-    Bool.pick(Usage, String.starts_with(s, "--"),
-      finish_long(scan_name(String.drop(s, 2n), Nat.add(start, 2n),
-        "", True{}, Nat.add(start, 2n)), short, repeat, False{}),
-      Invalid{start}))
+# A long name after "--[no-]" or "--", at column start.
+def parse_long_prefixed(s: String, short: String,
+    repeat: Bool, +start: Nat) -> Usage:
+  match s:
+    case SCon{Chr{45}, SCon{Chr{45}, SCon{Chr{91}, SCon{Chr{110},
+        SCon{Chr{111}, SCon{Chr{45}, SCon{Chr{93}, rest}}}}}}}:
+      finish_long(scan_name(rest, Nat.add(start, 7n), "", True{},
+        Nat.add(start, 7n)), short, repeat, True{})
+    case SCon{Chr{45}, SCon{Chr{45}, rest}}:
+      finish_long(scan_name(rest, Nat.add(start, 2n), "", True{},
+        Nat.add(start, 2n)), short, repeat, False{})
+    case _:
+      Invalid{start}
 
 def parse_short_tail(tail: String, +short: String, +repeat: Bool) -> Usage:
   match tail:
@@ -1011,11 +1019,22 @@ def parse_usage_body(s: String, +repeat: Bool) -> Usage:
     case _:
       Invalid{0n}
 
+# Whether s ends in "...": run counts the dots just before s.
+def ends_in_ellipsis(s: String, run: Nat) -> Bool:
+  match s:
+    case SNil{}: Nat.is_lt(2n, run)
+    case SCon{h, t}:
+      ends_in_ellipsis(t, Bool.pick(Nat, Char.is_eq(h, '.'), Nat.add(run, 1n), 0n))
+
+def parse_usage_repeated(repeated: Bool, +usage: String) -> Usage:
+  match repeated:
+    case False{}: parse_usage_body(usage, False{})
+    case True{}:
+      parse_usage_body(String.take(usage, Nat.sub(String.length(usage), 3n)),
+        True{})
+
 def parse_usage(+usage: String) -> Usage:
-  +repeated = String.ends_with(usage, "...")
-  body = Bool.pick(String, repeated,
-    String.take(usage, Nat.sub(String.length(usage), 3n)), usage)
-  parse_usage_body(body, repeated)
+  parse_usage_repeated(ends_in_ellipsis(usage, 0n), usage)
 
 def alias_valid_result(parsed: Usage, +raw: String) -> Bool:
   match parsed:
@@ -1291,11 +1310,28 @@ def usage_kind(~f: UsageKind -> Bool, parsed: Usage) -> Bool:
     case Parsed{id, short, long, kind}: f(kind)
     case Invalid{col}: False{}
 
-def has_pos_item(items: List<&2, Item>) -> Bool:
+# An item as lint walks it: an Arg with its usage parsed once, a Sub with
+# its children's too.
+type LintItem is Data:
+  LintArg{usage: String, help: String, attrs: List<&2, Item>, parsed: Usage}
+  LintSub{name: String, about: String, children: List<&2, Item>,
+    items: List<&2, LintItem>}
+  LintOther{item: Item}
+
+def lint_items(items: List<&2, Item>) -> List<&2, LintItem>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, attrs} <> tail:
+      LintArg{usage, help, attrs, parse_usage(usage)} <> lint_items(tail)
+    case Sub{name, about, +children} <> tail:
+      LintSub{name, about, children, lint_items(children)} <> lint_items(tail)
+    case head <> tail: LintOther{head} <> lint_items(tail)
+
+def has_pos_item(items: List<&2, LintItem>) -> Bool:
   match items:
     case Nil{}: False{}
-    case Arg{usage, help, attrs} <> tail:
-      Bool.or(usage_kind(~kind_pos, parse_usage(usage)), has_pos_item(tail))
+    case LintArg{usage, help, attrs, parsed} <> tail:
+      Bool.or(usage_kind(~kind_pos, parsed), has_pos_item(tail))
     case head <> tail: has_pos_item(tail)
 
 def has_sub_item(items: List<&2, Item>) -> Bool:
@@ -1330,12 +1366,12 @@ def usage_id(parsed: Usage, attrs: List<&2, Item>) -> String:
     case Invalid{col}:
       ""
 
-def scope_ids(items: List<&2, Item>) -> List<&2, String>:
+def scope_ids(items: List<&2, LintItem>) -> List<&2, String>:
   match items:
     case Nil{}:
       Nil{}
-    case Arg{usage, help, attrs} <> tail:
-      +name = usage_id(parse_usage(usage), attrs)
+    case LintArg{usage, help, attrs, parsed} <> tail:
+      +name = usage_id(parsed, attrs)
       +rest = scope_ids(tail)
       Bool.pick(List<&2, String>, String.is_empty(name),
         rest, name <> rest)
@@ -1348,8 +1384,16 @@ type Seen is Data:
   SeenArgAlias{name: String}
   SeenSubAlias{name: String}
 
+# String.eq, without rebuilding both strings to hand them back.
+def same_text(a: String, b: String) -> Bool:
+  match a b:
+    case SNil{} SNil{}: True{}
+    case SCon{x, xt} SCon{y, yt}:
+      Bool.and(Char.is_eq(x, y), same_text(xt, yt))
+    case _ _: False{}
+
 def same_nonempty(+a: String, b: String) -> Bool:
-  Bool.and(Bool.not(String.is_empty(a)), String.eq(a, b))
+  Bool.and(Bool.not(String.is_empty(a)), same_text(a, b))
 
 def arg_collision(seen: List<&2, Seen>, +id: String,
     +short: String, +long: String) -> Maybe<&2, String>:
@@ -1360,7 +1404,7 @@ def arg_collision(seen: List<&2, Seen>, +id: String,
       here = Bool.pick(Maybe<&2, String>, same_nonempty(short, old_short),
         Some{short}, Bool.pick(Maybe<&2, String>,
           same_nonempty(long, old_long), Some{long},
-          Bool.pick(Maybe<&2, String>, String.eq(id, old_id), Some{id}, None{})))
+          Bool.pick(Maybe<&2, String>, same_text(id, old_id), Some{id}, None{})))
       Maybe.or(&2, String, here, arg_collision(tail, id, short, long))
     case SeenArgAlias{+old} <> tail:
       Bool.pick(Maybe<&2, String>, same_nonempty(short, old),
@@ -1375,9 +1419,9 @@ def sub_collision(seen: List<&2, Seen>, +name: String) -> Bool:
     case Nil{}:
       False{}
     case SeenSub{old} <> tail:
-      Bool.or(String.eq(name, old), sub_collision(tail, name))
+      Bool.or(same_text(name, old), sub_collision(tail, name))
     case SeenSubAlias{old} <> tail:
-      Bool.or(String.eq(name, old), sub_collision(tail, name))
+      Bool.or(same_text(name, old), sub_collision(tail, name))
     case head <> tail:
       sub_collision(tail, name)
 
@@ -1388,7 +1432,7 @@ def arg_alias_collision(seen: List<&2, Seen>, +name: String) -> Bool:
       Bool.or(Bool.or(same_nonempty(name, short),
         same_nonempty(name, long)), arg_alias_collision(tail, name))
     case SeenArgAlias{old} <> tail:
-      Bool.or(String.eq(name, old), arg_alias_collision(tail, name))
+      Bool.or(same_text(name, old), arg_alias_collision(tail, name))
     case head <> tail:
       arg_alias_collision(tail, name)
 
@@ -1438,13 +1482,13 @@ def has_global(items: List<&2, Item>) -> Bool:
     case Global{} <> tail: True{}
     case head <> tail: has_global(tail)
 
-def global_entries(items: List<&2, Item>) -> List<&2, Seen>:
+def global_entries(items: List<&2, LintItem>) -> List<&2, Seen>:
   match items:
     case Nil{}: Nil{}
-    case Arg{+usage, help, +attrs} <> tail:
+    case LintArg{usage, help, +attrs, parsed} <> tail:
       List.append(&2, Seen,
         Bool.pick(List<&2, Seen>, has_global(attrs),
-          arg_entries(parse_usage(usage), attrs), Nil{}),
+          arg_entries(parsed, attrs), Nil{}),
         global_entries(tail))
     case head <> tail: global_entries(tail)
 
@@ -1708,7 +1752,7 @@ def check_default(found: Maybe<&2, String>, kind: UsageKind,
         value, id, at)
 
 def positional_issue(+kind: UsageKind, +id: String,
-    attrs: List<&2, Item>, rest_items: List<&2, Item>,
+    attrs: List<&2, Item>, rest_items: List<&2, LintItem>,
     +seen_optional: Bool, +seen_variadic: Bool, +at: String) ->
     List<&2, Problem>:
   Bool.pick(List<&2, Problem>,
@@ -1747,7 +1791,7 @@ def arg_reserved_dup(+at: String, +long: String, seen: List<&2, Seen>,
 
 def arg_issues(+kind: UsageKind, +id: String, +short: String,
     +long: String, usage: String, help: String, +attrs: List<&2, Item>,
-    remaining: List<&2, Item>, +at: String, ids: List<&2, String>,
+    remaining: List<&2, LintItem>, +at: String, ids: List<&2, String>,
     seen: List<&2, Seen>, optional: Bool, variadic: Bool,
     version: Bool) -> List<&2, Problem>:
   List.concat(&2, Problem, [
@@ -1764,7 +1808,7 @@ def arg_issues(+kind: UsageKind, +id: String, +short: String,
   ])
 
 def arg_problems(parsed: Usage, +usage: String, help: String,
-    +attrs: List<&2, Item>, remaining: List<&2, Item>, +at: String,
+    +attrs: List<&2, Item>, remaining: List<&2, LintItem>, +at: String,
     ids: List<&2, String>, +seen: List<&2, Seen>,
     optional: Bool, variadic: Bool, +version: Bool) -> List<&2, Problem>:
   match parsed:
@@ -1781,13 +1825,13 @@ def arg_problems(parsed: Usage, +usage: String, help: String,
         arg_alias_issues(aliases, at, SeenArg{id, short, long} <> seen,
           version))
 
+# has_pos: whether items has a positional.
 def command_body_issues(+at: String, name: String, about: String,
-    +items: List<&2, Item>) -> List<&2, Problem>:
+    +items: List<&2, Item>, has_pos: Bool) -> List<&2, Problem>:
   List.concat(&2, Problem, [
     when_problem(Bool.and(String.is_empty(about),
       Bool.not(has_hidden(items))), NoHelp{at, name}),
-    when_problem(Bool.and(has_pos_item(items), has_sub_item(items)),
-      Mixed{at}),
+    when_problem(Bool.and(has_pos, has_sub_item(items)), Mixed{at}),
     missing_refs(scope_group_rules(items), scope_groups(items), at),
     missing_refs(scope_groups(items), scope_group_rules(items), at),
   ])
@@ -1800,14 +1844,13 @@ def sub_name_issues(+at: String, +name: String,
       [Reserved{at, name}],
       when_problem(sub_collision(seen, name), Dup{at, name})))
 
-def lint(items: List<&2, Item>, +at: String, +ids: List<&2, String>,
+def lint(items: List<&2, LintItem>, +at: String, +ids: List<&2, String>,
     +seen: List<&2, Seen>, +inherited: List<&2, Seen>, +optional: Bool,
     +variadic: Bool, +version: Bool, +root: Bool) -> List<&2, Problem>:
   match items:
     case Nil{}:
       Nil{}
-    case Arg{+usage, help, +attrs} <> +tail:
-      +parsed = parse_usage(usage)
+    case LintArg{+usage, help, +attrs, +parsed} <> +tail:
       List.append(&2, Problem,
         arg_problems(parsed, usage, help, attrs, tail, at, ids, seen,
           optional, variadic, version),
@@ -1817,22 +1860,23 @@ def lint(items: List<&2, Item>, +at: String, +ids: List<&2, String>,
           Bool.or(optional, usage_kind(~kind_optional_pos, parsed)),
           Bool.or(variadic, usage_kind(~kind_variadic_pos, parsed)),
           version, root))
-    case Sub{+name, about, +children} <> tail:
+    case LintSub{+name, about, +children, +kids} <> tail:
       +child_at = String.concat([at, " ", name])
       +aliases = find_aliases(children)
       List.concat(&2, Problem, [
         sub_name_issues(at, name, seen),
         sub_alias_issues(aliases, at, SeenSub{name} <> seen),
-        command_body_issues(child_at, name, about, children),
-        lint(children, child_at, scope_ids(children), inherited,
-          List.append(&2, Seen, global_entries(children), inherited),
+        command_body_issues(child_at, name, about, children,
+          has_pos_item(kids)),
+        lint(kids, child_at, scope_ids(kids), inherited,
+          List.append(&2, Seen, global_entries(kids), inherited),
           False{}, False{}, version, False{}),
         lint(tail, at, ids,
           List.append(&2, Seen, sub_alias_entries(aliases),
             SeenSub{name} <> seen),
           inherited, optional, variadic, version, root),
       ])
-    case head <> tail:
+    case LintOther{head} <> tail:
       List.append(&2, Problem,
         maybe_misplaced(command_attr_name(head, root), at),
         lint(tail, at, ids, seen, inherited, optional, variadic,
@@ -1841,10 +1885,11 @@ def lint(items: List<&2, Item>, +at: String, +ids: List<&2, String>,
 def problems(c: Cmd) -> List<&2, Problem>:
   match c:
     case Cmd{+name, about, +items}:
+      +linted = lint_items(items)
       List.concat(&2, Problem, [
         when_problem(Bool.not(valid_command_name(name)), BadName{name, name}),
-        command_body_issues(name, name, about, items),
-        lint(items, name, scope_ids(items), Nil{}, global_entries(items),
+        command_body_issues(name, name, about, items, has_pos_item(linted)),
+        lint(linted, name, scope_ids(linted), Nil{}, global_entries(linted),
           False{}, False{}, has_version_item(items), True{}),
       ])
 

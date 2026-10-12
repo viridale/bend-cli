@@ -24,3 +24,31 @@
 #   state, a keep of the indent and a seal per list cell, and zsh_ends builds
 #   the top command's three lines. Both run once per command path while
 #   printing a zsh script; no other def changed.
+#
+# Lint parsing each usage once, and linear usage scans, against main's
+# build (1e79950), both from main.bend. Builds counting executed ops show
+# every kind falling on bench --threads 1 (keeps 83.6M -> 35.7M, takes 266M
+# -> 81M, seals 682M -> 171M) and on parse_usage alone:
+# FID_CLI_SCAN_NAME 0 11 30 -> 0 14 36: each char conses onto the reversed
+#   name inline, where it called String.append and Char.show, which copied
+#   the name on every char outside these counts; finish_name's
+#   String.reverse is inlined at its three call sites and runs once a name.
+# FID_CLI_SCAN_PH 2 3 11 -> gone: scan_ph is now a tail loop, a spin counted
+#   at each call site with ph_stop's six stop arms, which raises
+#   FID_CLI_PARSE_POS 0 1 0 -> 0 15 44, FID_CLI_PARSE_SHORT_TAIL 3 10 6 ->
+#   3 24 50 and FID_CLI_FINISH_LONG 3 10 16 -> 3 24 60 (two sites each). One
+#   arm runs a char, where the old loop built PhOK and appended every char.
+# FID_CLI_PARSE_LONG_PREFIXED 4 4 19 -> 0 7 50: it matches "--[no-]" and
+#   "--" as patterns and scans one name, where String.starts_with and
+#   String.drop ran twice and both names were scanned; a failed "--[no-]"
+#   rebuilds the cells it took, a copy per point of failure.
+# FID_CLI_FINISH_POS 0 0 0 -> 0 1 2: reverses the positional's name once.
+# FID_CLI_PARSE_USAGE 0 2 10 -> 0 0 0 and the new FID_CLI_PARSE_USAGE_BODY
+#   0 2 10: parse_usage_body is no longer inlined into parse_usage.
+# FID_CLI_PROBLEMS 8 0 36 -> 9 0 36 and the new FID_CLI_LINT_ITEMS 2 3 21:
+#   lint_items parses each usage once into the LintItems that lint,
+#   scope_ids, global_entries and has_pos_item read, where a lint parsed
+#   each four times and once more per Arg before it in its scope; problems
+#   keeps that list for its four readers.
+# FID_CLI_LINT 30 23 29 -> 26 24 29: takes a LintSub's parsed children; its
+#   total falls.
