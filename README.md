@@ -14,7 +14,7 @@ Create `app.bend` with the command definition, decoder, and action:
 
 ```python
 import Base
-import cli@1.0.0.0/cli.bend as Cli
+import cli@0.1.0.0/cli.bend as Cli
 
 type Greeting is Data:
   Greeting{name: String}
@@ -42,7 +42,7 @@ Create `main.bend` to connect the app to process arguments and output:
 ```python
 import Base
 import ./app.bend as App
-import cli@1.0.0.0/run.bend as Run
+import cli@0.1.0.0/run.bend as Run
 
 def main() -> IO(Unit):
   Run.main(~App.Greeting, ~App.decode, ~App.act, App.cli())
@@ -125,7 +125,7 @@ a parsing case:
 ```python
 import Base
 import ./app.bend as App
-import cli@1.0.0.0/cli.bend as Cli
+import cli@0.1.0.0/cli.bend as Cli
 
 law cli_ok:
   {Cli.check(~App.Greeting, ~App.decode, App.cli()) == []
@@ -198,14 +198,14 @@ the man pages with mandoc.
 
 ## Upgrading
 
-Package imports pin a four-part version such as `cli@1.0.0.0`. Update both
+Package imports pin a four-part version such as `cli@0.1.0.0`. Update both
 the pure and shell imports together. The first three parts follow SemVer; the
 last part records a republish of the same source with a changed package hash.
 
 Patch releases preserve public signatures and output bytes. Minor releases
 may add API or change rendered output; the changelog lists each output change
 with its previous and new form. Major releases may change public names, types,
-or semantics. Re-run app laws after an upgrade, especially golden output laws.
+or semantics; until 1.0, minor releases may too. Re-run app laws after an upgrade, especially golden output laws.
 
 ## License
 
