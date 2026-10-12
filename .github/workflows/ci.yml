@@ -16,7 +16,7 @@ jobs:
       matrix:
         os: [macos-15, ubuntu-24.04]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install Bend
@@ -25,6 +25,7 @@ jobs:
           sh /tmp/bend-install.sh
           echo "$HOME/.bend/bin" >> "$GITHUB_PATH"
       - name: Check Bend version
+        id: bend
         run: |
           bend version
           version="$(bend version | awk '{print $2}')"
@@ -33,6 +34,7 @@ jobs:
             echo "Bend 2.0.36 or newer is required" >&2
             exit 1
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Check source modules
         run: |
           find . -name '*.bend' -not -path './tmp/*' \
@@ -40,6 +42,19 @@ jobs:
             while IFS= read -r file; do
               bend "$file" --check-only
             done
+      # --verdict builds Bend's proof kernel with Lean once per Bend version
+      # and reuses it from ~/.bend/bendtt; the cache saves only on success.
+      - name: Restore proof kernel
+        id: kernel
+        uses: actions/cache@v6
+        with:
+          path: ~/.bend/bendtt
+          key: bendtt-${{ runner.os }}-${{ steps.bend.outputs.version }}
+      - name: Install Lean
+        if: steps.kernel.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/v4.2.4/elan-init.sh -o /tmp/elan-init.sh
+          sh /tmp/elan-init.sh -y --no-modify-path --default-toolchain leanprover/lean4:v4.34.0
       - name: Check proofs
         run: |
           bend PROOF.bend --verdict
