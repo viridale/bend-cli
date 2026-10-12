@@ -8,6 +8,9 @@ functions, so applications can state their CLI behavior as Bend laws.
 The BendHub package is `cli`. Import `cli.bend` in application code and laws;
 import `run.bend` only in the executable shell. Bend 2.0.36 or newer is required.
 
+The [documentation](docs/README.md) has a tutorial, how-to guides, a cookbook
+of complete programs, and the reference.
+
 ## Quickstart
 
 Create `app.bend` with the command definition, decoder, and action:
