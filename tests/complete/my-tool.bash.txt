@@ -1,0 +1,27 @@
+my-tool  => help rem remote
+my-tool - => --help --mode --no-quiet --out --output --quiet --version -V -h -o -q
+my-tool --mode  => help rem remote
+my-tool --mode= => \$x a\ b c:d e\\f it\'s
+my-tool --mode=c: => d
+my-tool --mode=e => e\\f
+my-tool --mode=i => it\'s
+my-tool -o sand/ => sand/dir1 sand/dir2 sand/file1
+my-tool --output=sand/f => sand/file1
+my-tool --key x  => 
+my-tool rem  => add help
+my-tool rem prune  => 
+my-tool rem add - => --help --no-quiet --quiet --tag -h -q -t
+my-tool rem add n sand/ => sand/dir1 sand/dir2
+my-tool rem add  => 
+my-tool rem add n d  => 
+my-tool rem add -t x  => 
+my-tool help  => rem remote
+my-tool help rem  => add
+my-tool rem help  => add
+my-tool -q rem --no-quiet add - => --help --no-quiet --quiet --tag -h -q -t
+my-tool --mode =  => 
+my-tool --mode=  => help rem remote
+my-tool rem add :  => sand
+my-tool rem add n: sand/ => sand/dir1 sand/dir2
+my-tool rem add :n sand/ => sand/dir1 sand/dir2
+my-tool --mode=c:  => help rem remote

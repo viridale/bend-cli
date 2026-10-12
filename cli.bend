@@ -4998,11 +4998,1447 @@ def problem_lines(found: List<&2, Problem>) -> String:
     case Nil{}: ""
     case p <> tail: String.concat([problem_line(p), "\n", problem_lines(tail)])
 
-# ---- Outcome (§8.7, V1-V5) ----
+# ---- Completions and man pages (§11) ----
 
-type Outcome is Data:
-  Shown{code: U32, out: String, err: String}
-  Matched{m: Matches}
+type Shell is Data:
+  Bash{}
+  Zsh{}
+  Fish{}
+
+def sh_body(s: String) -> String:
+  match s:
+    case SNil{}: SNil{}
+    case SCon{Chr{39}, tail}: String.append("'\\''", sh_body(tail))
+    case SCon{c, tail}: SCon{c, sh_body(tail)}
+
+# POSIX single quotes, with ' written as '\'' (P3).
+def Sh.quote(s: String) -> String:
+  SCon{'\'', String.append(sh_body(s), "'")}
+
+def fish_body(s: String) -> String:
+  match s:
+    case SNil{}: SNil{}
+    case SCon{Chr{39}, tail}: String.append("\\'", fish_body(tail))
+    case SCon{Chr{92}, tail}: String.append("\\\\", fish_body(tail))
+    case SCon{c, tail}: SCon{c, fish_body(tail)}
+
+# fish single quotes, with \ and ' backslash-escaped (P4).
+def Fish.quote(s: String) -> String:
+  SCon{'\'', String.append(fish_body(s), "'")}
+
+# Text in an _arguments spec or a _describe entry, with \, [, ] and :
+# backslash-escaped (P5).
+def Zsh.esc(s: String) -> String:
+  match s:
+    case SNil{}: SNil{}
+    case SCon{Chr{92}, tail}: String.append("\\\\", Zsh.esc(tail))
+    case SCon{Chr{91}, tail}: String.append("\\[", Zsh.esc(tail))
+    case SCon{Chr{93}, tail}: String.append("\\]", Zsh.esc(tail))
+    case SCon{Chr{58}, tail}: String.append("\\:", Zsh.esc(tail))
+    case SCon{c, tail}: SCon{c, Zsh.esc(tail)}
+
+# Text for man(7), start telling whether a line starts here: \, -, ", '
+# and ` as escapes, and \& before a . or a space that starts a line.
+def roff_body(s: String, start: Bool) -> String:
+  match s start:
+    case SNil{} _: SNil{}
+    case SCon{Chr{46}, tail} True{}: String.append("\\&.", roff_body(tail, False{}))
+    case SCon{Chr{32}, tail} True{}: String.append("\\& ", roff_body(tail, False{}))
+    case SCon{Chr{10}, tail} _: SCon{'\n', roff_body(tail, True{})}
+    case SCon{Chr{92}, tail} _: String.append("\\e", roff_body(tail, False{}))
+    case SCon{Chr{45}, tail} _: String.append("\\-", roff_body(tail, False{}))
+    case SCon{Chr{34}, tail} _: String.append("\\(dq", roff_body(tail, False{}))
+    case SCon{Chr{39}, tail} _: String.append("\\(aq", roff_body(tail, False{}))
+    case SCon{Chr{96}, tail} _: String.append("\\(ga", roff_body(tail, False{}))
+    case SCon{c, tail} _: SCon{c, roff_body(tail, False{})}
+
+# Text that starts lines (P6, P15).
+def Roff.esc(s: String) -> String:
+  roff_body(s, True{})
+
+# Text after the start of a line.
+def roff_text(s: String) -> String:
+  roff_body(s, False{})
+
+def text_lines(lines: List<&2, String>) -> String:
+  match lines:
+    case Nil{}: ""
+    case line <> tail: String.concat([line, "\n", text_lines(tail)])
+
+# The summary with its hard line breaks as spaces.
+def one_line(s: String) -> String:
+  String.join(String.lines(summary(s)), " ")
+
+def ident_char(+c: Char) -> Char:
+  Bool.pick(Char, Bool.or(name_start(c), Char.is_eq(c, '_')), c, '_')
+
+# A name with every char outside [A-Za-z0-9_] as _, for shell identifiers.
+def ident(s: String) -> String:
+  match s:
+    case SNil{}: SNil{}
+    case SCon{c, tail}: SCon{ident_char(c), ident(tail)}
+
+def same_words(a: List<&2, String>, b: List<&2, String>) -> Bool:
+  match a b:
+    case Nil{} Nil{}: True{}
+    case x <> xs y <> ys: Bool.and(String.eq(x, y), same_words(xs, ys))
+    case _ _: False{}
+
+def last_with(lines: List<&2, String>, +suffix: String) -> List<&2, String>:
+  match lines:
+    case Nil{}: Nil{}
+    case line <> Nil{}: [String.append(line, suffix)]
+    case line <> tail: line <> last_with(tail, suffix)
+
+# A command on a visible path, in pre-order from the root: the words of its
+# path below the root, its items, and the globals it inherits, root first.
+type Place is Data:
+  Place{words: List<&2, String>, items: List<&2, Item>,
+    globals: List<&2, Item>}
+
+# The visible commands below items, whose subcommands inherit globals.
+def places(items: List<&2, Item>, +words: List<&2, String>,
+    +globals: List<&2, Item>) -> List<&2, Place>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{name, about, +children} <> tail:
+      +here = List.append(&2, String, words, [name])
+      List.append(&2, Place,
+        Bool.pick(List<&2, Place>, has_hidden(children), [],
+          Place{here, children, globals} <> places(children, here,
+            List.append(&2, Item, globals, global_items(children)))),
+        places(tail, words, globals))
+    case head <> tail: places(tail, words, globals)
+
+def all_places(+items: List<&2, Item>) -> List<&2, Place>:
+  Place{[], items, []} <> places(items, [], global_items(items))
+
+# What a value completes to: a word of the one_of list numbered list, a
+# file, a directory, or nothing.
+type Comp is Data:
+  Words{list: Nat, values: List<&2, String>}
+  Files{}
+  Dirs{}
+  Text{}
+
+# An option as a script offers it: its names, shorts first, its kind, its
+# placeholder, what its value completes to, and its help on one line.
+type Opt is Data:
+  Opt{names: List<&2, String>, kind: UsageKind, ph: String, comp: Comp,
+    help: String}
+
+# A positional slot, numbered from 1.
+type Slot is Data:
+  Slot{k: Nat, hidden: Bool, required: Bool, many: Bool, rest: Bool,
+    ph: String, comp: Comp}
+
+# A visible subcommand: its name, its names with aliases, and its summary.
+type Entry is Data:
+  Entry{name: String, names: List<&2, String>, about: String}
+
+# The number of values in lists, counting from k + 1 after a miss, or 0.
+def list_number(lists: List<&2, List<&2, String>>,
+    +values: List<&2, String>, hit: Bool, +k: Nat) -> Nat:
+  match lists hit:
+    case _ True{}: k
+    case Nil{} False{}: 0n
+    case head <> tail False{}:
+      list_number(tail, values, same_words(head, values), (k + 1n : Nat))
+
+def add_list(found: Maybe<&2, List<&2, String>>,
+    +lists: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match found:
+    case None{}: lists
+    case Some{+values}:
+      Bool.pick(List<&2, List<&2, String>>,
+        List.contains(~List<&2, String>, ~same_words, lists, values), lists,
+        List.append(&2, List<&2, String>, lists, [values]))
+
+def visible_one_of(hidden: Bool, attrs: List<&2, Item>) ->
+    Maybe<&2, List<&2, String>>:
+  match hidden:
+    case True{}: None{}
+    case False{}: find_one_of(attrs)
+
+def item_lists(items: List<&2, Item>, lists: List<&2, List<&2, String>>) ->
+    List<&2, List<&2, String>>:
+  match items:
+    case Nil{}: lists
+    case Arg{usage, help, +attrs} <> tail:
+      item_lists(tail, add_list(visible_one_of(has_hidden(attrs), attrs), lists))
+    case head <> tail: item_lists(tail, lists)
+
+# The one_of lists of visible args, each once, in pre-order.
+def place_lists(places: List<&2, Place>,
+    lists: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match places:
+    case Nil{}: lists
+    case Place{words, items, globals} <> tail:
+      place_lists(tail, item_lists(items, lists))
+
+def type_comp(found: Maybe<&2, ValueType>) -> Comp:
+  match found:
+    case Some{TFile{}}: Files{}
+    case Some{TDir{}}: Dirs{}
+    case _: Text{}
+
+def comp_of(found: Maybe<&2, List<&2, String>>, t: Maybe<&2, ValueType>,
+    lists: List<&2, List<&2, String>>) -> Comp:
+  match found:
+    case Some{+values}: Words{list_number(lists, values, False{}, 0n), values}
+    case None{}: type_comp(t)
+
+def head_part(parts: List<&2, String>) -> String:
+  match parts:
+    case head <> tail: head
+    case Nil{}: ""
+
+def next_part(parts: List<&2, String>) -> String:
+  match parts:
+    case head <> next <> tail: next
+    case _: ""
+
+def between(s: String, +open: Char, close: Char) -> String:
+  head_part(String.split(next_part(String.split(s, open)), close))
+
+# The name in a usage's <>, or in an optional positional's [].
+def placeholder(+usage: String) -> String:
+  Bool.pick(String, String.contains(usage, "<"), between(usage, '<', '>'),
+    between(usage, '[', ']'))
+
+def short_alias(s: String) -> Bool:
+  Bool.not(long_name(s))
+
+def short_names(parsed: Usage, attrs: List<&2, Item>) -> List<&2, String>:
+  match parsed:
+    case Parsed{id, +short, long, kind}:
+      List.append(&2, String,
+        Bool.pick(List<&2, String>, String.is_empty(short), [], [short]),
+        List.filter(~String, ~short_alias, find_aliases(attrs)))
+    case Invalid{col}: []
+
+def parsed_kind(parsed: Usage) -> UsageKind:
+  match parsed:
+    case Parsed{id, short, long, kind}: kind
+    case Invalid{col}: FlagKind{}
+
+def arg_opt(+parsed: Usage, usage: String, help: String,
+    +attrs: List<&2, Item>, lists: List<&2, List<&2, String>>) -> Opt:
+  Opt{List.append(&2, String, short_names(parsed, attrs),
+      option_names(parsed, attrs)),
+    parsed_kind(parsed), placeholder(usage),
+    comp_of(find_one_of(attrs), find_as(attrs), lists), one_line(help)}
+
+# The visible options in items.
+def arg_opts(items: List<&2, Item>, +lists: List<&2, List<&2, String>>) ->
+    List<&2, Opt>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      +rest = arg_opts(tail, lists)
+      +parsed = parse_usage(usage)
+      Bool.pick(List<&2, Opt>,
+        Bool.or(usage_kind(~kind_pos, parsed), has_hidden(attrs)), rest,
+        arg_opt(parsed, usage, help, attrs, lists) <> rest)
+    case head <> tail: arg_opts(tail, lists)
+
+def flag_opt(names: List<&2, String>, help: String) -> Opt:
+  Opt{names, FlagKind{}, "", Text{}, help}
+
+def version_opts(present: Bool, args: List<&2, Item>) -> List<&2, Opt>:
+  match present:
+    case True{}:
+      [flag_opt(Bool.pick(List<&2, String>,
+        Maybe.is_some(&2, OptFound, find_option(args, "-V")),
+        ["--version"], ["-V", "--version"]), "Print version")]
+    case False{}: []
+
+# -h and --help, without -h when an arg took it, then at a root with a
+# version -V and --version likewise.
+def builtin_opts(+items: List<&2, Item>, globals: List<&2, Item>,
+    root: Bool) -> List<&2, Opt>:
+  +args = List.append(&2, Item, items, globals)
+  flag_opt(Bool.pick(List<&2, String>,
+      Maybe.is_some(&2, OptFound, find_option(args, "-h")),
+      ["--help"], ["-h", "--help"]), "Print help") <>
+    version_opts(Bool.and(root, has_version_item(items)), args)
+
+def pos_slot(parsed: Usage, k: Nat, usage: String, +attrs: List<&2, Item>,
+    lists: List<&2, List<&2, String>>) -> List<&2, Slot>:
+  match parsed:
+    case Parsed{id, short, long, PosKind{required, many}}:
+      [Slot{k, has_hidden(attrs), required, many, has_rest(attrs),
+        placeholder(usage), comp_of(find_one_of(attrs), find_as(attrs), lists)}]
+    case _: []
+
+# The positional slots in items, hidden ones too, numbered from k.
+def arg_slots(items: List<&2, Item>, +k: Nat,
+    +lists: List<&2, List<&2, String>>) -> List<&2, Slot>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, attrs} <> tail:
+      +parsed = parse_usage(usage)
+      List.append(&2, Slot, pos_slot(parsed, k, usage, attrs, lists),
+        arg_slots(tail, Bool.pick(Nat, usage_kind(~kind_pos, parsed),
+          (k + 1n : Nat), k), lists))
+    case head <> tail: arg_slots(tail, k, lists)
+
+# The slots up to the variadic one, which takes every later value.
+def completing(slots: List<&2, Slot>) -> List<&2, Slot>:
+  match slots:
+    case Nil{}: Nil{}
+    case Slot{k, hidden, required, True{}, rest, ph, comp} <> tail:
+      [Slot{k, hidden, required, True{}, rest, ph, comp}]
+    case head <> tail: head <> completing(tail)
+
+def variadic(slots: List<&2, Slot>) -> Maybe<&2, Slot>:
+  match slots:
+    case Nil{}: None{}
+    case Slot{k, hidden, required, True{}, rest, ph, comp} <> tail:
+      Some{Slot{k, hidden, required, True{}, rest, ph, comp}}
+    case head <> tail: variadic(tail)
+
+# The visible subcommands in items.
+def sub_entries(items: List<&2, Item>) -> List<&2, Entry>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{+name, about, +children} <> tail:
+      +rest = sub_entries(tail)
+      Bool.pick(List<&2, Entry>, has_hidden(children), rest,
+        Entry{name, name <> find_aliases(children), one_line(about)} <> rest)
+    case head <> tail: sub_entries(tail)
+
+def opt_names(opts: List<&2, Opt>) -> List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case Opt{names, kind, ph, comp, help} <> tail:
+      List.append(&2, String, names, opt_names(tail))
+
+def entry_names(entries: List<&2, Entry>) -> List<&2, String>:
+  match entries:
+    case Nil{}: Nil{}
+    case Entry{name, names, about} <> tail:
+      List.append(&2, String, names, entry_names(tail))
+
+# What a script needs at a place: its number, its words, its options in
+# scope, own first, the built-ins, its visible subcommands, and its slots.
+type Stop is Data:
+  Stop{k: Nat, words: List<&2, String>, opts: List<&2, Opt>,
+    builtins: List<&2, Opt>, subs: List<&2, Entry>, slots: List<&2, Slot>}
+
+def stop_of(place: Place, k: Nat, +lists: List<&2, List<&2, String>>) ->
+    Stop:
+  match place:
+    case Place{+words, +items, +globals}:
+      Stop{k, words, List.append(&2, Opt, arg_opts(items, lists),
+          arg_opts(globals, lists)),
+        builtin_opts(items, globals, List.is_empty(&2, String, words)),
+        sub_entries(items), arg_slots(items, 1n, lists)}
+
+def stops(places: List<&2, Place>, +k: Nat,
+    +lists: List<&2, List<&2, String>>) -> List<&2, Stop>:
+  match places:
+    case Nil{}: Nil{}
+    case place <> tail:
+      stop_of(place, k, lists) <> stops(tail, (k + 1n : Nat), lists)
+
+# The number of the stop at words, from found on.
+def stop_number(stops: List<&2, Stop>, +words: List<&2, String>,
+    found: Maybe<&2, Nat>) -> Nat:
+  match stops found:
+    case _ Some{k}: k
+    case Nil{} None{}: 0n
+    case Stop{+k, here, opts, builtins, subs, slots} <> tail None{}:
+      stop_number(tail, words, Bool.pick(Maybe<&2, Nat>,
+        same_words(here, words), Some{k}, None{}))
+
+# ---- bash
+
+# Words quoted for sh, apart by sep.
+def sh_list(words: List<&2, String>, +sep: String) -> String:
+  match words:
+    case Nil{}: ""
+    case word <> Nil{}: Sh.quote(word)
+    case word <> tail: String.concat([Sh.quote(word), sep, sh_list(tail, sep)])
+
+def dests(names: List<&2, String>, +dest: String) -> List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail: dest <> dests(tail, dest)
+
+# Each subcommand name's path, once per name.
+def entry_dests(entries: List<&2, Entry>, +words: List<&2, String>) ->
+    List<&2, String>:
+  match entries:
+    case Nil{}: Nil{}
+    case Entry{name, names, about} <> tail:
+      List.append(&2, String,
+        dests(names, String.join(List.append(&2, String, words, [name]), " ")),
+        entry_dests(tail, words))
+
+def bash_subs(+entries: List<&2, Entry>, words: List<&2, String>) ->
+    List<&2, String>:
+  Bool.pick(List<&2, String>, List.is_empty(&2, Entry, entries), [], [
+    String.concat(["      subs=(", sh_list(entry_names(entries), " "), ")"]),
+    String.concat(["      dests=(", sh_list(entry_dests(entries, words), " "),
+      ")"]),
+  ])
+
+def bash_shape(found: Maybe<&2, Slot>) -> List<&2, String>:
+  match found:
+    case Some{Slot{k, hidden, required, many, rest, ph, comp}}:
+      [String.concat(["      many=", Nat.show(k), " rest=",
+        Bool.pick(String, rest, "1", "0")])]
+    case None{}: []
+
+def bash_scope_arm(stop: Stop) -> List<&2, String>:
+  match stop:
+    case Stop{k, +words, opts, builtins, subs, slots}:
+      String.concat(["    ", Sh.quote(String.join(words, " ")), ")"]) <>
+        last_with(List.concat(&2, String, [
+          [String.concat(["      opts=(", sh_list(List.append(&2, String,
+            opt_names(opts), opt_names(builtins)), " "), ")"])],
+          bash_subs(subs, words),
+          bash_shape(variadic(slots)),
+        ]), " ;;")
+
+def bash_letter(comp: Comp) -> String:
+  match comp:
+    case Words{list, values}: "w"
+    case Files{}: "f"
+    case Dirs{}: "d"
+    case Text{}: "s"
+
+def bash_values(comp: Comp) -> String:
+  match comp:
+    case Words{list, values}: String.concat([" values=(", sh_list(values, " "), ")"])
+    case _: ""
+
+def bash_kind(+comp: Comp, bare: Bool) -> String:
+  String.concat(["kind=", bash_letter(comp),
+    Bool.pick(String, bare, " opt=1", ""), bash_values(comp)])
+
+def bash_opt_case(opt: Opt) -> List<&2, String>:
+  match opt:
+    case Opt{names, OptionKind{many}, ph, comp, help}:
+      [String.concat(["        ", sh_list(names, "|"), ") ",
+        bash_kind(comp, False{}), " ;;"])]
+    case Opt{names, BareOptionKind{}, ph, comp, help}:
+      [String.concat(["        ", sh_list(names, "|"), ") ",
+        bash_kind(comp, True{}), " ;;"])]
+    case _: []
+
+def bash_opt_cases(opts: List<&2, Opt>) -> List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case opt <> tail: List.append(&2, String, bash_opt_case(opt), bash_opt_cases(tail))
+
+def bash_slot_cases(slots: List<&2, Slot>) -> List<&2, String>:
+  match slots:
+    case Nil{}: Nil{}
+    case Slot{k, False{}, required, many, rest, ph, Words{list, values}} <> tail:
+      String.concat(["        ", Nat.show(k), ") ",
+        bash_kind(Words{list, values}, False{}), " ;;"]) <> bash_slot_cases(tail)
+    case Slot{k, False{}, required, many, rest, ph, Files{}} <> tail:
+      String.concat(["        ", Nat.show(k), ") kind=f ;;"]) <> bash_slot_cases(tail)
+    case Slot{k, False{}, required, many, rest, ph, Dirs{}} <> tail:
+      String.concat(["        ", Nat.show(k), ") kind=d ;;"]) <> bash_slot_cases(tail)
+    case head <> tail: bash_slot_cases(tail)
+
+def bash_cases(words: List<&2, String>, cases: List<&2, String>) ->
+    List<&2, String>:
+  match cases:
+    case Nil{}: []
+    case head <> tail:
+      List.concat(&2, String, [
+        [String.concat(["    ", Sh.quote(String.join(words, " ")), ")"]),
+          "      case $1 in"],
+        head <> tail,
+        ["      esac ;;"],
+      ])
+
+def bash_arg_arm(stop: Stop) -> List<&2, String>:
+  match stop:
+    case Stop{k, words, opts, builtins, subs, slots}:
+      bash_cases(words, List.append(&2, String, bash_opt_cases(opts),
+        bash_slot_cases(completing(slots))))
+
+def bash_arms(~f: Stop -> List<&2, String>, stops: List<&2, Stop>) ->
+    List<&2, String>:
+  match stops:
+    case Nil{}: Nil{}
+    case stop <> tail: List.append(&2, String, f(stop), bash_arms(~f, tail))
+# The rest of every bash script, for function prefix id and the quoted
+# command name: the parser of COMP_WORDS, then the binding.
+def bash_engine(+id: String, name: String) -> List<&2, String>:
+  [
+    "",
+    "# Offers each value of kind that starts with $1, written after $2 and cut to",
+    "# the part readline completes: the text after the last \"=\" or \":\". Readline",
+    "# quotes files and directories; words are quoted here.",
+    String.concat([id, "_offer() {"]),
+    "  local word full i",
+    "  case $kind in",
+    "    f) compopt -o filenames; mapfile -t values < <(compgen -f -- \"$1\") ;;",
+    "    d) compopt -o filenames; mapfile -t values < <(compgen -d -- \"$1\") ;;",
+    "    w)",
+    "      for ((i = 0; i < ${#values[@]}; i++)); do",
+    "        printf -v 'values[i]' %q \"${values[i]}\"",
+    "      done ;;",
+    "    *) return ;;",
+    "  esac",
+    "  for word in \"${values[@]}\"; do",
+    "    full=$2$word",
+    "    [[ $word == \"$1\"* ]] && COMPREPLY+=(\"${full:${#2}+${#1}-${#tail}}\")",
+    "  done",
+    "}",
+    "",
+    String.concat([id, "() {"]),
+    "  local -a words=() opts=() subs=() dests=() values=()",
+    "  local cur tail word line gap path= want= kind opt many rest i j n=0 end=0 help=0",
+    "  COMPREPLY=()",
+    "  # Rejoin the \"=\" and \":\" that bash splits words at. COMP_LINE has no blank",
+    "  # at such a split, so a \"=\" typed as its own word stays one.",
+    "  line=${COMP_LINE#*\"${COMP_WORDS[0]}\"}",
+    "  for ((i = 1; i <= COMP_CWORD; i++)); do",
+    "    word=${COMP_WORDS[i]}",
+    "    tail=${COMP_WORDS[i-1]}",
+    "    gap=${line%%[![:blank:]]*}",
+    "    line=${line:${#gap}+${#word}}",
+    "    if ((i > 1)) && [[ -z $gap ]] &&",
+    "      [[ -n $word && -z ${word//[=:]} || -n $tail && -z ${tail//[=:]} ]]; then",
+    "      words[${#words[@]}-1]+=$word",
+    "    else",
+    "      words+=(\"$word\")",
+    "    fi",
+    "  done",
+    "  tail=${COMP_WORDS[COMP_CWORD]}",
+    "  [[ -z ${tail//[=:]} ]] && tail=",
+    "  cur=${words[${#words[@]}-1]}",
+    "  unset 'words[${#words[@]}-1]'",
+    String.concat(["  ", id, "_scope"]),
+    "  for word in \"${words[@]}\"; do",
+    "    if [[ -n $want ]]; then",
+    "      want=",
+    "    elif ((!end)) && [[ $word == -- ]]; then",
+    "      end=1",
+    "    elif ((!end)) && [[ $word == --* ]]; then",
+    String.concat(["      ", id, "_arg \"${word%%=*}\""]),
+    "      [[ -n $kind && $opt == 0 && $word != *=* ]] && want=$word",
+    "    elif ((!end)) && [[ $word == -?* ]]; then",
+    "      for ((j = 1; j < ${#word}; j++)); do",
+    String.concat(["        ", id, "_arg \"-${word:j:1}\""]),
+    "        [[ -n $kind ]] || continue",
+    "        ((j + 1 == ${#word})) && want=-${word:j:1}",
+    "        break",
+    "      done",
+    "    elif ((${#subs[@]})); then",
+    "      ((end)) && return",
+    "      if [[ $word == help ]] && ((!help)); then",
+    "        help=1",
+    "        continue",
+    "      fi",
+    "      for ((j = 0; j < ${#subs[@]}; j++)); do",
+    "        [[ $word == \"${subs[j]}\" ]] && break",
+    "      done",
+    "      ((j < ${#subs[@]})) || return",
+    "      path=${dests[j]}",
+    String.concat(["      ", id, "_scope"]),
+    "    else",
+    "      # n counts the slots filled. The variadic slot stays open, but a rest()",
+    "      # value takes every later word, so nothing more completes.",
+    "      n=$((n + 1))",
+    "      if ((n == many && rest)); then",
+    "        end=1",
+    "      elif ((n == many)); then",
+    "        n=$((n - 1))",
+    "      fi",
+    "    fi",
+    "  done",
+    "  if [[ -n $want ]]; then",
+    String.concat(["    ", id, "_arg \"$want\""]),
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  elif ((!end)) && [[ $cur == --*=* ]]; then",
+    String.concat(["    ", id, "_arg \"${cur%%=*}\""]),
+    String.concat(["    ", id, "_offer \"${cur#*=}\" \"${cur%%=*}=\""]),
+    "  elif ((!end)) && [[ $cur == -* ]]; then",
+    "    values=(\"${opts[@]}\") kind=w",
+    "    ((help)) && values=('-h' '--help')",
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  elif ((!end && ${#subs[@]})); then",
+    "    values=(\"${subs[@]}\") kind=w",
+    "    ((help)) || values+=('help')",
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  elif ((!help)); then",
+    String.concat(["    ", id, "_arg $((n + 1))"]),
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  fi",
+    "}",
+    "",
+    String.concat(["complete -F ", id, " ", name]),
+  ]
+
+def bash_script(+name: String, +items: List<&2, Item>) -> String:
+  +all = all_places(items)
+  +found = stops(all, 0n, place_lists(all, []))
+  +id = String.append("_", ident(name))
+  text_lines(List.concat(&2, String, [
+    ["# bash completion; needs bash 4 or later.",
+      "",
+      "# Sets the tables of command path $path: opts, the options to offer; subs and",
+      "# dests, each subcommand name and the path it enters; many, the slot of the",
+      "# variadic positional, or 0; rest, 1 when that slot is rest().",
+      String.append(id, "_scope() {"),
+      "  opts=() subs=() dests=() many=0 rest=0",
+      "  case $path in"],
+    bash_arms(~bash_scope_arm, found),
+    ["  esac",
+      "}",
+      "",
+      "# Sets kind to what the option or positional $1 (a name, or a 1-based slot)",
+      "# takes at $path: w, a word from values; f, a file; d, a directory; s, other",
+      "# text. kind is empty for an option that takes no value and for a positional",
+      "# that completes nothing; opt is 1 when the value can only follow \"=\".",
+      String.append(id, "_arg() {"),
+      "  kind= opt=0 values=()",
+      "  case $path in"],
+    bash_arms(~bash_arg_arm, found),
+    ["  esac", "}"],
+    bash_engine(id, Sh.quote(name)),
+  ]))
+
+# ---- zsh
+
+def zsh_action(comp: Comp) -> String:
+  match comp:
+    case Words{list, values}: String.concat(["($v", Nat.show(list), ")"])
+    case Files{}: "_files"
+    case Dirs{}: "_files -/"
+    case Text{}: " "
+
+# The prefix of an option's specs: * when it repeats, else its names as a
+# group that excludes each other.
+def zsh_pre(kind: UsageKind, +names: List<&2, String>) -> String:
+  match kind:
+    case CountKind{}: "*"
+    case OptionKind{True{}}: "*"
+    case _:
+      Bool.pick(String, Nat.is_lt(1n, List.length(&2, String, names)),
+        String.concat(["(", String.join(names, " "), ")"]), "")
+
+def zsh_spec(+name: String, kind: UsageKind, pre: String, d: String,
+    ph: String, act: String) -> String:
+  match kind:
+    case OptionKind{many}:
+      String.concat([pre, name, Bool.pick(String, long_name(name), "=", "+"),
+        "[", d, "]:", ph, ":", act])
+    case BareOptionKind{}:
+      String.concat([pre, name, "=-[", d, "]::", ph, ":", act])
+    case _: String.concat([pre, name, "[", d, "]"])
+
+def zsh_names(names: List<&2, String>, +kind: UsageKind, +pre: String,
+    +d: String, +ph: String, +act: String) -> List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail:
+      zsh_spec(name, kind, pre, d, ph, act) <>
+        zsh_names(tail, kind, pre, d, ph, act)
+
+def zsh_opts(opts: List<&2, Opt>) -> List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case Opt{+names, +kind, ph, comp, help} <> tail:
+      List.append(&2, String,
+        zsh_names(names, kind, zsh_pre(kind, names), Zsh.esc(help),
+          Zsh.esc(ph), zsh_action(comp)),
+        zsh_opts(tail))
+
+def zsh_slots(slots: List<&2, Slot>) -> List<&2, String>:
+  match slots:
+    case Nil{}: Nil{}
+    case Slot{k, True{}, required, many, rest, ph, comp} <> tail:
+      zsh_slots(tail)
+    case Slot{k, False{}, required, True{}, False{}, ph, comp} <> tail:
+      String.concat(["*:", Zsh.esc(ph), ":", zsh_action(comp)]) <>
+        zsh_slots(tail)
+    case Slot{k, False{}, required, +many, rest, ph, comp} <> tail:
+      String.concat([Bool.pick(String, many, "(-)", ""), Nat.show(k),
+        Bool.pick(String, required, ":", "::"), Zsh.esc(ph), ":",
+        zsh_action(comp)]) <> zsh_slots(tail)
+
+# Specs quoted, one per line, all but the last continued.
+def zsh_spec_lines(specs: List<&2, String>, +ind: String) ->
+    List<&2, String>:
+  match specs:
+    case Nil{}: Nil{}
+    case spec <> Nil{}: [String.concat([ind, "  ", Sh.quote(spec)])]
+    case spec <> tail:
+      String.concat([ind, "  ", Sh.quote(spec), " \\"]) <>
+        zsh_spec_lines(tail, ind)
+
+def zsh_args(+ind: String, specs: List<&2, String>) -> List<&2, String>:
+  String.append(ind, "_arguments -C -s -S \\") <> zsh_spec_lines(specs, ind)
+
+def zsh_entry(names: List<&2, String>, +ind: String, +about: String) ->
+    List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail:
+      String.concat([ind, "  ", Sh.quote(String.concat([Zsh.esc(name), ":",
+        about]))]) <> zsh_entry(tail, ind, about)
+
+def zsh_entries(entries: List<&2, Entry>, +ind: String) -> List<&2, String>:
+  match entries:
+    case Nil{}: Nil{}
+    case Entry{name, names, +about} <> tail:
+      List.append(&2, String, zsh_entry(names, ind, Zsh.esc(about)),
+        zsh_entries(tail, ind))
+
+def zsh_commands(entries: List<&2, Entry>, with_help: Bool, label: String,
+    +ind: String) -> List<&2, String>:
+  List.concat(&2, String, [
+    [String.append(ind, "local -a commands=(")],
+    zsh_entries(entries, ind),
+    Bool.pick(List<&2, String>, with_help, [String.append(ind,
+      "  'help:Print this message or the help of the given subcommand(s)'")],
+      []),
+    [String.append(ind, ")"),
+      String.concat([ind, "_describe -t commands ", Sh.quote(label),
+        " commands"])],
+  ])
+
+def zsh_label(+name: String, words: List<&2, String>) -> String:
+  String.append(String.join(name <> words, " "), " command")
+
+def zsh_deeper(arms: List<&2, String>, +depth: Nat, +ind: String) ->
+    List<&2, String>:
+  match arms:
+    case Nil{}: []
+    case head <> tail:
+      List.concat(&2, String, [
+        [String.append(ind, "else"),
+          String.concat([ind, "  case $words[", Nat.show(depth), "] in"])],
+        head <> tail,
+        [String.append(ind, "  esac")],
+      ])
+
+# After help at depth, the subcommand names, then deeper by arms.
+def zsh_help_tree(entries: List<&2, Entry>, label: String,
+    arms: List<&2, String>, +depth: Nat, +ind: String) -> List<&2, String>:
+  List.concat(&2, String, [
+    [String.concat([ind, "if (( CURRENT == ", Nat.show(depth), " )); then"])],
+    zsh_commands(entries, False{}, label, String.append(ind, "  ")),
+    zsh_deeper(arms, depth, ind),
+    [String.append(ind, "fi")],
+  ])
+
+def bar_names(names: List<&2, String>) -> String:
+  match names:
+    case Nil{}: ""
+    case name <> Nil{}: Sh.quote(name)
+    case name <> tail: String.concat([Sh.quote(name), "|", bar_names(tail)])
+
+# The help tree's arms at ind for the subcommands in items that have
+# subcommands of their own.
+def zsh_help_arms(items: List<&2, Item>, +name: String,
+    +words: List<&2, String>, +depth: Nat, +ind: String) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{+sub, about, +children} <> tail:
+      +here = List.append(&2, String, words, [sub])
+      +entries = sub_entries(children)
+      List.append(&2, String,
+        Bool.pick(List<&2, String>,
+          Bool.or(has_hidden(children), List.is_empty(&2, Entry, entries)), [],
+          String.concat([ind, bar_names(sub <> find_aliases(children)), ")"]) <>
+            last_with(zsh_help_tree(entries, zsh_label(name, here),
+              zsh_help_arms(children, name, here, (depth + 1n : Nat),
+                String.append(ind, "      ")),
+              (depth + 1n : Nat), String.append(ind, "  ")), " ;;")),
+        zsh_help_arms(tail, name, words, depth, ind))
+    case head <> tail: zsh_help_arms(tail, name, words, depth, ind)
+
+# The body of a command with subcommands: its specs end in a state that
+# offers them, completes help's tree, or enters the arm of the one given.
+def zsh_branch(+entries: List<&2, Entry>, specs: List<&2, String>,
+    +items: List<&2, Item>, +name: String, +words: List<&2, String>,
+    arms: List<&2, String>, +ind: String) -> List<&2, String>:
+  +state = String.join(name <> words, "-")
+  +i2 = String.append(ind, "    ")
+  +hstate = String.append(state, "-help")
+  +label = zsh_label(name, words)
+  List.concat(&2, String, [
+    last_with(zsh_args(ind, List.append(&2, String, specs,
+      [String.append("*:: :->", state)])), " && return"),
+    [String.append(ind, "case $state in"),
+      String.concat([ind, "  ", Sh.quote(state), ")"]),
+      String.append(i2, "if (( CURRENT == 1 )); then")],
+    zsh_commands(entries, True{}, label, String.append(i2, "  ")),
+    [String.append(i2, "else"), String.append(i2, "  case $words[1] in")],
+    arms,
+    [String.append(i2, "    'help')")],
+    last_with(zsh_args(String.append(i2, "      "), ["(-h --help)-h[Print help]",
+      "(-h --help)--help[Print help]", String.append("*:: :->", hstate)]),
+      " && return"),
+    [String.append(i2, "      case $state in"),
+      String.concat([i2, "        ", Sh.quote(hstate), ")"])],
+    last_with(zsh_help_tree(entries, label,
+      zsh_help_arms(items, name, words, 1n,
+        String.append(i2, "              ")),
+      1n, String.append(i2, "          ")), " ;;"),
+    [String.append(i2, "      esac ;;"), String.append(i2, "  esac"),
+      String.append(i2, "fi ;;"), String.append(ind, "esac")],
+  ])
+
+def zsh_body(entries: List<&2, Entry>, specs: List<&2, String>,
+    +items: List<&2, Item>, +lists: List<&2, List<&2, String>>,
+    name: String, words: List<&2, String>, arms: List<&2, String>,
+    ind: String) -> List<&2, String>:
+  match entries:
+    case Nil{}:
+      zsh_args(ind, List.append(&2, String, specs,
+        zsh_slots(completing(arg_slots(items, 1n, lists)))))
+    case head <> tail:
+      zsh_branch(head <> tail, specs, items, name, words, arms, ind)
+
+# The body at ind of the command with items and globals at words, given
+# the arms of its subcommands.
+def zsh_cmd(+items: List<&2, Item>, +globals: List<&2, Item>,
+    +lists: List<&2, List<&2, String>>, name: String,
+    +words: List<&2, String>, arms: List<&2, String>, ind: String) ->
+    List<&2, String>:
+  zsh_body(sub_entries(items),
+    List.append(&2, String,
+      zsh_opts(List.append(&2, Opt, arg_opts(items, lists),
+        arg_opts(globals, lists))),
+      zsh_opts(builtin_opts(items, globals,
+        List.is_empty(&2, String, words)))),
+    items, lists, name, words, arms, ind)
+
+# The arms at ind for the visible subcommands in items, which inherit
+# globals; their bodies are 2 deeper.
+def zsh_arms(items: List<&2, Item>, +globals: List<&2, Item>,
+    +lists: List<&2, List<&2, String>>, +name: String,
+    +words: List<&2, String>, +ind: String) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{+sub, about, +children} <> tail:
+      +here = List.append(&2, String, words, [sub])
+      List.append(&2, String,
+        Bool.pick(List<&2, String>, has_hidden(children), [],
+          String.concat([ind, bar_names(sub <> find_aliases(children)), ")"]) <>
+            last_with(zsh_cmd(children, globals, lists, name, here,
+              zsh_arms(children, List.append(&2, Item, globals,
+                global_items(children)), lists, name, here,
+                String.append(ind, "          ")),
+              String.append(ind, "  ")), " ;;")),
+        zsh_arms(tail, globals, lists, name, words, ind))
+    case head <> tail: zsh_arms(tail, globals, lists, name, words, ind)
+
+def zsh_lists(lists: List<&2, List<&2, String>>, +k: Nat) ->
+    List<&2, String>:
+  match lists:
+    case Nil{}: Nil{}
+    case values <> tail:
+      String.concat(["v", Nat.show(k), "=(", sh_list(values, " "), ")"]) <>
+        zsh_lists(tail, (k + 1n : Nat))
+
+def zsh_arrays(lists: List<&2, List<&2, String>>) -> List<&2, String>:
+  match lists:
+    case Nil{}: []
+    case head <> tail:
+      [String.append("  local -a ", String.join(zsh_lists(head <> tail, 1n),
+        " "))]
+
+def zsh_script(+name: String, +items: List<&2, Item>) -> String:
+  +lists = place_lists(all_places(items), [])
+  +id = String.append("_", ident(name))
+  text_lines(List.concat(&2, String, [
+    [String.append("#compdef ", name), "", String.append(id, "() {"),
+      "  local curcontext=$curcontext state line"],
+    zsh_arrays(lists),
+    zsh_cmd(items, [], lists, name, [],
+      zsh_arms(items, global_items(items), lists, name, [], "          "),
+      "  "),
+    ["}",
+      "",
+      String.concat(["if [[ $funcstack[1] == ", Sh.quote(String.append("_",
+        name)), " ]]; then"]),
+      String.concat(["  ", id, " \"$@\""]),
+      "else",
+      String.concat(["  compdef ", id, " ", Sh.quote(name)]),
+      "fi"],
+  ]))
+
+# ---- fish
+
+# Words quoted for fish, apart by spaces.
+def fish_list(words: List<&2, String>) -> String:
+  match words:
+    case Nil{}: ""
+    case word <> Nil{}: Fish.quote(word)
+    case word <> tail: String.concat([Fish.quote(word), " ", fish_list(tail)])
+
+def fish_pats(names: List<&2, String>, +pre: String) -> List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail: Fish.quote(String.append(pre, name)) <> fish_pats(tail, pre)
+
+# The arms of _dest for subcommands entries of the path at words, numbered
+# pre.
+def fish_dest_arms(entries: List<&2, Entry>, +pre: String,
+    +words: List<&2, String>, +found: List<&2, Stop>) -> List<&2, String>:
+  match entries:
+    case Nil{}: Nil{}
+    case Entry{name, names, about} <> tail:
+      String.append("        case ", String.join(fish_pats(names, pre), " ")) <>
+        String.append("            echo ", Nat.show(stop_number(found,
+          List.append(&2, String, words, [name]), None{}))) <>
+        fish_dest_arms(tail, pre, words, found)
+
+def fish_dests(stops: List<&2, Stop>, +found: List<&2, Stop>) ->
+    List<&2, String>:
+  match stops:
+    case Nil{}: Nil{}
+    case Stop{k, words, opts, builtins, subs, slots} <> tail:
+      List.append(&2, String,
+        fish_dest_arms(subs, String.append(Nat.show(k), " "), words, found),
+        fish_dests(tail, found))
+
+def valued_names(opts: List<&2, Opt>) -> List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case Opt{names, OptionKind{many}, ph, comp, help} <> tail:
+      List.append(&2, String, names, valued_names(tail))
+    case head <> tail: valued_names(tail)
+
+def fish_valued_arm(k: Nat, names: List<&2, String>) -> List<&2, String>:
+  match names:
+    case Nil{}: []
+    case head <> tail:
+      [String.append("        case ", Nat.show(k)),
+        String.append("            contains -- $argv[2] ",
+          fish_list(head <> tail))]
+
+def fish_valued(stop: Stop) -> List<&2, String>:
+  match stop:
+    case Stop{k, words, opts, builtins, subs, slots}:
+      fish_valued_arm(k, valued_names(opts))
+
+def slot_shape(found: Maybe<&2, Slot>) -> String:
+  match found:
+    case Some{Slot{k, hidden, required, many, rest, ph, comp}}:
+      String.concat([Nat.show(k), " ", Bool.pick(String, rest, "1", "0")])
+    case None{}: "0 0"
+
+def fish_shape_arm(shown: Bool, k: Nat, has: Bool, found: Maybe<&2, Slot>) ->
+    List<&2, String>:
+  match shown:
+    case True{}:
+      [String.append("        case ", Nat.show(k)),
+        String.concat(["            echo ", Bool.pick(String, has, "1", "0"),
+          " ", slot_shape(found)])]
+    case False{}: []
+
+def fish_shape(stop: Stop) -> List<&2, String>:
+  match stop:
+    case Stop{k, words, opts, builtins, subs, slots}:
+      +has = Bool.not(List.is_empty(&2, Entry, subs))
+      +found = variadic(slots)
+      fish_shape_arm(Bool.or(has, Maybe.is_some(&2, Slot, found)), k, has,
+        found)
+
+def fish_values(lists: List<&2, List<&2, String>>, +k: Nat) ->
+    List<&2, String>:
+  match lists:
+    case Nil{}: Nil{}
+    case values <> tail:
+      String.append("        case ", Nat.show(k)) <>
+        String.append("            printf '%s\\n' ", fish_list(values)) <>
+        fish_values(tail, (k + 1n : Nat))
+
+def fish_values_fn(+id: String, lists: List<&2, List<&2, String>>) ->
+    List<&2, String>:
+  match lists:
+    case Nil{}: []
+    case head <> tail:
+      List.concat(&2, String, [
+        ["", "# Prints the values of the one_of list numbered $argv[1].",
+          String.concat(["function ", id, "_values"]), "    switch $argv[1]"],
+        fish_values(head <> tail, 1n),
+        ["    end", "end"],
+      ])
+
+def fish_flag(long: Bool, name: String) -> String:
+  match long:
+    case True{}: String.append("-l ", Fish.quote(String.drop(name, 2n)))
+    case False{}: String.append("-s ", Fish.quote(String.drop(name, 1n)))
+
+def fish_flags(names: List<&2, String>) -> List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case +name <> tail: fish_flag(long_name(name), name) <> fish_flags(tail)
+
+# What completes a value comp offers: words, files, directories or none.
+def fish_words(+id: String, comp: Comp) -> String:
+  match comp:
+    case Words{list, values}:
+      String.concat([" -a '(", id, "_values ", Nat.show(list), ")'"])
+    case Files{}: " -F"
+    case Dirs{}: " -a '(__fish_complete_directories)'"
+    case Text{}: ""
+
+def fish_needs(comp: Comp) -> String:
+  match comp:
+    case Files{}: " -r"
+    case _: " -x"
+
+# An option of kind needs its value (-r), and only a file name may be any
+# word (-x elsewhere); a [=<V>] value is optional.
+def fish_kind(kind: UsageKind, +id: String, +comp: Comp) -> String:
+  match kind:
+    case OptionKind{many}:
+      String.append(fish_needs(comp), fish_words(id, comp))
+    case BareOptionKind{}: fish_words(id, comp)
+    case _: ""
+
+def fish_opt_lines(opts: List<&2, Opt>, +at: String, +id: String) ->
+    List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case Opt{names, kind, ph, comp, help} <> tail:
+      String.concat([at, " n v' ", String.join(fish_flags(names), " "),
+        fish_kind(kind, id, comp), " -d ", Fish.quote(help)]) <>
+        fish_opt_lines(tail, at, id)
+
+# The built-ins, help first, which also holds after help (h).
+def fish_builtin_lines(opts: List<&2, Opt>, +at: String, tags: String) ->
+    List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case Opt{names, kind, ph, comp, help} <> tail:
+      String.concat([at, tags, "' ", String.join(fish_flags(names), " "),
+        " -d ", Fish.quote(help)]) <> fish_builtin_lines(tail, at, " n")
+
+def fish_name_lines(names: List<&2, String>, +at: String, +about: String) ->
+    List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail:
+      String.concat([at, " n h' -a ", Fish.quote(name), " -d ", about]) <>
+        fish_name_lines(tail, at, about)
+
+def fish_sub_lines(entries: List<&2, Entry>, +at: String) -> List<&2, String>:
+  match entries:
+    case Nil{}: Nil{}
+    case Entry{name, names, about} <> tail:
+      List.append(&2, String, fish_name_lines(names, at, Fish.quote(about)),
+        fish_sub_lines(tail, at))
+
+def fish_slot_lines(slots: List<&2, Slot>, +at: String, +id: String) ->
+    List<&2, String>:
+  match slots:
+    case Nil{}: Nil{}
+    case Slot{k, True{}, required, many, rest, ph, comp} <> tail:
+      fish_slot_lines(tail, at, id)
+    case Slot{k, False{}, required, many, rest, ph, Text{}} <> tail:
+      fish_slot_lines(tail, at, id)
+    case Slot{k, False{}, required, many, rest, ph, comp} <> tail:
+      String.concat([at, " p", Nat.show(k), "'", fish_words(id, comp)]) <>
+        fish_slot_lines(tail, at, id)
+
+def fish_ends(subs: List<&2, Entry>, +at: String, id: String,
+    slots: List<&2, Slot>) -> List<&2, String>:
+  match subs:
+    case Nil{}: fish_slot_lines(completing(slots), at, id)
+    case head <> tail:
+      List.append(&2, String, fish_sub_lines(head <> tail, at),
+        [String.append(at, " n' -a 'help' -d 'Print this message or the help of the given subcommand(s)'")])
+
+def fish_lines(stops: List<&2, Stop>, +pre: String, +id: String) ->
+    List<&2, String>:
+  match stops:
+    case Nil{}: Nil{}
+    case Stop{k, words, opts, builtins, subs, slots} <> tail:
+      +at = String.append(pre, Nat.show(k))
+      List.concat(&2, String, [
+        fish_opt_lines(opts, at, id),
+        fish_builtin_lines(builtins, at, " n h"),
+        fish_ends(subs, at, id, slots),
+        fish_lines(tail, pre, id),
+      ])
+
+# The function every fish script shares, for function prefix id: it walks
+# the words before the cursor as the bash engine does.
+def fish_engine(+id: String) -> List<&2, String>:
+  [
+    "",
+    "# Succeeds when the words before the cursor reach path $argv[1] and the next",
+    "# word can be one of $argv[2..-1]: n, an option or subcommand; h, a",
+    "# subcommand after help; v, an option's value; p<k>, positional slot k.",
+    String.concat(["function ", id, "_is"]),
+    "    # fish 4 deprecates -o, which fish 3 needs.",
+    "    set -l words (commandline -xpc 2>/dev/null; or commandline -opc)",
+    "    set -e words[1]",
+    "    set -l path 0",
+    String.concat(["    set -l shape (", id, "_shape 0 | string split ' ')"]),
+    "    set -l want 0",
+    "    set -l end 0",
+    "    set -l help 0",
+    "    set -l n 0",
+    "    for word in $words",
+    "        if test $want = 1",
+    "            set want 0",
+    "        else if test $end = 0; and test \"$word\" = --",
+    "            set end 1",
+    "        else if test $end = 0; and string match -q -r -- '^--.' $word",
+    String.concat(["            if not string match -q -- '*=*' $word; and ", id, "_valued $path $word"]),
+    "                set want 1",
+    "            end",
+    "        else if test $end = 0; and string match -q -r -- '^-.' $word",
+    "            set -l chars (string split '' -- (string sub -s 2 -- $word))",
+    "            for i in (seq (count $chars))",
+    String.concat(["                if ", id, "_valued $path -$chars[$i]"]),
+    "                    test $i = (count $chars); and set want 1",
+    "                    break",
+    "                end",
+    "            end",
+    "        else if test $shape[1] = 1",
+    "            if test $end = 1",
+    "                return 1",
+    "            else if test $help = 0; and test \"$word\" = help",
+    "                set help 1",
+    "            else",
+    String.concat(["                set path (", id, "_dest $path $word); or return 1"]),
+    String.concat(["                set shape (", id, "_shape $path | string split ' ')"]),
+    "            end",
+    "        else",
+    "            # n counts the slots filled. The variadic slot stays open, but a",
+    "            # rest() value takes every later word, so nothing more completes.",
+    "            set n (math $n + 1)",
+    "            if test $n = $shape[2]; and test $shape[3] = 1",
+    "                set end 1",
+    "            else if test $n = $shape[2]",
+    "                set n (math $n - 1)",
+    "            end",
+    "        end",
+    "    end",
+    "    test $path = $argv[1]; or return 1",
+    "    set -l tags",
+    "    if test $want = 1",
+    "        set tags v",
+    "    else",
+    "        test $end = 0; and test $help = 0; and set -a tags n",
+    "        test $help = 1; and set -a tags h",
+    "        test $shape[1] = 0; and test $help = 0; and set -a tags p(math $n + 1)",
+    "    end",
+    "    for tag in $argv[2..-1]",
+    "        contains -- $tag $tags; and return 0",
+    "    end",
+    "    return 1",
+    "end",
+  ]
+
+def fish_script(+name: String, +items: List<&2, Item>) -> String:
+  +all = all_places(items)
+  +lists = place_lists(all, [])
+  +found = stops(all, 0n, lists)
+  +id = String.append("__", ident(name))
+  +cq = Fish.quote(name)
+  text_lines(List.concat(&2, String, [
+    ["# fish completion; needs fish 3.3 or later.",
+      "",
+      "# Prints the number of the path that subcommand $argv[2] of path $argv[1]",
+      "# enters; paths are numbered in pre-order from 0, the root.",
+      String.concat(["function ", id, "_dest"]),
+      "    switch \"$argv[1] $argv[2]\""],
+    fish_dests(found, found),
+    ["        case '*'", "            return 1", "    end", "end", "",
+      "# Succeeds when option $argv[2] takes the next word as its value at path",
+      "# $argv[1].",
+      String.concat(["function ", id, "_valued"]),
+      "    switch $argv[1]"],
+    bash_arms(~fish_valued, found),
+    ["        case '*'", "            return 1", "    end", "end", "",
+      "# Prints how path $argv[1] takes words: 1 if it has subcommands, else 0; the",
+      "# slot of its variadic positional, or 0; 1 if that slot is rest(), else 0.",
+      String.concat(["function ", id, "_shape"]),
+      "    switch $argv[1]"],
+    bash_arms(~fish_shape, found),
+    ["        case '*'", "            echo 0 0 0", "    end", "end"],
+    fish_values_fn(id, lists),
+    fish_engine(id),
+    ["",
+      "# Option lines also hold at v, so that fish can read grouped short options",
+      "# before a value, as in -vC DIR.",
+      String.concat(["complete -c ", cq, " -f"])],
+    fish_lines(found, String.concat(["complete -c ", cq, " -n '", id, "_is "]),
+      id),
+  ]))
+
+# ---- man pages
+
+def roff_bold(s: String) -> String:
+  String.concat(["\\fB", roff_text(s), "\\fR"])
+
+def roff_bolds(names: List<&2, String>) -> List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail: roff_bold(String.trim_start(name)) <> roff_bolds(tail)
+
+def roff_texts(texts: List<&2, String>) -> List<&2, String>:
+  match texts:
+    case Nil{}: Nil{}
+    case text <> tail: roff_text(text) <> roff_texts(tail)
+
+def spaces_only(s: String) -> Bool:
+  match s:
+    case SNil{}: True{}
+    case SCon{Chr{32}, tail}: spaces_only(tail)
+    case SCon{head, tail}: False{}
+
+def line_mark(blank: Bool, line: String) -> List<&2, Maybe<&2, String>>:
+  match blank:
+    case True{}: []
+    case False{}: [Some{line}]
+
+# Each line, None for an empty one, which ends a paragraph; a line of only
+# spaces is left out.
+def para_marks(lines: List<&2, String>) -> List<&2, Maybe<&2, String>>:
+  match lines:
+    case Nil{}: Nil{}
+    case SNil{} <> tail: None{} <> para_marks(tail)
+    case +line <> tail:
+      List.append(&2, Maybe<&2, String>, line_mark(spaces_only(line), line),
+        para_marks(tail))
+
+# Marked lines escaped, after gap: nothing before the first, .br within a
+# paragraph, sep between paragraphs.
+def roff_marks(marks: List<&2, Maybe<&2, String>>, +sep: String,
+    gap: Maybe<&2, String>) -> List<&2, String>:
+  match marks gap:
+    case Nil{} _: Nil{}
+    case None{} <> tail None{}: roff_marks(tail, sep, None{})
+    case None{} <> tail Some{g}: roff_marks(tail, sep, Some{sep})
+    case Some{line} <> tail None{}:
+      Roff.esc(line) <> roff_marks(tail, sep, Some{".br"})
+    case Some{line} <> tail Some{g}:
+      g <> Roff.esc(line) <> roff_marks(tail, sep, Some{".br"})
+
+def roff_paras(text: String, sep: String) -> List<&2, String>:
+  roff_marks(para_marks(String.lines(text)), sep, None{})
+
+def ph_end(s: String) -> Nat:
+  match s:
+    case SNil{}: 0n
+    case SCon{Chr{62}, tail}: 0n
+    case SCon{head, tail}: 1n+ph_end(tail)
+
+# A placeholder's name in italics, from after its <.
+def roff_ph(+s: String) -> String:
+  +end = ph_end(s)
+  String.concat([roff_text(String.take(s, end)), ">\\fR",
+    roff_text(String.drop(s, (end + 1n : Nat)))])
+
+def roff_value(rest: String) -> String:
+  match rest:
+    case SCon{Chr{32}, SCon{Chr{60}, tail}}: String.append(" \\fI<", roff_ph(tail))
+    case SCon{Chr{91}, SCon{Chr{61}, SCon{Chr{60}, tail}}}:
+      String.append("[=\\fI<", roff_ph(tail))
+    case SNil{}: ""
+    case SCon{head, tail}: roff_text(SCon{head, tail})
+
+# Option names bold, the placeholder in italics.
+def roff_option(+usage: String) -> String:
+  +cut = value_cut(usage)
+  String.append(String.join(roff_bolds(String.split(String.take(usage, cut),
+    ',')), ", "), roff_value(String.drop(usage, cut)))
+
+# A positional in italics, apart from its repeat.
+def roff_positional(+usage: String) -> String:
+  +cut = value_cut(usage)
+  String.concat(["\\fI", roff_text(String.take(usage, cut)), "\\fR",
+    roff_text(String.drop(usage, cut))])
+
+def roff_entry(left: String, help: String, attrs: List<&2, Item>) ->
+    List<&2, String>:
+  ".TP" <> left <> roff_paras(right_text(True{}, help, attrs), ".IP")
+
+def roff_positional_entry(shown: Bool, usage: String, help: String,
+    attrs: List<&2, Item>) -> List<&2, String>:
+  match shown:
+    case True{}: roff_entry(roff_positional(usage), help, attrs)
+    case False{}: []
+
+def roff_positionals(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      List.append(&2, String,
+        roff_positional_entry(Bool.and(arg_pos(usage),
+          Bool.not(has_hidden(attrs))), usage, help, attrs),
+        roff_positionals(tail))
+    case head <> tail: roff_positionals(tail)
+
+def roff_option_entry(shown: Bool, usage: String, help: String,
+    attrs: List<&2, Item>) -> List<&2, String>:
+  match shown:
+    case True{}: roff_entry(roff_option(usage), help, attrs)
+    case False{}: []
+
+# The visible options under a heading, "" for OPTIONS.
+def roff_options(items: List<&2, Item>, +heading: String) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{+usage, help, +attrs} <> tail:
+      List.append(&2, String,
+        roff_option_entry(Bool.and(Bool.not(arg_pos(usage)),
+          Bool.and(Bool.not(has_hidden(attrs)),
+            String.eq(find_heading(attrs), heading))), usage, help, attrs),
+        roff_options(tail, heading))
+    case head <> tail: roff_options(tail, heading)
+
+def roff_builtins(opts: List<&2, Opt>) -> List<&2, String>:
+  match opts:
+    case Nil{}: Nil{}
+    case Opt{names, kind, ph, comp, help} <> tail:
+      ".TP" <> String.join(roff_bolds(names), ", ") <> help <>
+        roff_builtins(tail)
+
+def roff_headings(titles: List<&2, String>, +args: List<&2, Item>) ->
+    List<&2, String>:
+  match titles:
+    case Nil{}: Nil{}
+    case +title <> tail:
+      String.concat([".SS \"", roff_text(title), "\""]) <>
+        List.append(&2, String, roff_options(args, title),
+          roff_headings(tail, args))
+
+def roff_command(hidden: Bool, +page: String, name: String, about: String,
+    children: List<&2, Item>) -> List<&2, String>:
+  match hidden:
+    case True{}: []
+    case False{}:
+      [".TP", String.append(roff_bold(String.concat([page, "-", name])), "(1)"),
+        Roff.esc(join_filled([one_line(about),
+          tag("aliases", find_aliases(children))]))]
+
+def roff_commands(items: List<&2, Item>, +page: String) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{name, about, +children} <> tail:
+      List.append(&2, String,
+        roff_command(has_hidden(children), page, name, about, children),
+        roff_commands(tail, page))
+    case head <> tail: roff_commands(tail, page)
+
+def roff_arg(pos: Bool, +usage: String, attrs: List<&2, Item>) -> String:
+  match pos:
+    case True{}: roff_positional(usage)
+    case False{}: roff_option(arg_display(arg_info(usage, attrs)))
+
+def roff_env(hidden: Bool, found: Maybe<&2, String>, +usage: String,
+    attrs: List<&2, Item>) -> List<&2, String>:
+  match hidden found:
+    case False{} Some{name}:
+      [".TP", roff_bold(name), String.concat(["Used for ",
+        roff_arg(arg_pos(usage), usage, attrs), " when it is not given"])]
+    case _ _: []
+
+def roff_envs(items: List<&2, Item>) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, +attrs} <> tail:
+      List.append(&2, String,
+        roff_env(has_hidden(attrs), find_env(attrs), usage, attrs),
+        roff_envs(tail))
+    case head <> tail: roff_envs(tail)
+
+def roff_examples(items: List<&2, Item>, before: List<&2, String>) ->
+    List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Example{line, what} <> tail:
+      List.concat(&2, String, [
+        before,
+        [Roff.esc(String.append(what, ":")), ".IP", ".nf",
+          Roff.esc(String.append("$ ", line)), ".fi"],
+        roff_examples(tail, [".PP"]),
+      ])
+    case head <> tail: roff_examples(tail, before)
+
+def sub_pages(items: List<&2, Item>, +page: String) -> List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{name, about, +children} <> tail:
+      +rest = sub_pages(tail, page)
+      Bool.pick(List<&2, String>, has_hidden(children), rest,
+        String.concat([page, "-", name]) <> rest)
+    case head <> tail: sub_pages(tail, page)
+
+def init_words(words: List<&2, String>) -> List<&2, String>:
+  match words:
+    case Nil{}: Nil{}
+    case word <> Nil{}: Nil{}
+    case word <> tail: word <> init_words(tail)
+
+# The parent's page, none at the root.
+def parent_pages(words: List<&2, String>) -> List<&2, String>:
+  match words:
+    case Nil{}: []
+    case word <> Nil{}: []
+    case word <> tail: [String.join(word <> init_words(tail), "-")]
+
+def roff_refs(pages: List<&2, String>) -> List<&2, String>:
+  match pages:
+    case Nil{}: Nil{}
+    case page <> tail: String.append(roff_bold(page), "(1)") <> roff_refs(tail)
+
+def roff_see(pages: List<&2, String>) -> List<&2, String>:
+  match pages:
+    case Nil{}: []
+    case head <> tail: [String.join(roff_refs(head <> tail), ", ")]
+
+def roff_synopsis(texts: List<&2, String>) -> String:
+  match texts:
+    case Nil{}: ""
+    case path <> tail: String.join(roff_bold(path) <> roff_texts(tail), " ")
+
+def roff_section(title: String, lines: List<&2, String>) -> List<&2, String>:
+  match lines:
+    case Nil{}: []
+    case head <> tail: String.append(".SH ", title) <> head <> tail
+
+def roff_view(view: View, title: String) -> String:
+  match view:
+    case View{+path, +about, +items, +globals, root, stuck}:
+      +words = String.split(path, ' ')
+      +page = String.join(words, "-")
+      +args = List.append(&2, Item, items, globals)
+      text_lines(List.concat(&2, String, [
+        [String.concat([".TH \"", roff_text(String.to_upper(page)),
+          "\" \"1\" \"\" \"", roff_text(title), "\" \"User Commands\""]),
+          ".SH NAME",
+          Roff.esc(String.concat([page, " - ", one_line(about)])),
+          ".SH SYNOPSIS",
+          roff_synopsis(segment_texts(usage_elems(path, items, globals)))],
+        roff_section("DESCRIPTION", roff_paras(about, ".PP")),
+        roff_section("ARGUMENTS", roff_positionals(items)),
+        [".SH OPTIONS"],
+        roff_options(args, ""),
+        roff_builtins(builtin_opts(items, globals, root)),
+        roff_headings(heading_titles(args, []), args),
+        roff_section("COMMANDS", roff_commands(items, page)),
+        roff_section("ENVIRONMENT", roff_envs(args)),
+        [".SH EXIT STATUS", ".TP", "\\fB0\\fR", "Success", ".TP", "\\fB1\\fR",
+          "Failure", ".TP", "\\fB2\\fR", "Usage error", ".TP", "\\fB70\\fR",
+          "Internal software error"],
+        roff_section("EXAMPLES", roff_examples(items, [])),
+        roff_section("NOTES",
+          roff_paras(String.join(after_texts(items), "\n\n"), ".PP")),
+        roff_section("SEE ALSO", roff_see(List.append(&2, String,
+          parent_pages(words), sub_pages(items, page)))),
+      ]))
 
 def find_version(items: List<&2, Item>) -> String:
   match items:
@@ -5010,11 +6446,72 @@ def find_version(items: List<&2, Item>) -> String:
     case Version{value} <> tail: value
     case head <> tail: find_version(tail)
 
+# The man page of the command at the longest valid prefix of path (§11).
+def roff(c: Cmd, path: List<&2, String>) -> String:
+  match c:
+    case Cmd{+name, about, +items}:
+      roff_view(view_walk(path, View{name, about, items, [], True{}, False{}}),
+        join_filled([name, find_version(items)]))
+
+# The completion script for shell s (§11).
+def script(c: Cmd, s: Shell) -> String:
+  match c s:
+    case Cmd{name, about, items} Bash{}: bash_script(name, items)
+    case Cmd{name, about, items} Zsh{}: zsh_script(name, items)
+    case Cmd{name, about, items} Fish{}: fish_script(name, items)
+
+# ---- Outcome (§8.7, V1-V6) ----
+
+type Outcome is Data:
+  Shown{code: U32, out: String, err: String}
+  Matched{m: Matches}
+
+# The subcommand at path, from found on.
+def sub_at(path: List<&2, String>, items: List<&2, Item>,
+    found: Maybe<&2, SubFound>) -> Maybe<&2, SubFound>:
+  match path:
+    case Nil{}: found
+    case name <> tail:
+      +next = find_sub(items, name)
+      sub_at(tail, sub_items(next), next)
+
+def builtin_name(found: Maybe<&2, SubFound>) -> Maybe<&2, String>:
+  match found:
+    case Some{SubFound{name, items}}:
+      Bool.pick(Maybe<&2, String>, has_builtin(items), Some{name}, None{})
+    case None{}: None{}
+
+def field_values(f: Field) -> List<&2, String>:
+  match f:
+    case Field{id, values, source}: values
+
+# The shell completions was given, which one_of limits to these three.
+def shell_named(+name: String) -> Shell:
+  Bool.pick(Shell, String.eq(name, "zsh"), Zsh{},
+    Bool.pick(Shell, String.eq(name, "fish"), Fish{}, Bash{}))
+
+def builtin_page(man: Bool, c: Cmd, fields: List<&2, Field>) -> String:
+  match man:
+    case True{}: roff(c, field_values(field_find(fields, "command")))
+    case False{}:
+      script(c, shell_named(head_part(field_values(field_find(fields,
+        "shell")))))
+
+# V6: the completions built-in prints its script and man its page, plain;
+# any other path is left to decode.
+def outcome_accepted(builtin: Maybe<&2, String>, c: Cmd,
+    path: List<&2, String>, fields: List<&2, Field>,
+    external: Maybe<&2, ExternalArgs>) -> Outcome:
+  match builtin:
+    case Some{name}: Shown{0, builtin_page(String.eq(name, "man"), c, fields), ""}
+    case None{}: Matched{Matches{c, path, fields, external}}
+
 def outcome_parse(result: ParseResult, +c: Cmd, h: Host,
     +argv: List<&2, String>) -> Outcome:
   match result:
-    case Accepted{path, fields, external}:
-      Matched{Matches{c, path, fields, external}}
+    case Accepted{+path, fields, external}:
+      outcome_accepted(builtin_name(sub_at(path, cmd_items(c), None{})), c,
+        path, fields, external)
     case HelpRequested{path, long}:
       Shown{0, help_out(term(c, h, argv), view_of(c, path), long), ""}
     case VersionRequested{}:
@@ -5033,8 +6530,8 @@ def outcome_lint(found: List<&2, Problem>, +c: Cmd, +h: Host,
       Shown{70, "", String.append("bug: invalid command-line definition\n",
         problem_lines(p <> tail))}
 
-# eval through V5: a lint failure, help, version, the V3 summary or an
-# error is Shown; Matched is a parse left to decode.
+# eval through V6: a lint failure, help, version, the V3 summary, an error
+# or a built-in's output is Shown; Matched is a parse left to decode.
 def outcome(+c: Cmd, h: Host, argv: List<&2, String>) -> Outcome:
   outcome_lint(problems(c), c, h, argv)
 

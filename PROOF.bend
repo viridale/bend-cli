@@ -4,6 +4,7 @@
 
 import Base
 import ./cli.bend as Cli
+import ./demo.bend as Demo
 import ./LAWS.bend as Laws
 
 def Laws.g_text_width():
@@ -3514,8 +3515,8 @@ def Laws.g_lint_lines():
 def Laws.g_lint_flag_default():
   ({==}, ({==}, ({==}, {==})))
 
-# P10 and P11 follow eval_with's cases: lint, then the parse, then the
-# decoder's answer at the matched scope.
+# P10 and P11 follow eval_with's cases: lint, then the parse, then a
+# built-in's page or the decoder's answer at the matched scope.
 def p10_fault(-A: Type, f: Cli.Fault, cmd: Cli.Cmd,
     path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
     {Laws.p10_code(A, Cli.faulted(A, f, cmd, path, h, argv)) == True{}
@@ -3532,6 +3533,19 @@ def p10_decoded(-A: Type, d: Cli.Dec(A), cmd: Cli.Cmd,
     case Done{a}: {==}
     case Fail{f}: p10_fault(A, f, cmd, path, h, argv)
 
+# completions and man show their page with code 0 and nothing on stderr.
+def p10_accepted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    builtin: Maybe<&2, String>, +c: Cli.Cmd, +path: List<&2, String>,
+    fields: List<&2, Cli.Field>, external: Maybe<&2, Cli.ExternalArgs>,
+    h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.eval_step(A, decode, Cli.outcome_accepted(builtin, c,
+      path, fields, external), h, argv)) == True{} : Bool}:
+  match builtin:
+    case Some{name}: {==}
+    case None{}:
+      p10_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
+        path, h, argv)
+
 def p10_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     r: Cli.ParseResult, +c: Cli.Cmd, +h: Cli.Host,
     +argv: List<&2, String>) ->
@@ -3539,8 +3553,9 @@ def p10_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
       argv), h, argv)) == True{} : Bool}:
   match r:
     case Cli.Accepted{+path, fields, external}:
-      p10_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
-        path, h, argv)
+      p10_accepted(A, decode,
+        Cli.builtin_name(Cli.sub_at(path, Cli.cmd_items(c), None{})), c, path,
+        fields, external, h, argv)
     case Cli.HelpRequested{path, long}: {==}
     case Cli.VersionRequested{}: {==}
     case Cli.SummaryRequired{}: {==}
@@ -3580,6 +3595,19 @@ def p11_decoded(-A: Type, d: Cli.Dec(A), cmd: Cli.Cmd,
     case Done{a}: {==}
     case Fail{f}: p11_fault(A, f, cmd, path, h, argv)
 
+# completions and man show their page with code 0 and nothing on stderr.
+def p11_accepted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    builtin: Maybe<&2, String>, +c: Cli.Cmd, +path: List<&2, String>,
+    fields: List<&2, Cli.Field>, external: Maybe<&2, Cli.ExternalArgs>,
+    h: Cli.Host, argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.eval_step(A, decode, Cli.outcome_accepted(builtin, c,
+      path, fields, external), h, argv)) == True{} : Bool}:
+  match builtin:
+    case Some{name}: {==}
+    case None{}:
+      p11_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
+        path, h, argv)
+
 def p11_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     r: Cli.ParseResult, +c: Cli.Cmd, +h: Cli.Host,
     +argv: List<&2, String>) ->
@@ -3587,8 +3615,9 @@ def p11_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
       argv), h, argv)) == True{} : Bool}:
   match r:
     case Cli.Accepted{+path, fields, external}:
-      p11_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
-        path, h, argv)
+      p11_accepted(A, decode,
+        Cli.builtin_name(Cli.sub_at(path, Cli.cmd_items(c), None{})), c, path,
+        fields, external, h, argv)
     case Cli.HelpRequested{path, long}: {==}
     case Cli.VersionRequested{}: {==}
     case Cli.SummaryRequired{}: {==}
@@ -3752,3 +3781,1545 @@ def Laws.g_act_exit():
 
 def Laws.g_plan_pkg():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
+
+# M6: completions and man pages.
+
+# The checker compares two strings with one nested call per char, so a
+# golden script of a few thousand chars nears its stack limit, and whether
+# it passes then varies from run to run. pieces cuts a string after each
+# newline, and strings with equal pieces are equal (pieces_eq); the checker
+# compares lists of pieces with one nested call per piece and per char of a
+# piece. A Cut does the same for a step's out.
+
+# s cut after each newline; the cut test need not hold of h for the pieces
+# to concatenate back to s. cut comes first: --verdict's kernel binds the
+# parameters before a match at q=2 and normalizes them, which would walk
+# the pieces of the rest of s once per char.
+def piece_push(cut: Bool, h: Char, r: List<&2, String>) -> List<&2, String>:
+  match cut:
+    case True{}: SCon{h, SNil{}} <> r
+    case False{}: String.split.push(h, r)
+
+def pieces(s: String) -> List<&2, String>:
+  match s:
+    case SNil{}: []
+    case SCon{+h, t}: piece_push(Char.is_eq(h, '\n'), h, pieces(t))
+
+def concat_push(h: Char, r: List<&2, String>) ->
+    {String.concat(String.split.push(h, r)) == SCon{h, String.concat(r)} : String}:
+  match r:
+    case Nil{}: {==}
+    case x <> rest: {==}
+
+def concat_piece_push(+h: Char, +t: String,
+    ih: {String.concat(pieces(t)) == t : String}, cut: Bool) ->
+    {String.concat(piece_push(cut, h, pieces(t))) == SCon{h, t} : String}:
+  match cut:
+    case True{}:
+      %ih : {String.concat(piece_push(True{}, h, pieces(t))) == SCon{h, _} : String}
+      {==}
+    case False{}:
+      %ih : {String.concat(piece_push(False{}, h, pieces(t))) == SCon{h, _} : String}
+      concat_push(h, pieces(t))
+
+def concat_pieces(s: String) -> {String.concat(pieces(s)) == s : String}:
+  match s:
+    case SNil{}: {==}
+    case SCon{+h, +t}: concat_piece_push(h, t, concat_pieces(t), Char.is_eq(h, '\n'))
+
+# Strings with equal pieces are equal.
+def pieces_eq(+x: String, +g: String, e: {pieces(x) == pieces(g) : List<&2, String>}) ->
+    {x == g : String}:
+  %concat_pieces(x) : {_ == g : String}
+  %concat_pieces(g) : {String.concat(pieces(x)) == _ : String}
+  %e : {String.concat(pieces(x)) == String.concat(_) : String}
+  {==}
+
+# A step with its out cut into pieces.
+type Cut<-A: Type> is Type:
+  CutGo{value: A, term: Cli.Term}
+  CutExit{code: U32, out: List<&2, String>, err: String}
+
+def step_cut(-A: Type, s: Cli.Step<A>) -> Cut<A>:
+  match s:
+    case Cli.Go{value, term}: CutGo{value, term}
+    case Cli.Exit{code, out, err}: CutExit{code, pieces(out), err}
+
+def step_join(-A: Type, c: Cut<A>) -> Cli.Step<A>:
+  match c:
+    case CutGo{value, term}: Cli.Go{value, term}
+    case CutExit{code, out, err}: Cli.Exit{code, String.concat(out), err}
+
+def join_cut(-A: Type, s: Cli.Step<A>) ->
+    {step_join(A, step_cut(A, s)) == s : Cli.Step<A>}:
+  match s:
+    case Cli.Go{value, term}: {==}
+    case Cli.Exit{+code, +out, +err}:
+      %concat_pieces(out) : {Cli.Exit{code, String.concat(pieces(out)), err}
+        == Cli.Exit{code, _, err} : Cli.Step<A>}
+      {==}
+
+# Steps with equal cuts are equal.
+def step_eq(-A: Type, run: Cli.Step<A>, g: Cli.Step<A>,
+    e: {step_cut(A, run) == step_cut(A, g) : Cut<A>}) -> {run == g : Cli.Step<A>}:
+  %join_cut(A, run) : {_ == g : Cli.Step<A>}
+  %join_cut(A, g) : {step_join(A, step_cut(A, run)) == _ : Cli.Step<A>}
+  %e : {step_join(A, step_cut(A, run)) == step_join(A, _) : Cli.Step<A>}
+  {==}
+
+def Laws.g_quote_models():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))))))))
+
+def Laws.g_quote():
+  ({==}, ({==}, ({==}, ({==}, {==}))))
+
+def Laws.g_comp_bash():
+  pieces_eq(Cli.script(Demo.cli(), Cli.Bash{}), Laws.pkg_bash(), {==})
+
+def Laws.g_comp_zsh():
+  pieces_eq(Cli.script(Demo.cli(), Cli.Zsh{}), Laws.pkg_zsh(), {==})
+
+def Laws.g_comp_fish():
+  pieces_eq(Cli.script(Demo.cli(), Cli.Fish{}), Laws.pkg_fish(), {==})
+
+def Laws.g_comp_quirks_bash():
+  ({==}, pieces_eq(Cli.script(Laws.quirks(), Cli.Bash{}), Laws.quirks_bash(), {==}))
+
+def Laws.g_comp_quirks_zsh():
+  pieces_eq(Cli.script(Laws.quirks(), Cli.Zsh{}), Laws.quirks_zsh(), {==})
+
+def Laws.g_comp_quirks_fish():
+  pieces_eq(Cli.script(Laws.quirks(), Cli.Fish{}), Laws.quirks_fish(), {==})
+
+def Laws.g_comp_launch_bash():
+  ({==}, pieces_eq(Cli.script(Laws.launch(), Cli.Bash{}), Laws.launch_bash(), {==}))
+
+def Laws.g_comp_launch_zsh():
+  pieces_eq(Cli.script(Laws.launch(), Cli.Zsh{}), Laws.launch_zsh(), {==})
+
+def Laws.g_comp_launch_fish():
+  pieces_eq(Cli.script(Laws.launch(), Cli.Fish{}), Laws.launch_fish(), {==})
+
+def Laws.g_man_pkg():
+  pieces_eq(Cli.roff(Demo.cli(), []), Laws.pkg_man(), {==})
+
+def Laws.g_man_add():
+  pieces_eq(Cli.roff(Demo.cli(), ["add"]), Laws.add_man(), {==})
+
+def Laws.g_man_path():
+  (pieces_eq(Cli.roff(Demo.cli(), ["rm"]), Cli.roff(Demo.cli(), ["remove"]), {==}),
+    (pieces_eq(Cli.roff(Demo.cli(), ["add", "x"]), Laws.add_man(), {==}),
+      (pieces_eq(Cli.roff(Demo.cli(), ["nope", "add"]), Laws.pkg_man(), {==}),
+        pieces_eq(Cli.roff(Demo.cli(), ["help"]), Laws.pkg_man(), {==}))))
+
+def Laws.g_man_quirks():
+  (pieces_eq(Cli.roff(Laws.quirks(), []), Laws.quirks_man(), {==}),
+    (pieces_eq(Cli.roff(Laws.quirks(), ["rem", "add"]), Laws.quirks_add_man(), {==}),
+      pieces_eq(Cli.roff(Laws.quirks(), ["remote", "prune"]), Laws.quirks_prune_man(), {==})))
+
+def Laws.g_man_launch():
+  pieces_eq(Cli.roff(Laws.launch(), []), Laws.launch_man(), {==})
+
+def Laws.g_eval_builtins():
+  (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["completions", "bash"]),
+     Laws.shown(Demo.Action, Laws.pkg_bash()), {==}),
+   (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["completions", "zsh"]),
+      Laws.shown(Demo.Action, Laws.pkg_zsh()), {==}),
+    (step_eq(Demo.Action, Laws.pkg_run(Laws.tty(), ["--color=always", "completions", "fish"]),
+       Laws.shown(Demo.Action, Laws.pkg_fish()), {==}),
+     (step_eq(Bool, Cli.eval(~Bool, ~(+m => Cli.bug(Bool, "b")), Demo.cli(), Laws.host(),
+        ["completions", "bash"]), Laws.shown(Bool, Laws.pkg_bash()), {==}),
+      (step_eq(Bool, Cli.eval(~Bool, ~(+m => Cli.bug(Bool, "b")), Demo.cli(), Laws.host(),
+         ["man", "add"]), Laws.shown(Bool, Laws.add_man()), {==}),
+       (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["man"]),
+          Laws.shown(Demo.Action, Laws.pkg_man()), {==}),
+        (step_eq(Demo.Action, Laws.pkg_run(Laws.tty(), ["-v", "man", "add"]),
+           Laws.shown(Demo.Action, Laws.add_man()), {==}),
+         (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["man", "rm"]),
+            Laws.shown(Demo.Action, Cli.roff(Demo.cli(), ["remove"])), {==}),
+          (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["man", "nope"]),
+             Laws.shown(Demo.Action, Laws.pkg_man()), {==}),
+           (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["completions", "bash", "--help"]),
+              Laws.shown(Demo.Action, Cli.help(Demo.cli(), ["completions"], True{}, Laws.host())), {==}),
+            ({==}, ({==}, {==}))))))))))))
+
+# P3, P4, P5, P6 and P15 go by induction on s, with a view of each char that
+# tells the chars a quoter or reader treats apart from all others. The
+# checker reduces a match on a char only where its bits are constructors, so
+# each view's arms split c's bits as tools/charsplit.py prints them.
+
+# P3: in quotes, the shell reads sh_body(s) then ' back as s.
+
+# What the proof of P3 needs of a char other than ', \ and newline.
+def ShOther(c: Char) -> Type:
+  (@t: String -> {SCon{c, Cli.sh_body(t)} == Cli.sh_body(SCon{c, t}) : String}) &
+  ((@x: String -> {Laws.put(c, Laws.sh_read(x, True{}))
+      == Laws.sh_read(SCon{c, x}, True{}) : Maybe<&2, String>}) &
+    (@x: String -> {Laws.put(Chr{92}, Laws.sh_read(SCon{c, x}, True{}))
+      == Laws.sh_read(SCon{Chr{92}, SCon{c, x}}, True{}) : Maybe<&2, String>}))
+
+def ShView(c: Char) -> Type:
+  {Chr{39} == c : Char} | ({Chr{92} == c : Char} | ({Chr{10} == c : Char} | ShOther(c)))
+
+# Arms: python3 tools/charsplit.py '(t => {==}, (x => {==}, x => {==}))' 39 92 10
+def sh_view(c: Char) -> ShView(c):
+  match c:
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inl{{==}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, _}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inl{{==}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inl{{==}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}:
+      Inr{Inr{Inr{(t => {==}, (x => {==}, x => {==}))}}}
+
+def sh_bs_cons(-c: Char, +u: String, v: ShView(c)) ->
+    {Laws.put(Chr{92}, Laws.sh_read(String.append(Cli.sh_body(SCon{c, u}), "'"), True{}))
+      == Laws.sh_read(SCon{Chr{92}, String.append(Cli.sh_body(SCon{c, u}), "'")}, True{})
+      : Maybe<&2, String>}:
+  match v:
+    case Inl{e}:
+      %e : {Laws.put(Chr{92}, Laws.sh_read(String.append(Cli.sh_body(SCon{_, u}), "'"), True{}))
+        == Laws.sh_read(SCon{Chr{92}, String.append(Cli.sh_body(SCon{_, u}), "'")}, True{})
+        : Maybe<&2, String>}
+      {==}
+    case Inr{Inl{e}}:
+      %e : {Laws.put(Chr{92}, Laws.sh_read(String.append(Cli.sh_body(SCon{_, u}), "'"), True{}))
+        == Laws.sh_read(SCon{Chr{92}, String.append(Cli.sh_body(SCon{_, u}), "'")}, True{})
+        : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inl{e}}}:
+      %e : {Laws.put(Chr{92}, Laws.sh_read(String.append(Cli.sh_body(SCon{_, u}), "'"), True{}))
+        == Laws.sh_read(SCon{Chr{92}, String.append(Cli.sh_body(SCon{_, u}), "'")}, True{})
+        : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{(body, (rd, rd_bs))}}}:
+      %body(u) : {Laws.put(Chr{92}, Laws.sh_read(String.append(_, "'"), True{}))
+        == Laws.sh_read(SCon{Chr{92}, String.append(_, "'")}, True{})
+        : Maybe<&2, String>}
+      rd_bs(String.append(Cli.sh_body(u), "'"))
+
+# In quotes, a \ stands for itself whatever follows it.
+def sh_bs_next(t: String) ->
+    {Laws.put(Chr{92}, Laws.sh_read(String.append(Cli.sh_body(t), "'"), True{}))
+      == Laws.sh_read(SCon{Chr{92}, String.append(Cli.sh_body(t), "'")}, True{})
+      : Maybe<&2, String>}:
+  match t:
+    case SNil{}: {==}
+    case SCon{c, u}: sh_bs_cons(c, u, sh_view(c))
+
+def sh_in_cons(-c: Char, +t: String,
+    ih: {Some{t} == Laws.sh_read(String.append(Cli.sh_body(t), "'"), True{})
+      : Maybe<&2, String>},
+    v: ShView(c)) ->
+    {Some{SCon{c, t}} == Laws.sh_read(String.append(Cli.sh_body(SCon{c, t}), "'"), True{})
+      : Maybe<&2, String>}:
+  match v:
+    case Inl{e}:
+      %e : {Some{SCon{_, t}} == Laws.sh_read(String.append(Cli.sh_body(SCon{_, t}), "'"), True{})
+        : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{39}, t}} == Laws.put(Chr{39}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inl{e}}:
+      %e : {Some{SCon{_, t}} == Laws.sh_read(String.append(Cli.sh_body(SCon{_, t}), "'"), True{})
+        : Maybe<&2, String>}
+      %sh_bs_next(t) : {Some{SCon{Chr{92}, t}} == _ : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{92}, t}} == Laws.put(Chr{92}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inl{e}}}:
+      %e : {Some{SCon{_, t}} == Laws.sh_read(String.append(Cli.sh_body(SCon{_, t}), "'"), True{})
+        : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{10}, t}} == Laws.put(Chr{10}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{(body, (rd, rd_bs))}}}:
+      %body(t) : {Some{SCon{c, t}} == Laws.sh_read(String.append(_, "'"), True{})
+        : Maybe<&2, String>}
+      %rd(String.append(Cli.sh_body(t), "'")) : {Some{SCon{c, t}} == _ : Maybe<&2, String>}
+      %ih : {Some{SCon{c, t}} == Laws.put(c, _) : Maybe<&2, String>}
+      {==}
+
+def sh_in(s: String) ->
+    {Some{s} == Laws.sh_read(String.append(Cli.sh_body(s), "'"), True{})
+      : Maybe<&2, String>}:
+  match s:
+    case SNil{}: {==}
+    case SCon{c, +t}: sh_in_cons(c, t, sh_in(t), sh_view(c))
+
+def Laws.p3(s):
+  Equal.sym(Maybe<&2, String>, Some{s}, Laws.Sh.unquote(Cli.Sh.quote(s)), sh_in(s))
+
+# P4: in quotes, fish reads fish_body(s) then ' back as s.
+
+# What the proof of P4 needs of a char other than ' and \.
+def FishOther(c: Char) -> Type:
+  (@t: String -> {SCon{c, Cli.fish_body(t)} == Cli.fish_body(SCon{c, t}) : String}) &
+  (@x: String -> {Laws.put(c, Laws.fish_read(x, True{}))
+    == Laws.fish_read(SCon{c, x}, True{}) : Maybe<&2, String>})
+
+def FishView(c: Char) -> Type:
+  {Chr{39} == c : Char} | ({Chr{92} == c : Char} | FishOther(c))
+
+# Arms: python3 tools/charsplit.py '(t => {==}, x => {==})' 39 92
+def fish_view(c: Char) -> FishView(c):
+  match c:
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inl{{==}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{True{}, WCon{False{}, _}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{True{}, _}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inl{{==}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}:
+      Inr{Inr{(t => {==}, x => {==})}}
+
+def fish_in_cons(-c: Char, +t: String,
+    ih: {Some{t} == Laws.fish_read(String.append(Cli.fish_body(t), "'"), True{})
+      : Maybe<&2, String>},
+    v: FishView(c)) ->
+    {Some{SCon{c, t}} == Laws.fish_read(String.append(Cli.fish_body(SCon{c, t}), "'"), True{})
+      : Maybe<&2, String>}:
+  match v:
+    case Inl{e}:
+      %e : {Some{SCon{_, t}} == Laws.fish_read(String.append(Cli.fish_body(SCon{_, t}), "'"), True{})
+        : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{39}, t}} == Laws.put(Chr{39}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inl{e}}:
+      %e : {Some{SCon{_, t}} == Laws.fish_read(String.append(Cli.fish_body(SCon{_, t}), "'"), True{})
+        : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{92}, t}} == Laws.put(Chr{92}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{(body, rd)}}:
+      %body(t) : {Some{SCon{c, t}} == Laws.fish_read(String.append(_, "'"), True{})
+        : Maybe<&2, String>}
+      %rd(String.append(Cli.fish_body(t), "'")) : {Some{SCon{c, t}} == _ : Maybe<&2, String>}
+      %ih : {Some{SCon{c, t}} == Laws.put(c, _) : Maybe<&2, String>}
+      {==}
+
+def fish_in(s: String) ->
+    {Some{s} == Laws.fish_read(String.append(Cli.fish_body(s), "'"), True{})
+      : Maybe<&2, String>}:
+  match s:
+    case SNil{}: {==}
+    case SCon{c, +t}: fish_in_cons(c, t, fish_in(t), fish_view(c))
+
+def Laws.p4(s):
+  Equal.sym(Maybe<&2, String>, Some{s}, Laws.Fish.unquote(Cli.Fish.quote(s)), fish_in(s))
+
+# P5: Zsh.unesc reads each \c of Zsh.esc(s) as c.
+
+# What the proof of P5 needs of a char other than \, [, ] and :.
+def ZshOther(c: Char) -> Type:
+  (@t: String -> {SCon{c, Cli.Zsh.esc(t)} == Cli.Zsh.esc(SCon{c, t}) : String}) &
+  (@x: String -> {Laws.put(c, Laws.Zsh.unesc(x)) == Laws.Zsh.unesc(SCon{c, x})
+    : Maybe<&2, String>})
+
+def ZshView(c: Char) -> Type:
+  {Chr{92} == c : Char} | ({Chr{91} == c : Char} |
+    ({Chr{93} == c : Char} | ({Chr{58} == c : Char} | ZshOther(c))))
+
+# Arms: python3 tools/charsplit.py '(t => {==}, x => {==})' 92 91 93 58
+def zsh_view(c: Char) -> ZshView(c):
+  match c:
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inl{{==}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inl{{==}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inl{{==}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inl{{==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}:
+      Inr{Inr{Inr{Inr{(t => {==}, x => {==})}}}}
+
+def zsh_in_cons(-c: Char, +t: String,
+    ih: {Some{t} == Laws.Zsh.unesc(Cli.Zsh.esc(t)) : Maybe<&2, String>},
+    v: ZshView(c)) ->
+    {Some{SCon{c, t}} == Laws.Zsh.unesc(Cli.Zsh.esc(SCon{c, t})) : Maybe<&2, String>}:
+  match v:
+    case Inl{e}:
+      %e : {Some{SCon{_, t}} == Laws.Zsh.unesc(Cli.Zsh.esc(SCon{_, t})) : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{92}, t}} == Laws.put(Chr{92}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inl{e}}:
+      %e : {Some{SCon{_, t}} == Laws.Zsh.unesc(Cli.Zsh.esc(SCon{_, t})) : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{91}, t}} == Laws.put(Chr{91}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inl{e}}}:
+      %e : {Some{SCon{_, t}} == Laws.Zsh.unesc(Cli.Zsh.esc(SCon{_, t})) : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{93}, t}} == Laws.put(Chr{93}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inl{e}}}}:
+      %e : {Some{SCon{_, t}} == Laws.Zsh.unesc(Cli.Zsh.esc(SCon{_, t})) : Maybe<&2, String>}
+      %ih : {Some{SCon{Chr{58}, t}} == Laws.put(Chr{58}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inr{(body, rd)}}}}:
+      %body(t) : {Some{SCon{c, t}} == Laws.Zsh.unesc(_) : Maybe<&2, String>}
+      %rd(Cli.Zsh.esc(t)) : {Some{SCon{c, t}} == _ : Maybe<&2, String>}
+      %ih : {Some{SCon{c, t}} == Laws.put(c, _) : Maybe<&2, String>}
+      {==}
+
+def zsh_in(s: String) -> {Some{s} == Laws.Zsh.unesc(Cli.Zsh.esc(s)) : Maybe<&2, String>}:
+  match s:
+    case SNil{}: {==}
+    case SCon{c, +t}: zsh_in_cons(c, t, zsh_in(t), zsh_view(c))
+
+def Laws.p5(s):
+  Equal.sym(Maybe<&2, String>, Some{s}, Laws.Zsh.unesc(Cli.Zsh.esc(s)), zsh_in(s))
+
+# P6 and P15: roff_body(s, b) for a line start b, read from the same b.
+
+# What the proofs of P6 and P15 need of a char that roff_body neither
+# escapes nor guards at a line start, and that is not a newline.
+def RoffOther(c: Char) -> Type:
+  (@b: Bool -> @t: String -> {SCon{c, Cli.roff_body(t, False{})}
+    == Cli.roff_body(SCon{c, t}, b) : String}) &
+  ((@b: Bool -> @x: String -> {Laws.put(c, Laws.roff_read(x, False{}))
+      == Laws.roff_read(SCon{c, x}, b) : Maybe<&2, String>}) &
+    (@b: Bool -> @x: String -> {Laws.no_request(x, False{})
+      == Laws.no_request(SCon{c, x}, b) : Bool}))
+
+def RoffView(c: Char) -> Type:
+  {Chr{46} == c : Char} | ({Chr{32} == c : Char} | ({Chr{10} == c : Char} |
+    ({Chr{92} == c : Char} | ({Chr{45} == c : Char} | ({Chr{34} == c : Char} |
+      ({Chr{39} == c : Char} | ({Chr{96} == c : Char} | RoffOther(c))))))))
+
+# Arms: python3 tools/charsplit.py '(b => t => {==}, (b => x => {==}, b => x => {==}))' 46 32 10 92 45 34 39 96
+def roff_char_view(c: Char) -> RoffView(c):
+  match c:
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inl{{==}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inl{{==}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inl{{==}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inl{{==}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inl{{==}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inl{{==}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inl{{==}}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inl{{==}}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(b => t => {==}, (b => x => {==}, b => x => {==}))}}}}}}}}
+
+def no_request_cons(-c: Char, +t: String,
+    ih: @n: Bool -> {Laws.no_request(Cli.roff_body(t, n), n) == True{} : Bool},
+    v: RoffView(c), +b: Bool) ->
+    {Laws.no_request(Cli.roff_body(SCon{c, t}, b), b) == True{} : Bool}:
+  match v:
+    case Inl{e}:
+      match b:
+        case True{}:
+          %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, True{}), True{}) == True{} : Bool}
+          ih(False{})
+        case False{}:
+          %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, False{}), False{}) == True{} : Bool}
+          ih(False{})
+    case Inr{Inl{e}}:
+      match b:
+        case True{}:
+          %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, True{}), True{}) == True{} : Bool}
+          ih(False{})
+        case False{}:
+          %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, False{}), False{}) == True{} : Bool}
+          ih(False{})
+    case Inr{Inr{Inl{e}}}:
+      %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, b), b) == True{} : Bool}
+      ih(True{})
+    case Inr{Inr{Inr{Inl{e}}}}:
+      %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, b), b) == True{} : Bool}
+      ih(False{})
+    case Inr{Inr{Inr{Inr{Inl{e}}}}}:
+      %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, b), b) == True{} : Bool}
+      ih(False{})
+    case Inr{Inr{Inr{Inr{Inr{Inl{e}}}}}}:
+      %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, b), b) == True{} : Bool}
+      ih(False{})
+    case Inr{Inr{Inr{Inr{Inr{Inr{Inl{e}}}}}}}:
+      %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, b), b) == True{} : Bool}
+      ih(False{})
+    case Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inl{e}}}}}}}}:
+      %e : {Laws.no_request(Cli.roff_body(SCon{_, t}, b), b) == True{} : Bool}
+      ih(False{})
+    case Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(body, (rd, nr))}}}}}}}}:
+      %body(b, t) : {Laws.no_request(_, b) == True{} : Bool}
+      %nr(b, Cli.roff_body(t, False{})) : {_ == True{} : Bool}
+      ih(False{})
+
+def no_request_in(s: String, b: Bool) ->
+    {Laws.no_request(Cli.roff_body(s, b), b) == True{} : Bool}:
+  match s:
+    case SNil{}: {==}
+    case SCon{c, +t}: no_request_cons(c, t, n => no_request_in(t, n), roff_char_view(c), b)
+
+def Laws.p6(s):
+  no_request_in(s, True{})
+
+def roff_in_cons(-c: Char, +t: String,
+    ih: @n: Bool -> {Some{t} == Laws.roff_read(Cli.roff_body(t, n), n)
+      : Maybe<&2, String>},
+    v: RoffView(c), +b: Bool) ->
+    {Some{SCon{c, t}} == Laws.roff_read(Cli.roff_body(SCon{c, t}, b), b)
+      : Maybe<&2, String>}:
+  match v:
+    case Inl{e}:
+      match b:
+        case True{}:
+          %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, True{}), True{})
+            : Maybe<&2, String>}
+          %ih(False{}) : {Some{SCon{Chr{46}, t}} == Laws.put(Chr{46}, _) : Maybe<&2, String>}
+          {==}
+        case False{}:
+          %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, False{}), False{})
+            : Maybe<&2, String>}
+          %ih(False{}) : {Some{SCon{Chr{46}, t}} == Laws.put(Chr{46}, _) : Maybe<&2, String>}
+          {==}
+    case Inr{Inl{e}}:
+      match b:
+        case True{}:
+          %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, True{}), True{})
+            : Maybe<&2, String>}
+          %ih(False{}) : {Some{SCon{Chr{32}, t}} == Laws.put(Chr{32}, _) : Maybe<&2, String>}
+          {==}
+        case False{}:
+          %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, False{}), False{})
+            : Maybe<&2, String>}
+          %ih(False{}) : {Some{SCon{Chr{32}, t}} == Laws.put(Chr{32}, _) : Maybe<&2, String>}
+          {==}
+    case Inr{Inr{Inl{e}}}:
+      %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, b), b)
+        : Maybe<&2, String>}
+      %ih(True{}) : {Some{SCon{Chr{10}, t}} == Laws.put(Chr{10}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inl{e}}}}:
+      %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, b), b)
+        : Maybe<&2, String>}
+      %ih(False{}) : {Some{SCon{Chr{92}, t}} == Laws.put(Chr{92}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inr{Inl{e}}}}}:
+      %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, b), b)
+        : Maybe<&2, String>}
+      %ih(False{}) : {Some{SCon{Chr{45}, t}} == Laws.put(Chr{45}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inr{Inr{Inl{e}}}}}}:
+      %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, b), b)
+        : Maybe<&2, String>}
+      %ih(False{}) : {Some{SCon{Chr{34}, t}} == Laws.put(Chr{34}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inr{Inr{Inr{Inl{e}}}}}}}:
+      %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, b), b)
+        : Maybe<&2, String>}
+      %ih(False{}) : {Some{SCon{Chr{39}, t}} == Laws.put(Chr{39}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inl{e}}}}}}}}:
+      %e : {Some{SCon{_, t}} == Laws.roff_read(Cli.roff_body(SCon{_, t}, b), b)
+        : Maybe<&2, String>}
+      %ih(False{}) : {Some{SCon{Chr{96}, t}} == Laws.put(Chr{96}, _) : Maybe<&2, String>}
+      {==}
+    case Inr{Inr{Inr{Inr{Inr{Inr{Inr{Inr{(body, (rd, nr))}}}}}}}}:
+      %body(b, t) : {Some{SCon{c, t}} == Laws.roff_read(_, b) : Maybe<&2, String>}
+      %rd(b, Cli.roff_body(t, False{})) : {Some{SCon{c, t}} == _ : Maybe<&2, String>}
+      %ih(False{}) : {Some{SCon{c, t}} == Laws.put(c, _) : Maybe<&2, String>}
+      {==}
+
+def roff_in(s: String, b: Bool) ->
+    {Some{s} == Laws.roff_read(Cli.roff_body(s, b), b) : Maybe<&2, String>}:
+  match s:
+    case SNil{}: {==}
+    case SCon{c, +t}: roff_in_cons(c, t, n => roff_in(t, n), roff_char_view(c), b)
+
+def Laws.p15(s):
+  Equal.sym(Maybe<&2, String>, Some{s}, Laws.Roff.unesc(Cli.Roff.esc(s)), roff_in(s, True{}))

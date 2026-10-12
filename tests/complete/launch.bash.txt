@@ -1,0 +1,21 @@
+launch  => sand
+launch - => --dry-run --help -h -n
+launch sand/ => sand/dir1 sand/dir2 sand/file1
+launch -n sand/f => sand/file1
+launch p sand/ => sand/dir1 sand/dir2 sand/file1
+launch p - => --dry-run --help -h -n
+launch p a sand/ => 
+launch p a - => 
+launch p a b  => 
+launch -- sand/ => sand/dir1 sand/dir2 sand/file1
+launch -- p sand/ => sand/dir1 sand/dir2 sand/file1
+launch -- p a sand/ => 
+launch p -- sand/ => sand/dir1 sand/dir2 sand/file1
+launch -n p -- a sand/ => 
+launch = sand/ => sand/dir1 sand/dir2 sand/file1
+launch : sand/ => sand/dir1 sand/dir2 sand/file1
+launch -n = sand/ => sand/dir1 sand/dir2 sand/file1
+launch p: sand/ => sand/dir1 sand/dir2 sand/file1
+launch :p sand/ => sand/dir1 sand/dir2 sand/file1
+launch p:q sand/ => sand/dir1 sand/dir2 sand/file1
+launch p =  => 

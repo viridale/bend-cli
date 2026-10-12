@@ -1,0 +1,35 @@
+pkg  => add completions help list remove rm run
+pkg - => --color --help --verbose --version -C -V -h -v
+pkg a => add
+pkg --c => --color
+pkg --color  => always auto never
+pkg --color= => always auto never
+pkg --color=al => always
+pkg --color=always  => add completions help list remove rm run
+pkg --color=always add  => 
+pkg -C sand/ => sand/dir1 sand/dir2
+pkg -vC sand/d => sand/dir1 sand/dir2
+pkg -C sand  => add completions help list remove rm run
+pkg add  => 
+pkg add - => --color --dev --help --registry --verbose -C -D -h -v
+pkg add -D - => --color --dev --help --registry --verbose -C -D -h -v
+pkg add --registry  => 
+pkg add --registry x  => 
+pkg rm - => --color --help --verbose -C -h -v
+pkg list --format  => json text
+pkg list --format=j => json
+pkg run x - => --color --help --verbose -C -h -v
+pkg run x y - => 
+pkg completions  => bash fish zsh
+pkg completions bash  => 
+pkg help  => add completions list remove rm run
+pkg help add  => 
+pkg help - => --help -h
+pkg man  => 
+pkg --  => 
+pkg bogus  => 
+pkg --color=  => add completions help list remove rm run
+pkg -C =  => add completions help list remove rm run
+pkg -C :  => add completions help list remove rm run
+pkg -C=sand  => add completions help list remove rm run
+pkg add = - => --color --dev --help --registry --verbose -C -D -h -v

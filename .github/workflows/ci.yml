@@ -120,4 +120,48 @@ jobs:
           fi
           LC_ALL=C grep -q $'\033\\[' /tmp/tty.txt
 
+  # SPEC §11: the completion scripts in real shells and the man pages through
+  # mandoc. Ubuntu 22.04 has fish 3.3.1, the oldest fish supported, and runs
+  # bash 4.4, the oldest bash, in Docker; macOS runs Homebrew's bash 5 and
+  # fish 4.
+  completions:
+    name: Completions and man pages (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Bend
+        run: |
+          curl -fsSL https://bend-lang.com/install.sh -o /tmp/bend-install.sh
+          sh /tmp/bend-install.sh
+          echo "$HOME/.bend/bin" >> "$GITHUB_PATH"
+      - name: Install shells
+        run: |
+          if [ "$(uname)" = Darwin ]; then
+            brew install bash fish
+          else
+            sudo apt-get update
+            sudo apt-get install -y zsh fish mandoc
+            docker pull bash:4.4
+          fi
+          bash --version | head -1
+          zsh --version
+          fish --version
+      - name: Build
+        run: |
+          mkdir -p build
+          bend main.bend -o build/pkg
+      - name: Completions and man pages
+        run: tests/complete/run.sh bash zsh fish man
+      - name: Completions in bash 4.4
+        if: runner.os == 'Linux'
+        run: |
+          BASH_CMD="docker run --rm -it -v $PWD:$PWD bash:4.4 bash" \
+            tests/complete/run.sh bash
+
   # Add G6 and G7 in M7, when bench/main.bend runs.

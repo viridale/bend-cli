@@ -10,3 +10,10 @@
 #   of argv instead of reversing an accumulator.
 # FID_CLI_SCAN 1 1 2 -> 0 2 4: scan_trace's events walk is inlined on both
 #   branches of scan_close; one runs per call, so no executed count rises.
+#
+# M6's V6, against M5's build (7efc301), both from main.bend:
+# FID_CLI_OUTCOME 21 16 36 -> 25 17 37: outcome_parse's Accepted arm, inlined
+#   here, looks up the built-in at the parsed path. It keeps c's three
+#   fields for cmd_items(c) and path for sub_at, and builtin_name's inlined
+#   walk adds a take and a seal. It runs once per process; no other def that
+#   M5 had rose.

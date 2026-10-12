@@ -107,8 +107,9 @@ version, completions, and man pages before invoking the app decoder.
 To install generated completions, run `source <(pkg completions bash)` in
 bash 4 or newer, save `pkg completions zsh` as `_pkg` in a directory on
 `$fpath`, or write `pkg completions fish` to
-`~/.config/fish/completions/pkg.fish`. Add `Cli.man()` to make
-`pkg man` print a man page; pass a subcommand path for its page.
+`~/.config/fish/completions/pkg.fish` in fish 3.3 or newer. Add
+`Cli.man()` to make `pkg man` print a man page; pass a subcommand path for
+its page.
 
 ## State and prove CLI behavior
 
@@ -192,7 +193,8 @@ stdout and usage errors to stderr.
 
 CI runs on macOS arm64 and Ubuntu 24.04 x86-64. Native builds need clang;
 compiled JavaScript uses Bun 1.1 or newer. Windows is outside the 1.x support
-scope.
+scope. CI also completes in bash 4.4 and 5, zsh, fish 3.3 and 4, and lints
+the man pages with mandoc.
 
 ## Upgrading
 

@@ -9,8 +9,11 @@
 # G-HELP, G-ERR, G-TIP and G-COLOR fix outcome's bytes for V1-V5. P10 and
 # P11 fix eval's codes and streams for every decoder through eval_with,
 # which eval calls (eval_bridge); the M5 goldens fix eval's bytes and Go
-# values for chosen cases. Nothing here fixes completions or man (M6), nor
-# Run.main's IO, which tests/e2e.bend covers (K4).
+# values for chosen cases. P3-P6 and P15 fix the quoters against models of
+# how each shell and man(7) read text; G-COMP and G-MAN fix the bytes of
+# script and roff, and g_eval_builtins fixes V6. Nothing here fixes what a
+# real shell offers from a script, nor Run.main's IO, which tests/e2e.bend
+# covers (K4).
 
 import Base
 import ./cli.bend as Cli
@@ -3117,3 +3120,1455 @@ law g_plan_pkg:
     Demo.Plan{0, "run script=exit args=1,2 verbose=0"} : Demo.Plan} &
   {Demo.plan(job(Demo.Script{"exit", []})) ==
     Demo.Plan{0, "run script=exit args= verbose=0"} : Demo.Plan}
+
+# ---- M6: completions and man pages (§11) ----
+
+# The models below say how a reader takes the quoters' output back. Each
+# reads only what the quoters need, and answers None for anything else: an
+# open quote, a char the reader would treat specially, or an escape it does
+# not define. None says only that the model does not read the text.
+def put(c: Char, m: Maybe<&2, String>) -> Maybe<&2, String>:
+  match m:
+    case Some{s}: Some{SCon{c, s}}
+    case None{}: None{}
+
+def put_if(ok: Bool, c: Char, m: Maybe<&2, String>) -> Maybe<&2, String>:
+  match ok:
+    case True{}: put(c, m)
+    case False{}: None{}
+
+# An ASCII letter or digit, or a char of extra.
+def plain_char(+c: Char, extra: String) -> Bool:
+  Bool.or(Bool.or(Char.is_alpha(c), Char.is_digit(c)),
+    String.contains(extra, Char.show(c)))
+
+# A POSIX shell reading one word (XCU 2.2): in '…' every char stands for
+# itself; outside, \ newline is removed, \c gives c, and a plain char or
+# one of _@%+=:,./- stands for itself.
+def sh_read(s: String, quoted: Bool) -> Maybe<&2, String>:
+  match s quoted:
+    case SNil{} False{}: Some{""}
+    case SNil{} True{}: None{}
+    case SCon{Chr{39}, tail} q: sh_read(tail, Bool.not(q))
+    case SCon{c, tail} True{}: put(c, sh_read(tail, True{}))
+    case SCon{Chr{92}, SCon{Chr{10}, tail}} False{}: sh_read(tail, False{})
+    case SCon{Chr{92}, SCon{c, tail}} False{}: put(c, sh_read(tail, False{}))
+    case SCon{Chr{92}, SNil{}} False{}: None{}
+    case SCon{+c, tail} False{}:
+      put_if(plain_char(c, "_@%+=:,./-"), c, sh_read(tail, False{}))
+
+def Sh.unquote(s: String) -> Maybe<&2, String>:
+  sh_read(s, False{})
+
+# fish reading one word: in '…', \\ gives \, \' gives ', and every other
+# char, \ included, stands for itself; outside, a plain char or one of
+# _@+=:,./- stands for itself.
+def fish_read(s: String, quoted: Bool) -> Maybe<&2, String>:
+  match s quoted:
+    case SNil{} False{}: Some{""}
+    case SNil{} True{}: None{}
+    case SCon{Chr{39}, tail} q: fish_read(tail, Bool.not(q))
+    case SCon{Chr{92}, SCon{Chr{92}, tail}} True{}:
+      put(Chr{92}, fish_read(tail, True{}))
+    case SCon{Chr{92}, SCon{Chr{39}, tail}} True{}:
+      put(Chr{39}, fish_read(tail, True{}))
+    case SCon{c, tail} True{}: put(c, fish_read(tail, True{}))
+    case SCon{+c, tail} False{}:
+      put_if(plain_char(c, "_@+=:,./-"), c, fish_read(tail, False{}))
+
+def Fish.unquote(s: String) -> Maybe<&2, String>:
+  fish_read(s, False{})
+
+# zsh's _arguments reading the text of a spec field: \c gives c, and an
+# unescaped [, ] or : would end the field.
+def Zsh.unesc(s: String) -> Maybe<&2, String>:
+  match s:
+    case SNil{}: Some{""}
+    case SCon{Chr{92}, SCon{c, tail}}: put(c, Zsh.unesc(tail))
+    case SCon{Chr{92}, SNil{}}: None{}
+    case SCon{Chr{91}, tail}: None{}
+    case SCon{Chr{93}, tail}: None{}
+    case SCon{Chr{58}, tail}: None{}
+    case SCon{c, tail}: put(c, Zsh.unesc(tail))
+
+# man(7) reading text lines: \e, \-, \(dq, \(aq and \(ga give \, -, ", '
+# and `, and \& gives nothing. A line may not start with . or ' (a request)
+# or a space (a break). A raw -, ", ' or ` is None, since groff may typeset
+# it as a hyphen or a curly quote, and so is any other escape.
+def roff_read(s: String, start: Bool) -> Maybe<&2, String>:
+  match s start:
+    case SNil{} _: Some{""}
+    case SCon{Chr{46}, tail} True{}: None{}
+    case SCon{Chr{32}, tail} True{}: None{}
+    case SCon{Chr{10}, tail} _: put(Chr{10}, roff_read(tail, True{}))
+    case SCon{Chr{92}, SCon{Chr{101}, tail}} _:
+      put(Chr{92}, roff_read(tail, False{}))
+    case SCon{Chr{92}, SCon{Chr{45}, tail}} _:
+      put(Chr{45}, roff_read(tail, False{}))
+    case SCon{Chr{92}, SCon{Chr{38}, tail}} _: roff_read(tail, False{})
+    case SCon{Chr{92}, SCon{Chr{40}, SCon{Chr{100}, SCon{Chr{113}, tail}}}} _:
+      put(Chr{34}, roff_read(tail, False{}))
+    case SCon{Chr{92}, SCon{Chr{40}, SCon{Chr{97}, SCon{Chr{113}, tail}}}} _:
+      put(Chr{39}, roff_read(tail, False{}))
+    case SCon{Chr{92}, SCon{Chr{40}, SCon{Chr{103}, SCon{Chr{97}, tail}}}} _:
+      put(Chr{96}, roff_read(tail, False{}))
+    case SCon{Chr{92}, tail} _: None{}
+    case SCon{Chr{45}, tail} _: None{}
+    case SCon{Chr{34}, tail} _: None{}
+    case SCon{Chr{39}, tail} _: None{}
+    case SCon{Chr{96}, tail} _: None{}
+    case SCon{c, tail} _: put(c, roff_read(tail, False{}))
+
+def Roff.unesc(s: String) -> Maybe<&2, String>:
+  roff_read(s, True{})
+
+# P3: a POSIX shell reads Sh.quote(s) as the one word s.
+law p3:
+  for +s: String
+  {Sh.unquote(Cli.Sh.quote(s)) == Some{s} : Maybe<&2, String>}
+
+# P4: fish reads Fish.quote(s) as the one word s.
+law p4:
+  for +s: String
+  {Fish.unquote(Cli.Fish.quote(s)) == Some{s} : Maybe<&2, String>}
+
+# P5: _arguments reads Zsh.esc(s) as s, so it holds no unescaped [, ] or :.
+law p5:
+  for +s: String
+  {Zsh.unesc(Cli.Zsh.esc(s)) == Some{s} : Maybe<&2, String>}
+
+# P6: no line of Roff.esc(s) starts with . or ', so none is a request.
+def no_request(s: String, start: Bool) -> Bool:
+  match s start:
+    case SNil{} _: True{}
+    case SCon{Chr{46}, tail} True{}: False{}
+    case SCon{Chr{39}, tail} True{}: False{}
+    case SCon{Chr{10}, tail} _: no_request(tail, True{})
+    case SCon{c, tail} _: no_request(tail, False{})
+
+law p6:
+  for s: String
+  {no_request(Cli.Roff.esc(s), True{}) == True{} : Bool}
+
+# P15: man(7) reads Roff.esc(s) as s.
+law p15:
+  for +s: String
+  {Roff.unesc(Cli.Roff.esc(s)) == Some{s} : Maybe<&2, String>}
+
+# The models read what each reader would, and refuse what it would read
+# differently.
+law g_quote_models:
+  {Sh.unquote("a'b c'\\'d\\\ne") == Some{"ab c'de"} : Maybe<&2, String>} &
+  {Sh.unquote("a b") == None{} : Maybe<&2, String>} &
+  {Sh.unquote("$x") == None{} : Maybe<&2, String>} &
+  {Sh.unquote("'a") == None{} : Maybe<&2, String>} &
+  {Fish.unquote("'a\\b\\\\\\''") == Some{"a\\b\\'"} : Maybe<&2, String>} &
+  {Fish.unquote("a\\ b") == None{} : Maybe<&2, String>} &
+  {Fish.unquote("%self") == None{} : Maybe<&2, String>} &
+  {Zsh.unesc("a\\:b\\\\") == Some{"a:b\\"} : Maybe<&2, String>} &
+  {Zsh.unesc("a:b") == None{} : Maybe<&2, String>} &
+  {Zsh.unesc("a\\") == None{} : Maybe<&2, String>} &
+  {Roff.unesc("\\&.a \\- \\e\\(dq\n\\& b") == Some{".a - \\\"\n b"}
+    : Maybe<&2, String>} &
+  {Roff.unesc("a-b") == None{} : Maybe<&2, String>} &
+  {Roff.unesc("a\n.b") == None{} : Maybe<&2, String>} &
+  {Roff.unesc("\\fBa\\fR") == None{} : Maybe<&2, String>}
+
+# §11: the quoters' bytes. Roff.esc escapes every \, -, ", ' and `, and
+# puts \& before a line that starts with . or a space.
+law g_quote:
+  {Cli.Sh.quote("it's") == "'it'\\''s'" : String} &
+  {Cli.Sh.quote("") == "''" : String} &
+  {Cli.Fish.quote("it's a\\b") == "'it\\'s a\\\\b'" : String} &
+  {Cli.Zsh.esc("a:[b]\\c") == "a\\:\\[b\\]\\\\c" : String} &
+  {Cli.Roff.esc(".x-y \"q\" `b` \\\n'z\n c") ==
+    "\\&.x\\-y \\(dqq\\(dq \\(gab\\(ga \\e\n\\(aqz\n\\& c" : String}
+
+# The engine every bash script shares, for function prefix id, then
+# the line that binds it to name, already quoted.
+def bash_rest(+id: String, name: String) -> List<&2, String>:
+  [
+    "",
+    "# Offers each value of kind that starts with $1, written after $2 and cut to",
+    "# the part readline completes: the text after the last \"=\" or \":\". Readline",
+    "# quotes files and directories; words are quoted here.",
+    String.concat([id, "_offer() {"]),
+    "  local word full i",
+    "  case $kind in",
+    "    f) compopt -o filenames; mapfile -t values < <(compgen -f -- \"$1\") ;;",
+    "    d) compopt -o filenames; mapfile -t values < <(compgen -d -- \"$1\") ;;",
+    "    w)",
+    "      for ((i = 0; i < ${#values[@]}; i++)); do",
+    "        printf -v 'values[i]' %q \"${values[i]}\"",
+    "      done ;;",
+    "    *) return ;;",
+    "  esac",
+    "  for word in \"${values[@]}\"; do",
+    "    full=$2$word",
+    "    [[ $word == \"$1\"* ]] && COMPREPLY+=(\"${full:${#2}+${#1}-${#tail}}\")",
+    "  done",
+    "}",
+    "",
+    String.concat([id, "() {"]),
+    "  local -a words=() opts=() subs=() dests=() values=()",
+    "  local cur tail word line gap path= want= kind opt many rest i j n=0 end=0 help=0",
+    "  COMPREPLY=()",
+    "  # Rejoin the \"=\" and \":\" that bash splits words at. COMP_LINE has no blank",
+    "  # at such a split, so a \"=\" typed as its own word stays one.",
+    "  line=${COMP_LINE#*\"${COMP_WORDS[0]}\"}",
+    "  for ((i = 1; i <= COMP_CWORD; i++)); do",
+    "    word=${COMP_WORDS[i]}",
+    "    tail=${COMP_WORDS[i-1]}",
+    "    gap=${line%%[![:blank:]]*}",
+    "    line=${line:${#gap}+${#word}}",
+    "    if ((i > 1)) && [[ -z $gap ]] &&",
+    "      [[ -n $word && -z ${word//[=:]} || -n $tail && -z ${tail//[=:]} ]]; then",
+    "      words[${#words[@]}-1]+=$word",
+    "    else",
+    "      words+=(\"$word\")",
+    "    fi",
+    "  done",
+    "  tail=${COMP_WORDS[COMP_CWORD]}",
+    "  [[ -z ${tail//[=:]} ]] && tail=",
+    "  cur=${words[${#words[@]}-1]}",
+    "  unset 'words[${#words[@]}-1]'",
+    String.concat(["  ", id, "_scope"]),
+    "  for word in \"${words[@]}\"; do",
+    "    if [[ -n $want ]]; then",
+    "      want=",
+    "    elif ((!end)) && [[ $word == -- ]]; then",
+    "      end=1",
+    "    elif ((!end)) && [[ $word == --* ]]; then",
+    String.concat(["      ", id, "_arg \"${word%%=*}\""]),
+    "      [[ -n $kind && $opt == 0 && $word != *=* ]] && want=$word",
+    "    elif ((!end)) && [[ $word == -?* ]]; then",
+    "      for ((j = 1; j < ${#word}; j++)); do",
+    String.concat(["        ", id, "_arg \"-${word:j:1}\""]),
+    "        [[ -n $kind ]] || continue",
+    "        ((j + 1 == ${#word})) && want=-${word:j:1}",
+    "        break",
+    "      done",
+    "    elif ((${#subs[@]})); then",
+    "      ((end)) && return",
+    "      if [[ $word == help ]] && ((!help)); then",
+    "        help=1",
+    "        continue",
+    "      fi",
+    "      for ((j = 0; j < ${#subs[@]}; j++)); do",
+    "        [[ $word == \"${subs[j]}\" ]] && break",
+    "      done",
+    "      ((j < ${#subs[@]})) || return",
+    "      path=${dests[j]}",
+    String.concat(["      ", id, "_scope"]),
+    "    else",
+    "      # n counts the slots filled. The variadic slot stays open, but a rest()",
+    "      # value takes every later word, so nothing more completes.",
+    "      n=$((n + 1))",
+    "      if ((n == many && rest)); then",
+    "        end=1",
+    "      elif ((n == many)); then",
+    "        n=$((n - 1))",
+    "      fi",
+    "    fi",
+    "  done",
+    "  if [[ -n $want ]]; then",
+    String.concat(["    ", id, "_arg \"$want\""]),
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  elif ((!end)) && [[ $cur == --*=* ]]; then",
+    String.concat(["    ", id, "_arg \"${cur%%=*}\""]),
+    String.concat(["    ", id, "_offer \"${cur#*=}\" \"${cur%%=*}=\""]),
+    "  elif ((!end)) && [[ $cur == -* ]]; then",
+    "    values=(\"${opts[@]}\") kind=w",
+    "    ((help)) && values=('-h' '--help')",
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  elif ((!end && ${#subs[@]})); then",
+    "    values=(\"${subs[@]}\") kind=w",
+    "    ((help)) || values+=('help')",
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  elif ((!help)); then",
+    String.concat(["    ", id, "_arg $((n + 1))"]),
+    String.concat(["    ", id, "_offer \"$cur\" ''"]),
+    "  fi",
+    "}",
+    "",
+    String.concat(["complete -F ", id, " ", name]),
+  ]
+
+def pkg_bash() -> String:
+  page(List.append(&2, String, [
+    "# bash completion; needs bash 4 or later.",
+    "",
+    "# Sets the tables of command path $path: opts, the options to offer; subs and",
+    "# dests, each subcommand name and the path it enters; many, the slot of the",
+    "# variadic positional, or 0; rest, 1 when that slot is rest().",
+    "_pkg_scope() {",
+    "  opts=() subs=() dests=() many=0 rest=0",
+    "  case $path in",
+    "    '')",
+    "      opts=('--color' '-v' '--verbose' '-C' '-h' '--help' '-V' '--version')",
+    "      subs=('add' 'remove' 'rm' 'list' 'run' 'completions')",
+    "      dests=('add' 'remove' 'remove' 'list' 'run' 'completions') ;;",
+    "    'add')",
+    "      opts=('-D' '--dev' '--registry' '--color' '-v' '--verbose' '-C' '-h' '--help')",
+    "      many=1 rest=0 ;;",
+    "    'remove')",
+    "      opts=('--color' '-v' '--verbose' '-C' '-h' '--help')",
+    "      many=1 rest=0 ;;",
+    "    'list')",
+    "      opts=('-a' '--all' '--format' '--color' '-v' '--verbose' '-C' '-h' '--help') ;;",
+    "    'run')",
+    "      opts=('--color' '-v' '--verbose' '-C' '-h' '--help')",
+    "      many=2 rest=1 ;;",
+    "    'completions')",
+    "      opts=('--color' '-v' '--verbose' '-C' '-h' '--help') ;;",
+    "  esac",
+    "}",
+    "",
+    "# Sets kind to what the option or positional $1 (a name, or a 1-based slot)",
+    "# takes at $path: w, a word from values; f, a file; d, a directory; s, other",
+    "# text. kind is empty for an option that takes no value and for a positional",
+    "# that completes nothing; opt is 1 when the value can only follow \"=\".",
+    "_pkg_arg() {",
+    "  kind= opt=0 values=()",
+    "  case $path in",
+    "    '')",
+    "      case $1 in",
+    "        '--color') kind=w values=('auto' 'always' 'never') ;;",
+    "        '-C') kind=d ;;",
+    "      esac ;;",
+    "    'add')",
+    "      case $1 in",
+    "        '--registry') kind=s ;;",
+    "        '--color') kind=w values=('auto' 'always' 'never') ;;",
+    "        '-C') kind=d ;;",
+    "      esac ;;",
+    "    'remove')",
+    "      case $1 in",
+    "        '--color') kind=w values=('auto' 'always' 'never') ;;",
+    "        '-C') kind=d ;;",
+    "      esac ;;",
+    "    'list')",
+    "      case $1 in",
+    "        '--format') kind=w values=('text' 'json') ;;",
+    "        '--color') kind=w values=('auto' 'always' 'never') ;;",
+    "        '-C') kind=d ;;",
+    "      esac ;;",
+    "    'run')",
+    "      case $1 in",
+    "        '--color') kind=w values=('auto' 'always' 'never') ;;",
+    "        '-C') kind=d ;;",
+    "      esac ;;",
+    "    'completions')",
+    "      case $1 in",
+    "        '--color') kind=w values=('auto' 'always' 'never') ;;",
+    "        '-C') kind=d ;;",
+    "        1) kind=w values=('bash' 'zsh' 'fish') ;;",
+    "      esac ;;",
+    "  esac",
+    "}",
+  ], bash_rest("_pkg", "'pkg'")))
+
+def quirks_bash() -> String:
+  page(List.append(&2, String, [
+    "# bash completion; needs bash 4 or later.",
+    "",
+    "# Sets the tables of command path $path: opts, the options to offer; subs and",
+    "# dests, each subcommand name and the path it enters; many, the slot of the",
+    "# variadic positional, or 0; rest, 1 when that slot is rest().",
+    "_my_tool_scope() {",
+    "  opts=() subs=() dests=() many=0 rest=0",
+    "  case $path in",
+    "    '')",
+    "      opts=('-q' '--quiet' '--no-quiet' '--mode' '-o' '--out' '--output' '-h' '--help' '-V' '--version')",
+    "      subs=('remote' 'rem')",
+    "      dests=('remote' 'remote') ;;",
+    "    'remote')",
+    "      opts=('-q' '--quiet' '--no-quiet' '-h' '--help')",
+    "      subs=('add')",
+    "      dests=('remote add') ;;",
+    "    'remote add')",
+    "      opts=('-t' '--tag' '-q' '--quiet' '--no-quiet' '-h' '--help') ;;",
+    "  esac",
+    "}",
+    "",
+    "# Sets kind to what the option or positional $1 (a name, or a 1-based slot)",
+    "# takes at $path: w, a word from values; f, a file; d, a directory; s, other",
+    "# text. kind is empty for an option that takes no value and for a positional",
+    "# that completes nothing; opt is 1 when the value can only follow \"=\".",
+    "_my_tool_arg() {",
+    "  kind= opt=0 values=()",
+    "  case $path in",
+    "    '')",
+    "      case $1 in",
+    "        '--mode') kind=w opt=1 values=('it'\\''s' 'a b' '$x' 'c:d' 'e\\f') ;;",
+    "        '-o'|'--out'|'--output') kind=f ;;",
+    "      esac ;;",
+    "    'remote add')",
+    "      case $1 in",
+    "        '-t'|'--tag') kind=s ;;",
+    "        2) kind=d ;;",
+    "      esac ;;",
+    "  esac",
+    "}",
+  ], bash_rest("_my_tool", "'my-tool'")))
+
+def launch_bash() -> String:
+  page(List.append(&2, String, [
+    "# bash completion; needs bash 4 or later.",
+    "",
+    "# Sets the tables of command path $path: opts, the options to offer; subs and",
+    "# dests, each subcommand name and the path it enters; many, the slot of the",
+    "# variadic positional, or 0; rest, 1 when that slot is rest().",
+    "_launch_scope() {",
+    "  opts=() subs=() dests=() many=0 rest=0",
+    "  case $path in",
+    "    '')",
+    "      opts=('-n' '--dry-run' '-h' '--help')",
+    "      many=2 rest=1 ;;",
+    "  esac",
+    "}",
+    "",
+    "# Sets kind to what the option or positional $1 (a name, or a 1-based slot)",
+    "# takes at $path: w, a word from values; f, a file; d, a directory; s, other",
+    "# text. kind is empty for an option that takes no value and for a positional",
+    "# that completes nothing; opt is 1 when the value can only follow \"=\".",
+    "_launch_arg() {",
+    "  kind= opt=0 values=()",
+    "  case $path in",
+    "    '')",
+    "      case $1 in",
+    "        1) kind=f ;;",
+    "        2) kind=f ;;",
+    "      esac ;;",
+    "  esac",
+    "}",
+  ], bash_rest("_launch", "'launch'")))
+
+# The function every fish script shares, for function prefix id.
+def fish_is(+id: String) -> List<&2, String>:
+  [
+    "",
+    "# Succeeds when the words before the cursor reach path $argv[1] and the next",
+    "# word can be one of $argv[2..-1]: n, an option or subcommand; h, a",
+    "# subcommand after help; v, an option's value; p<k>, positional slot k.",
+    String.concat(["function ", id, "_is"]),
+    "    # fish 4 deprecates -o, which fish 3 needs.",
+    "    set -l words (commandline -xpc 2>/dev/null; or commandline -opc)",
+    "    set -e words[1]",
+    "    set -l path 0",
+    String.concat(["    set -l shape (", id, "_shape 0 | string split ' ')"]),
+    "    set -l want 0",
+    "    set -l end 0",
+    "    set -l help 0",
+    "    set -l n 0",
+    "    for word in $words",
+    "        if test $want = 1",
+    "            set want 0",
+    "        else if test $end = 0; and test \"$word\" = --",
+    "            set end 1",
+    "        else if test $end = 0; and string match -q -r -- '^--.' $word",
+    String.concat(["            if not string match -q -- '*=*' $word; and ", id, "_valued $path $word"]),
+    "                set want 1",
+    "            end",
+    "        else if test $end = 0; and string match -q -r -- '^-.' $word",
+    "            set -l chars (string split '' -- (string sub -s 2 -- $word))",
+    "            for i in (seq (count $chars))",
+    String.concat(["                if ", id, "_valued $path -$chars[$i]"]),
+    "                    test $i = (count $chars); and set want 1",
+    "                    break",
+    "                end",
+    "            end",
+    "        else if test $shape[1] = 1",
+    "            if test $end = 1",
+    "                return 1",
+    "            else if test $help = 0; and test \"$word\" = help",
+    "                set help 1",
+    "            else",
+    String.concat(["                set path (", id, "_dest $path $word); or return 1"]),
+    String.concat(["                set shape (", id, "_shape $path | string split ' ')"]),
+    "            end",
+    "        else",
+    "            # n counts the slots filled. The variadic slot stays open, but a",
+    "            # rest() value takes every later word, so nothing more completes.",
+    "            set n (math $n + 1)",
+    "            if test $n = $shape[2]; and test $shape[3] = 1",
+    "                set end 1",
+    "            else if test $n = $shape[2]",
+    "                set n (math $n - 1)",
+    "            end",
+    "        end",
+    "    end",
+    "    test $path = $argv[1]; or return 1",
+    "    set -l tags",
+    "    if test $want = 1",
+    "        set tags v",
+    "    else",
+    "        test $end = 0; and test $help = 0; and set -a tags n",
+    "        test $help = 1; and set -a tags h",
+    "        test $shape[1] = 0; and test $help = 0; and set -a tags p(math $n + 1)",
+    "    end",
+    "    for tag in $argv[2..-1]",
+    "        contains -- $tag $tags; and return 0",
+    "    end",
+    "    return 1",
+    "end",
+  ]
+
+def pkg_fish() -> String:
+  page(List.concat(&2, String, [
+    [
+      "# fish completion; needs fish 3.3 or later.",
+      "",
+      "# Prints the number of the path that subcommand $argv[2] of path $argv[1]",
+      "# enters; paths are numbered in pre-order from 0, the root.",
+      "function __pkg_dest",
+      "    switch \"$argv[1] $argv[2]\"",
+      "        case '0 add'",
+      "            echo 1",
+      "        case '0 remove' '0 rm'",
+      "            echo 2",
+      "        case '0 list'",
+      "            echo 3",
+      "        case '0 run'",
+      "            echo 4",
+      "        case '0 completions'",
+      "            echo 5",
+      "        case '*'",
+      "            return 1",
+      "    end",
+      "end",
+      "",
+      "# Succeeds when option $argv[2] takes the next word as its value at path",
+      "# $argv[1].",
+      "function __pkg_valued",
+      "    switch $argv[1]",
+      "        case 0",
+      "            contains -- $argv[2] '--color' '-C'",
+      "        case 1",
+      "            contains -- $argv[2] '--registry' '--color' '-C'",
+      "        case 2",
+      "            contains -- $argv[2] '--color' '-C'",
+      "        case 3",
+      "            contains -- $argv[2] '--format' '--color' '-C'",
+      "        case 4",
+      "            contains -- $argv[2] '--color' '-C'",
+      "        case 5",
+      "            contains -- $argv[2] '--color' '-C'",
+      "        case '*'",
+      "            return 1",
+      "    end",
+      "end",
+      "",
+      "# Prints how path $argv[1] takes words: 1 if it has subcommands, else 0; the",
+      "# slot of its variadic positional, or 0; 1 if that slot is rest(), else 0.",
+      "function __pkg_shape",
+      "    switch $argv[1]",
+      "        case 0",
+      "            echo 1 0 0",
+      "        case 1",
+      "            echo 0 1 0",
+      "        case 2",
+      "            echo 0 1 0",
+      "        case 4",
+      "            echo 0 2 1",
+      "        case '*'",
+      "            echo 0 0 0",
+      "    end",
+      "end",
+      "",
+      "# Prints the values of the one_of list numbered $argv[1].",
+      "function __pkg_values",
+      "    switch $argv[1]",
+      "        case 1",
+      "            printf '%s\\n' 'auto' 'always' 'never'",
+      "        case 2",
+      "            printf '%s\\n' 'text' 'json'",
+      "        case 3",
+      "            printf '%s\\n' 'bash' 'zsh' 'fish'",
+      "    end",
+      "end",
+    ],
+    fish_is("__pkg"),
+    [
+      "",
+      "# Option lines also hold at v, so that fish can read grouped short options",
+      "# before a value, as in -vC DIR.",
+      "complete -c 'pkg' -f",
+      "complete -c 'pkg' -n '__pkg_is 0 n v' -l 'color' -x -a '(__pkg_values 1)' -d 'When to use color'",
+      "complete -c 'pkg' -n '__pkg_is 0 n v' -s 'v' -l 'verbose' -d 'More output; repeat for more'",
+      "complete -c 'pkg' -n '__pkg_is 0 n v' -s 'C' -x -a '(__fish_complete_directories)' -d 'Run as if started in DIR'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'pkg' -n '__pkg_is 0 n' -s 'V' -l 'version' -d 'Print version'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -a 'add' -d 'Add packages'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -a 'remove' -d 'Remove packages'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -a 'rm' -d 'Remove packages'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -a 'list' -d 'List installed packages'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -a 'run' -d 'Run a package script'",
+      "complete -c 'pkg' -n '__pkg_is 0 n h' -a 'completions' -d 'Print a shell completion script'",
+      "complete -c 'pkg' -n '__pkg_is 0 n' -a 'help' -d 'Print this message or the help of the given subcommand(s)'",
+      "complete -c 'pkg' -n '__pkg_is 1 n v' -s 'D' -l 'dev' -d 'Add as development dependencies'",
+      "complete -c 'pkg' -n '__pkg_is 1 n v' -l 'registry' -x -d 'Registry to fetch from'",
+      "complete -c 'pkg' -n '__pkg_is 1 n v' -l 'color' -x -a '(__pkg_values 1)' -d 'When to use color'",
+      "complete -c 'pkg' -n '__pkg_is 1 n v' -s 'v' -l 'verbose' -d 'More output; repeat for more'",
+      "complete -c 'pkg' -n '__pkg_is 1 n v' -s 'C' -x -a '(__fish_complete_directories)' -d 'Run as if started in DIR'",
+      "complete -c 'pkg' -n '__pkg_is 1 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'pkg' -n '__pkg_is 2 n v' -l 'color' -x -a '(__pkg_values 1)' -d 'When to use color'",
+      "complete -c 'pkg' -n '__pkg_is 2 n v' -s 'v' -l 'verbose' -d 'More output; repeat for more'",
+      "complete -c 'pkg' -n '__pkg_is 2 n v' -s 'C' -x -a '(__fish_complete_directories)' -d 'Run as if started in DIR'",
+      "complete -c 'pkg' -n '__pkg_is 2 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'pkg' -n '__pkg_is 3 n v' -s 'a' -l 'all' -d 'Include transitive packages'",
+      "complete -c 'pkg' -n '__pkg_is 3 n v' -l 'format' -x -a '(__pkg_values 2)' -d 'Output format'",
+      "complete -c 'pkg' -n '__pkg_is 3 n v' -l 'color' -x -a '(__pkg_values 1)' -d 'When to use color'",
+      "complete -c 'pkg' -n '__pkg_is 3 n v' -s 'v' -l 'verbose' -d 'More output; repeat for more'",
+      "complete -c 'pkg' -n '__pkg_is 3 n v' -s 'C' -x -a '(__fish_complete_directories)' -d 'Run as if started in DIR'",
+      "complete -c 'pkg' -n '__pkg_is 3 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'pkg' -n '__pkg_is 4 n v' -l 'color' -x -a '(__pkg_values 1)' -d 'When to use color'",
+      "complete -c 'pkg' -n '__pkg_is 4 n v' -s 'v' -l 'verbose' -d 'More output; repeat for more'",
+      "complete -c 'pkg' -n '__pkg_is 4 n v' -s 'C' -x -a '(__fish_complete_directories)' -d 'Run as if started in DIR'",
+      "complete -c 'pkg' -n '__pkg_is 4 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'pkg' -n '__pkg_is 5 n v' -l 'color' -x -a '(__pkg_values 1)' -d 'When to use color'",
+      "complete -c 'pkg' -n '__pkg_is 5 n v' -s 'v' -l 'verbose' -d 'More output; repeat for more'",
+      "complete -c 'pkg' -n '__pkg_is 5 n v' -s 'C' -x -a '(__fish_complete_directories)' -d 'Run as if started in DIR'",
+      "complete -c 'pkg' -n '__pkg_is 5 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'pkg' -n '__pkg_is 5 p1' -a '(__pkg_values 3)'",
+    ],
+  ]))
+
+def quirks_fish() -> String:
+  page(List.concat(&2, String, [
+    [
+      "# fish completion; needs fish 3.3 or later.",
+      "",
+      "# Prints the number of the path that subcommand $argv[2] of path $argv[1]",
+      "# enters; paths are numbered in pre-order from 0, the root.",
+      "function __my_tool_dest",
+      "    switch \"$argv[1] $argv[2]\"",
+      "        case '0 remote' '0 rem'",
+      "            echo 1",
+      "        case '1 add'",
+      "            echo 2",
+      "        case '*'",
+      "            return 1",
+      "    end",
+      "end",
+      "",
+      "# Succeeds when option $argv[2] takes the next word as its value at path",
+      "# $argv[1].",
+      "function __my_tool_valued",
+      "    switch $argv[1]",
+      "        case 0",
+      "            contains -- $argv[2] '-o' '--out' '--output'",
+      "        case 2",
+      "            contains -- $argv[2] '-t' '--tag'",
+      "        case '*'",
+      "            return 1",
+      "    end",
+      "end",
+      "",
+      "# Prints how path $argv[1] takes words: 1 if it has subcommands, else 0; the",
+      "# slot of its variadic positional, or 0; 1 if that slot is rest(), else 0.",
+      "function __my_tool_shape",
+      "    switch $argv[1]",
+      "        case 0",
+      "            echo 1 0 0",
+      "        case 1",
+      "            echo 1 0 0",
+      "        case '*'",
+      "            echo 0 0 0",
+      "    end",
+      "end",
+      "",
+      "# Prints the values of the one_of list numbered $argv[1].",
+      "function __my_tool_values",
+      "    switch $argv[1]",
+      "        case 1",
+      "            printf '%s\\n' 'it\\'s' 'a b' '$x' 'c:d' 'e\\\\f'",
+      "    end",
+      "end",
+    ],
+    fish_is("__my_tool"),
+    [
+      "",
+      "# Option lines also hold at v, so that fish can read grouped short options",
+      "# before a value, as in -vC DIR.",
+      "complete -c 'my-tool' -f",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n v' -s 'q' -l 'quiet' -l 'no-quiet' -d 'Say less'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n v' -l 'mode' -a '(__my_tool_values 1)' -d 'Pick a mode: [a] or b'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n v' -s 'o' -l 'out' -l 'output' -r -F -d 'Write to FILE'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n' -s 'V' -l 'version' -d 'Print version'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n h' -a 'remote' -d 'Manage remotes'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n h' -a 'rem' -d 'Manage remotes'",
+      "complete -c 'my-tool' -n '__my_tool_is 0 n' -a 'help' -d 'Print this message or the help of the given subcommand(s)'",
+      "complete -c 'my-tool' -n '__my_tool_is 1 n v' -s 'q' -l 'quiet' -l 'no-quiet' -d 'Say less'",
+      "complete -c 'my-tool' -n '__my_tool_is 1 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'my-tool' -n '__my_tool_is 1 n h' -a 'add' -d 'Add a remote'",
+      "complete -c 'my-tool' -n '__my_tool_is 1 n' -a 'help' -d 'Print this message or the help of the given subcommand(s)'",
+      "complete -c 'my-tool' -n '__my_tool_is 2 n v' -s 't' -l 'tag' -x -d 'Tag the remote'",
+      "complete -c 'my-tool' -n '__my_tool_is 2 n v' -s 'q' -l 'quiet' -l 'no-quiet' -d 'Say less'",
+      "complete -c 'my-tool' -n '__my_tool_is 2 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'my-tool' -n '__my_tool_is 2 p2' -a '(__fish_complete_directories)'",
+    ],
+  ]))
+
+def launch_fish() -> String:
+  page(List.concat(&2, String, [
+    [
+      "# fish completion; needs fish 3.3 or later.",
+      "",
+      "# Prints the number of the path that subcommand $argv[2] of path $argv[1]",
+      "# enters; paths are numbered in pre-order from 0, the root.",
+      "function __launch_dest",
+      "    switch \"$argv[1] $argv[2]\"",
+      "        case '*'",
+      "            return 1",
+      "    end",
+      "end",
+      "",
+      "# Succeeds when option $argv[2] takes the next word as its value at path",
+      "# $argv[1].",
+      "function __launch_valued",
+      "    switch $argv[1]",
+      "        case '*'",
+      "            return 1",
+      "    end",
+      "end",
+      "",
+      "# Prints how path $argv[1] takes words: 1 if it has subcommands, else 0; the",
+      "# slot of its variadic positional, or 0; 1 if that slot is rest(), else 0.",
+      "function __launch_shape",
+      "    switch $argv[1]",
+      "        case 0",
+      "            echo 0 2 1",
+      "        case '*'",
+      "            echo 0 0 0",
+      "    end",
+      "end",
+    ],
+    fish_is("__launch"),
+    [
+      "",
+      "# Option lines also hold at v, so that fish can read grouped short options",
+      "# before a value, as in -vC DIR.",
+      "complete -c 'launch' -f",
+      "complete -c 'launch' -n '__launch_is 0 n v' -s 'n' -l 'dry-run' -d 'Print the command instead'",
+      "complete -c 'launch' -n '__launch_is 0 n h' -s 'h' -l 'help' -d 'Print help'",
+      "complete -c 'launch' -n '__launch_is 0 p1' -F",
+      "complete -c 'launch' -n '__launch_is 0 p2' -F",
+    ],
+  ]))
+
+def pkg_zsh() -> String:
+  page([
+    "#compdef pkg",
+    "",
+    "_pkg() {",
+    "  local curcontext=$curcontext state line",
+    "  local -a v1=('auto' 'always' 'never') v2=('text' 'json') v3=('bash' 'zsh' 'fish')",
+    "  _arguments -C -s -S \\",
+    "    '--color=[When to use color]:WHEN:($v1)' \\",
+    "    '*-v[More output; repeat for more]' \\",
+    "    '*--verbose[More output; repeat for more]' \\",
+    "    '-C+[Run as if started in DIR]:DIR:_files -/' \\",
+    "    '(-h --help)-h[Print help]' \\",
+    "    '(-h --help)--help[Print help]' \\",
+    "    '(-V --version)-V[Print version]' \\",
+    "    '(-V --version)--version[Print version]' \\",
+    "    '*:: :->pkg' && return",
+    "  case $state in",
+    "    'pkg')",
+    "      if (( CURRENT == 1 )); then",
+    "        local -a commands=(",
+    "          'add:Add packages'",
+    "          'remove:Remove packages'",
+    "          'rm:Remove packages'",
+    "          'list:List installed packages'",
+    "          'run:Run a package script'",
+    "          'completions:Print a shell completion script'",
+    "          'help:Print this message or the help of the given subcommand(s)'",
+    "        )",
+    "        _describe -t commands 'pkg command' commands",
+    "      else",
+    "        case $words[1] in",
+    "          'add')",
+    "            _arguments -C -s -S \\",
+    "              '(-D --dev)-D[Add as development dependencies]' \\",
+    "              '(-D --dev)--dev[Add as development dependencies]' \\",
+    "              '--registry=[Registry to fetch from]:URL: ' \\",
+    "              '--color=[When to use color]:WHEN:($v1)' \\",
+    "              '*-v[More output; repeat for more]' \\",
+    "              '*--verbose[More output; repeat for more]' \\",
+    "              '-C+[Run as if started in DIR]:DIR:_files -/' \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '*:NAME: ' ;;",
+    "          'remove'|'rm')",
+    "            _arguments -C -s -S \\",
+    "              '--color=[When to use color]:WHEN:($v1)' \\",
+    "              '*-v[More output; repeat for more]' \\",
+    "              '*--verbose[More output; repeat for more]' \\",
+    "              '-C+[Run as if started in DIR]:DIR:_files -/' \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '*:NAME: ' ;;",
+    "          'list')",
+    "            _arguments -C -s -S \\",
+    "              '(-a --all)-a[Include transitive packages]' \\",
+    "              '(-a --all)--all[Include transitive packages]' \\",
+    "              '--format=[Output format]:FMT:($v2)' \\",
+    "              '--color=[When to use color]:WHEN:($v1)' \\",
+    "              '*-v[More output; repeat for more]' \\",
+    "              '*--verbose[More output; repeat for more]' \\",
+    "              '-C+[Run as if started in DIR]:DIR:_files -/' \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' ;;",
+    "          'run')",
+    "            _arguments -C -s -S \\",
+    "              '--color=[When to use color]:WHEN:($v1)' \\",
+    "              '*-v[More output; repeat for more]' \\",
+    "              '*--verbose[More output; repeat for more]' \\",
+    "              '-C+[Run as if started in DIR]:DIR:_files -/' \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '1:SCRIPT: ' \\",
+    "              '(-)2::ARGS: ' ;;",
+    "          'completions')",
+    "            _arguments -C -s -S \\",
+    "              '--color=[When to use color]:WHEN:($v1)' \\",
+    "              '*-v[More output; repeat for more]' \\",
+    "              '*--verbose[More output; repeat for more]' \\",
+    "              '-C+[Run as if started in DIR]:DIR:_files -/' \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '1:SHELL:($v3)' ;;",
+    "          'help')",
+    "            _arguments -C -s -S \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '*:: :->pkg-help' && return",
+    "            case $state in",
+    "              'pkg-help')",
+    "                if (( CURRENT == 1 )); then",
+    "                  local -a commands=(",
+    "                    'add:Add packages'",
+    "                    'remove:Remove packages'",
+    "                    'rm:Remove packages'",
+    "                    'list:List installed packages'",
+    "                    'run:Run a package script'",
+    "                    'completions:Print a shell completion script'",
+    "                  )",
+    "                  _describe -t commands 'pkg command' commands",
+    "                fi ;;",
+    "            esac ;;",
+    "        esac",
+    "      fi ;;",
+    "  esac",
+    "}",
+    "",
+    "if [[ $funcstack[1] == '_pkg' ]]; then",
+    "  _pkg \"$@\"",
+    "else",
+    "  compdef _pkg 'pkg'",
+    "fi",
+  ])
+
+def quirks_zsh() -> String:
+  page([
+    "#compdef my-tool",
+    "",
+    "_my_tool() {",
+    "  local curcontext=$curcontext state line",
+    "  local -a v1=('it'\\''s' 'a b' '$x' 'c:d' 'e\\f')",
+    "  _arguments -C -s -S \\",
+    "    '(-q --quiet --no-quiet)-q[Say less]' \\",
+    "    '(-q --quiet --no-quiet)--quiet[Say less]' \\",
+    "    '(-q --quiet --no-quiet)--no-quiet[Say less]' \\",
+    "    '--mode=-[Pick a mode\\: \\[a\\] or b]::M:($v1)' \\",
+    "    '(-o --out --output)-o+[Write to FILE]:FILE:_files' \\",
+    "    '(-o --out --output)--out=[Write to FILE]:FILE:_files' \\",
+    "    '(-o --out --output)--output=[Write to FILE]:FILE:_files' \\",
+    "    '(-h --help)-h[Print help]' \\",
+    "    '(-h --help)--help[Print help]' \\",
+    "    '(-V --version)-V[Print version]' \\",
+    "    '(-V --version)--version[Print version]' \\",
+    "    '*:: :->my-tool' && return",
+    "  case $state in",
+    "    'my-tool')",
+    "      if (( CURRENT == 1 )); then",
+    "        local -a commands=(",
+    "          'remote:Manage remotes'",
+    "          'rem:Manage remotes'",
+    "          'help:Print this message or the help of the given subcommand(s)'",
+    "        )",
+    "        _describe -t commands 'my-tool command' commands",
+    "      else",
+    "        case $words[1] in",
+    "          'remote'|'rem')",
+    "            _arguments -C -s -S \\",
+    "              '(-q --quiet --no-quiet)-q[Say less]' \\",
+    "              '(-q --quiet --no-quiet)--quiet[Say less]' \\",
+    "              '(-q --quiet --no-quiet)--no-quiet[Say less]' \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '*:: :->my-tool-remote' && return",
+    "            case $state in",
+    "              'my-tool-remote')",
+    "                if (( CURRENT == 1 )); then",
+    "                  local -a commands=(",
+    "                    'add:Add a remote'",
+    "                    'help:Print this message or the help of the given subcommand(s)'",
+    "                  )",
+    "                  _describe -t commands 'my-tool remote command' commands",
+    "                else",
+    "                  case $words[1] in",
+    "                    'add')",
+    "                      _arguments -C -s -S \\",
+    "                        '*-t+[Tag the remote]:T: ' \\",
+    "                        '*--tag=[Tag the remote]:T: ' \\",
+    "                        '(-q --quiet --no-quiet)-q[Say less]' \\",
+    "                        '(-q --quiet --no-quiet)--quiet[Say less]' \\",
+    "                        '(-q --quiet --no-quiet)--no-quiet[Say less]' \\",
+    "                        '(-h --help)-h[Print help]' \\",
+    "                        '(-h --help)--help[Print help]' \\",
+    "                        '1:NAME: ' \\",
+    "                        '2::DIR:_files -/' ;;",
+    "                    'help')",
+    "                      _arguments -C -s -S \\",
+    "                        '(-h --help)-h[Print help]' \\",
+    "                        '(-h --help)--help[Print help]' \\",
+    "                        '*:: :->my-tool-remote-help' && return",
+    "                      case $state in",
+    "                        'my-tool-remote-help')",
+    "                          if (( CURRENT == 1 )); then",
+    "                            local -a commands=(",
+    "                              'add:Add a remote'",
+    "                            )",
+    "                            _describe -t commands 'my-tool remote command' commands",
+    "                          fi ;;",
+    "                      esac ;;",
+    "                  esac",
+    "                fi ;;",
+    "            esac ;;",
+    "          'help')",
+    "            _arguments -C -s -S \\",
+    "              '(-h --help)-h[Print help]' \\",
+    "              '(-h --help)--help[Print help]' \\",
+    "              '*:: :->my-tool-help' && return",
+    "            case $state in",
+    "              'my-tool-help')",
+    "                if (( CURRENT == 1 )); then",
+    "                  local -a commands=(",
+    "                    'remote:Manage remotes'",
+    "                    'rem:Manage remotes'",
+    "                  )",
+    "                  _describe -t commands 'my-tool command' commands",
+    "                else",
+    "                  case $words[1] in",
+    "                    'remote'|'rem')",
+    "                      if (( CURRENT == 2 )); then",
+    "                        local -a commands=(",
+    "                          'add:Add a remote'",
+    "                        )",
+    "                        _describe -t commands 'my-tool remote command' commands",
+    "                      fi ;;",
+    "                  esac",
+    "                fi ;;",
+    "            esac ;;",
+    "        esac",
+    "      fi ;;",
+    "  esac",
+    "}",
+    "",
+    "if [[ $funcstack[1] == '_my-tool' ]]; then",
+    "  _my_tool \"$@\"",
+    "else",
+    "  compdef _my_tool 'my-tool'",
+    "fi",
+  ])
+
+def launch_zsh() -> String:
+  page([
+    "#compdef launch",
+    "",
+    "_launch() {",
+    "  local curcontext=$curcontext state line",
+    "  _arguments -C -s -S \\",
+    "    '(-n --dry-run)-n[Print the command instead]' \\",
+    "    '(-n --dry-run)--dry-run[Print the command instead]' \\",
+    "    '(-h --help)-h[Print help]' \\",
+    "    '(-h --help)--help[Print help]' \\",
+    "    '1:PROG:_files' \\",
+    "    '(-)2::ARGS:_files'",
+    "}",
+    "",
+    "if [[ $funcstack[1] == '_launch' ]]; then",
+    "  _launch \"$@\"",
+    "else",
+    "  compdef _launch 'launch'",
+    "fi",
+  ])
+
+def pkg_man() -> String:
+  page([
+    ".TH \"PKG\" \"1\" \"\" \"pkg 0.1.0\" \"User Commands\"",
+    ".SH NAME",
+    "pkg \\- A package manager (demo)",
+    ".SH SYNOPSIS",
+    "\\fBpkg\\fR [OPTIONS] <COMMAND>",
+    ".SH DESCRIPTION",
+    "A package manager (demo)",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-\\-color\\fR \\fI<WHEN>\\fR",
+    "When to use color [default: auto] [possible values: auto, always, never]",
+    ".TP",
+    "\\fB\\-v\\fR, \\fB\\-\\-verbose\\fR...",
+    "More output; repeat for more",
+    ".TP",
+    "\\fB\\-C\\fR \\fI<DIR>\\fR",
+    "Run as if started in DIR",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".TP",
+    "\\fB\\-V\\fR, \\fB\\-\\-version\\fR",
+    "Print version",
+    ".SH COMMANDS",
+    ".TP",
+    "\\fBpkg\\-add\\fR(1)",
+    "Add packages",
+    ".TP",
+    "\\fBpkg\\-remove\\fR(1)",
+    "Remove packages [aliases: rm]",
+    ".TP",
+    "\\fBpkg\\-list\\fR(1)",
+    "List installed packages",
+    ".TP",
+    "\\fBpkg\\-run\\fR(1)",
+    "Run a package script",
+    ".TP",
+    "\\fBpkg\\-completions\\fR(1)",
+    "Print a shell completion script",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+    ".SH SEE ALSO",
+    "\\fBpkg\\-add\\fR(1), \\fBpkg\\-remove\\fR(1), \\fBpkg\\-list\\fR(1), \\fBpkg\\-run\\fR(1), \\fBpkg\\-completions\\fR(1)",
+  ])
+
+def add_man() -> String:
+  page([
+    ".TH \"PKG\\-ADD\" \"1\" \"\" \"pkg 0.1.0\" \"User Commands\"",
+    ".SH NAME",
+    "pkg\\-add \\- Add packages",
+    ".SH SYNOPSIS",
+    "\\fBpkg add\\fR [OPTIONS] <NAME>...",
+    ".SH DESCRIPTION",
+    "Add packages",
+    ".SH ARGUMENTS",
+    ".TP",
+    "\\fI<NAME>\\fR...",
+    "Packages to add",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-D\\fR, \\fB\\-\\-dev\\fR",
+    "Add as development dependencies",
+    ".TP",
+    "\\fB\\-\\-registry\\fR \\fI<URL>\\fR",
+    "Registry to fetch from [env: PKG_REGISTRY] [default: https://registry.example]",
+    ".TP",
+    "\\fB\\-\\-color\\fR \\fI<WHEN>\\fR",
+    "When to use color [default: auto] [possible values: auto, always, never]",
+    ".TP",
+    "\\fB\\-v\\fR, \\fB\\-\\-verbose\\fR...",
+    "More output; repeat for more",
+    ".TP",
+    "\\fB\\-C\\fR \\fI<DIR>\\fR",
+    "Run as if started in DIR",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".SH ENVIRONMENT",
+    ".TP",
+    "\\fBPKG_REGISTRY\\fR",
+    "Used for \\fB\\-\\-registry\\fR \\fI<URL>\\fR when it is not given",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+    ".SH EXAMPLES",
+    "Add a development dependency:",
+    ".IP",
+    ".nf",
+    "$ pkg add \\-D left\\-pad",
+    ".fi",
+    ".SH SEE ALSO",
+    "\\fBpkg\\fR(1)",
+  ])
+
+def quirks_man() -> String:
+  page([
+    ".TH \"MY\\-TOOL\" \"1\" \"\" \"my\\-tool 2.0\\-rc.1\" \"User Commands\"",
+    ".SH NAME",
+    "my\\-tool \\- It\\(aqs a \\(dqtool\\(dq: [all] of it",
+    ".SH SYNOPSIS",
+    "\\fBmy\\-tool\\fR [OPTIONS] <COMMAND>",
+    ".SH DESCRIPTION",
+    "It\\(aqs a \\(dqtool\\(dq: [all] of it",
+    ".PP",
+    "Second paragraph.",
+    ".br",
+    "\\&.A hard break",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-q\\fR, \\fB\\-\\-[no\\-]quiet\\fR",
+    "Say less",
+    ".IP",
+    "\\(aqQuoted\\(aq second paragraph [env: MY_QUIET]",
+    ".TP",
+    "\\fB\\-\\-mode\\fR[=\\fI<M>\\fR]",
+    "Pick a mode: [a] or b [possible values: it\\(aqs, a b, $x, c:d, e\\ef]",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".TP",
+    "\\fB\\-V\\fR, \\fB\\-\\-version\\fR",
+    "Print version",
+    ".SS \"Output\"",
+    ".TP",
+    "\\fB\\-o\\fR, \\fB\\-\\-out\\fR \\fI<FILE>\\fR",
+    "Write to FILE [aliases: \\-\\-output]",
+    ".SH COMMANDS",
+    ".TP",
+    "\\fBmy\\-tool\\-remote\\fR(1)",
+    "Manage remotes [aliases: rem]",
+    ".SH ENVIRONMENT",
+    ".TP",
+    "\\fBMY_QUIET\\fR",
+    "Used for \\fB\\-\\-[no\\-]quiet\\fR when it is not given",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+    ".SH EXAMPLES",
+    "Quote a mode:",
+    ".IP",
+    ".nf",
+    "$ my\\-tool \\-\\-mode=\\(aqit\\(aq\\e\\(aq\\(aqs\\(aq rem add x",
+    ".fi",
+    ".PP",
+    "Be quiet:",
+    ".IP",
+    ".nf",
+    "$ my\\-tool \\-q",
+    ".fi",
+    ".SH NOTES",
+    "\\(aqQuoted\\(aq notes\\ewith a backslash",
+    ".SH SEE ALSO",
+    "\\fBmy\\-tool\\-remote\\fR(1)",
+  ])
+
+def quirks_add_man() -> String:
+  page([
+    ".TH \"MY\\-TOOL\\-REMOTE\\-ADD\" \"1\" \"\" \"my\\-tool 2.0\\-rc.1\" \"User Commands\"",
+    ".SH NAME",
+    "my\\-tool\\-remote\\-add \\- Add a remote",
+    ".SH SYNOPSIS",
+    "\\fBmy\\-tool remote add\\fR [OPTIONS] <NAME> [DIR]",
+    ".SH DESCRIPTION",
+    "Add a remote",
+    ".SH ARGUMENTS",
+    ".TP",
+    "\\fI<NAME>\\fR",
+    "Remote name",
+    ".TP",
+    "\\fI[DIR]\\fR",
+    "Where to clone",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-t\\fR, \\fB\\-\\-tag\\fR \\fI<T>\\fR...",
+    "Tag the remote",
+    ".TP",
+    "\\fB\\-q\\fR, \\fB\\-\\-[no\\-]quiet\\fR",
+    "Say less",
+    ".IP",
+    "\\(aqQuoted\\(aq second paragraph [env: MY_QUIET]",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".SH ENVIRONMENT",
+    ".TP",
+    "\\fBMY_QUIET\\fR",
+    "Used for \\fB\\-\\-[no\\-]quiet\\fR when it is not given",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+    ".SH SEE ALSO",
+    "\\fBmy\\-tool\\-remote\\fR(1)",
+  ])
+
+def quirks_prune_man() -> String:
+  page([
+    ".TH \"MY\\-TOOL\\-REMOTE\\-PRUNE\" \"1\" \"\" \"my\\-tool 2.0\\-rc.1\" \"User Commands\"",
+    ".SH NAME",
+    "my\\-tool\\-remote\\-prune \\- Prune remotes",
+    ".SH SYNOPSIS",
+    "\\fBmy\\-tool remote prune\\fR [OPTIONS]",
+    ".SH DESCRIPTION",
+    "Prune remotes",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-q\\fR, \\fB\\-\\-[no\\-]quiet\\fR",
+    "Say less",
+    ".IP",
+    "\\(aqQuoted\\(aq second paragraph [env: MY_QUIET]",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".SH ENVIRONMENT",
+    ".TP",
+    "\\fBMY_QUIET\\fR",
+    "Used for \\fB\\-\\-[no\\-]quiet\\fR when it is not given",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+    ".SH SEE ALSO",
+    "\\fBmy\\-tool\\-remote\\fR(1)",
+  ])
+
+def launch_man() -> String:
+  page([
+    ".TH \"LAUNCH\" \"1\" \"\" \"launch\" \"User Commands\"",
+    ".SH NAME",
+    "launch \\- Start a program",
+    ".SH SYNOPSIS",
+    "\\fBlaunch\\fR [OPTIONS] <PROG> [ARGS]...",
+    ".SH DESCRIPTION",
+    "Start a program",
+    ".SH ARGUMENTS",
+    ".TP",
+    "\\fI<PROG>\\fR",
+    "Program to start",
+    ".TP",
+    "\\fI[ARGS]\\fR...",
+    "Arguments for the program",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-n\\fR, \\fB\\-\\-dry\\-run\\fR",
+    "Print the command instead",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+  ])
+
+# G-COMP: pkg's scripts. Each path offers its visible subcommands with
+# their aliases and help, the options in scope with -h and --help (and -V
+# and --version at the root), one_of values and directories for -C. The
+# hidden man command never appears.
+law g_comp_bash:
+  {Cli.script(Demo.cli(), Cli.Bash{}) == pkg_bash() : String}
+
+law g_comp_zsh:
+  {Cli.script(Demo.cli(), Cli.Zsh{}) == pkg_zsh() : String}
+
+law g_comp_fish:
+  {Cli.script(Demo.cli(), Cli.Fish{}) == pkg_fish() : String}
+
+# §11: a spec whose text needs every quoter: quotes, $, \, [, ], : and a
+# space in values and help, a leading dot, a dash in the name, hidden items,
+# subcommand and option aliases, a [=<V>] option, a heading, a negatable
+# switch with env, examples and after() text.
+def quirks() -> Cli.Cmd:
+  Cli.cmd("my-tool",
+    "It's a \"tool\": [all] of it\n\nSecond paragraph.\n.A hard break", [
+    Cli.version("2.0-rc.1"),
+    Cli.arg("-q, --[no-]quiet", "Say less\n\n'Quoted' second paragraph",
+      [Cli.global(), Cli.env("MY_QUIET")]),
+    Cli.arg("--mode[=<M>]", "Pick a mode: [a] or b",
+      [Cli.one_of(["it's", "a b", "$x", "c:d", "e\\f"]), Cli.bare("a b")]),
+    Cli.arg("--key <K>", "Secret", [Cli.hidden()]),
+    Cli.arg("-o, --out <FILE>", "Write to FILE",
+      [Cli.as_file(), Cli.alias("--output"), Cli.heading("Output")]),
+    Cli.sub("remote", "Manage remotes", [
+      Cli.alias("rem"),
+      Cli.sub("add", "Add a remote", [
+        Cli.arg("-t, --tag <T>...", "Tag the remote", []),
+        Cli.arg("<NAME>", "Remote name", []),
+        Cli.arg("[DIR]", "Where to clone", [Cli.as_dir()]),
+      ]),
+      Cli.sub("prune", "Prune remotes", [Cli.hidden()]),
+    ]),
+    Cli.example("my-tool --mode='it'\\''s' rem add x", "Quote a mode"),
+    Cli.example("my-tool -q", "Be quiet"),
+    Cli.after("'Quoted' notes\\with a backslash"),
+  ])
+
+# G-COMP: the quirks scripts, for a spec that lints clean. Identifiers map
+# - to _; words, descriptions and values pass through the quoters; --key
+# and prune never appear; a [=<V>] option completes its value only after =.
+law g_comp_quirks_bash:
+  {Cli.problems(quirks()) == [] : List<&2, Cli.Problem>} &
+  {Cli.script(quirks(), Cli.Bash{}) == quirks_bash() : String}
+
+law g_comp_quirks_zsh:
+  {Cli.script(quirks(), Cli.Zsh{}) == quirks_zsh() : String}
+
+law g_comp_quirks_fish:
+  {Cli.script(quirks(), Cli.Fish{}) == quirks_fish() : String}
+
+# §11: a spec without a version, whose rest() slot takes files.
+def launch() -> Cli.Cmd:
+  Cli.cmd("launch", "Start a program", [
+    Cli.arg("-n, --dry-run", "Print the command instead", []),
+    Cli.arg("<PROG>", "Program to start", [Cli.as_file()]),
+    Cli.arg("[ARGS]...", "Arguments for the program",
+      [Cli.rest(), Cli.as_file()]),
+  ])
+
+# G-COMP: the launch scripts, for a spec that lints clean. The rest() slot
+# completes files for its first value only, since that value takes every
+# later word; without a version there is no -V.
+law g_comp_launch_bash:
+  {Cli.problems(launch()) == [] : List<&2, Cli.Problem>} &
+  {Cli.script(launch(), Cli.Bash{}) == launch_bash() : String}
+
+law g_comp_launch_zsh:
+  {Cli.script(launch(), Cli.Zsh{}) == launch_zsh() : String}
+
+law g_comp_launch_fish:
+  {Cli.script(launch(), Cli.Fish{}) == launch_fish() : String}
+
+# G-MAN: the pkg and pkg-add pages. The header has no date; COMMANDS lists
+# each visible subcommand's page and summary, and SEE ALSO the parent's and
+# subcommands' pages. help is not a page.
+law g_man_pkg:
+  {Cli.roff(Demo.cli(), []) == pkg_man() : String}
+
+law g_man_add:
+  {Cli.roff(Demo.cli(), ["add"]) == add_man() : String}
+
+# G-MAN: roff renders the longest valid prefix of the path, through aliases
+# and hidden commands, with the canonical names in the page name.
+law g_man_path:
+  {Cli.roff(Demo.cli(), ["rm"]) == Cli.roff(Demo.cli(), ["remove"])
+    : String} &
+  {Cli.roff(Demo.cli(), ["add", "x"]) == add_man() : String} &
+  {Cli.roff(Demo.cli(), ["nope", "add"]) == pkg_man() : String} &
+  {Cli.roff(Demo.cli(), ["help"]) == pkg_man() : String}
+
+# G-MAN: the quirks pages. Paragraphs break with .PP, or .IP inside an
+# entry; hard line breaks with .br. Tags end the last paragraph. A heading's
+# options follow the built-ins under .SS; ENVIRONMENT names the arg each
+# variable fills; after() text is NOTES. Hidden items have no entry, but a
+# hidden command has a page.
+law g_man_quirks:
+  {Cli.roff(quirks(), []) == quirks_man() : String} &
+  {Cli.roff(quirks(), ["rem", "add"]) == quirks_add_man() : String} &
+  {Cli.roff(quirks(), ["remote", "prune"]) == quirks_prune_man() : String}
+
+# G-MAN: a root without a version has its name alone in the header, and no
+# -V in OPTIONS.
+law g_man_launch:
+  {Cli.roff(launch(), []) == launch_man() : String}
+
+def pkg_run(h: Cli.Host, argv: List<&2, String>) -> Cli.Step<Demo.Action>:
+  Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), h, argv)
+
+def shown(-A: Type, out: String) -> Cli.Step<A>:
+  Cli.Exit{0, out, ""}
+
+# V6: completions prints script(c, shell) and man prints roff(c, path) on
+# stdout with exit 0, uncolored, before any decoder runs. Help and scan
+# errors come first. A sub() named like a built-in is an ordinary command.
+law g_eval_builtins:
+  {pkg_run(host(), ["completions", "bash"]) ==
+    shown(Demo.Action, pkg_bash()) : Cli.Step<Demo.Action>} &
+  {pkg_run(host(), ["completions", "zsh"]) ==
+    shown(Demo.Action, pkg_zsh()) : Cli.Step<Demo.Action>} &
+  {pkg_run(tty(), ["--color=always", "completions", "fish"]) ==
+    shown(Demo.Action, pkg_fish()) : Cli.Step<Demo.Action>} &
+  {Cli.eval(~Bool, ~(+m => Cli.bug(Bool, "b")), Demo.cli(), host(),
+    ["completions", "bash"]) == shown(Bool, pkg_bash()) : Cli.Step<Bool>} &
+  {Cli.eval(~Bool, ~(+m => Cli.bug(Bool, "b")), Demo.cli(), host(),
+    ["man", "add"]) == shown(Bool, add_man()) : Cli.Step<Bool>} &
+  {pkg_run(host(), ["man"]) == shown(Demo.Action, pkg_man())
+    : Cli.Step<Demo.Action>} &
+  {pkg_run(tty(), ["-v", "man", "add"]) == shown(Demo.Action, add_man())
+    : Cli.Step<Demo.Action>} &
+  {pkg_run(host(), ["man", "rm"]) ==
+    shown(Demo.Action, Cli.roff(Demo.cli(), ["remove"]))
+    : Cli.Step<Demo.Action>} &
+  {pkg_run(host(), ["man", "nope"]) == shown(Demo.Action, pkg_man())
+    : Cli.Step<Demo.Action>} &
+  {pkg_run(host(), ["completions", "bash", "--help"]) ==
+    shown(Demo.Action, Cli.help(Demo.cli(), ["completions"], True{}, host()))
+    : Cli.Step<Demo.Action>} &
+  {pkg_run(host(), ["completions"]) == failed(Demo.Action,
+    "the following required arguments were not provided:\n  <SHELL>", [],
+    "pkg completions [OPTIONS] <SHELL>") : Cli.Step<Demo.Action>} &
+  {pkg_run(host(), ["completions", "pwsh"]) == failed(Demo.Action,
+    "invalid value 'pwsh' for '<SHELL>': expected one of 'bash', 'zsh', 'fish'",
+    [], "pkg completions [OPTIONS] <SHELL>") : Cli.Step<Demo.Action>} &
+  {ran(lookalikes(), host(), ["man"]) == went_to(["man"], [], None{})
+    : Cli.Step<Parsed>}
