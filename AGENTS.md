@@ -1,12 +1,23 @@
-
-- Before writing Bend, run `bend version` and read all of `bend guide`; read `bend guide shaders` before parallel or graphical work.
+- Before starting a new session writing Bend, run `bend version` and read all of `bend guide`; read `bend guide shaders` before parallel or graphical work.
 - State each requirement as a law in `LAWS.bend` before writing its code, and put the law diff up for review before proving it.
 - Never delete or weaken an accepted law to pass a check; prove every law in `PROOF.bend` and require `bend PROOF.bend` to pass.
+- Expect `bend LAWS.bend --check-only` to fail with one TODO per open law once the laws type-check; `bend PROOF.bend` is what closes them.
+- In a proof, `%e : P` with `e : {a == b}` needs the goal to be `P` with `_` as `b` and leaves `P` with `_` as `a`, so state a lemma with the side to remove on the right; a rewrite's proof term is a use of what it names and its motive is not, so mark `+` on a parameter that both the rewrite and the rest of the proof use.
+- Keep `F32.read` out of laws: the checker does not reduce it, so even `{F32.read("1.5") == Some{1.5}}` cannot be proved.
 - Lay out `main.bend`, `LAWS.bend`, and `PROOF.bend` as Bend's demos do: a header comment with purpose, expected output, and run command; laws through an import alias; one proof def per law.
 - Keep decisions in pure functions over `Data` with the IO in a thin shell; match every `Result`, close every handle on every branch, bound loops with `Nat` fuel, and keep `@unsafe` out of anything a law depends on.
 - Define a def above its first caller, put the shrinking argument first, match only parameters and pattern-bound variables, and annotate every operator and every `<-` bind; check with `--check-only` after each def.
+- Read these checker errors as rules: "an unfilled law is a dead claim" is a call above its def; "a type for this operator" in a pattern means `case 1n+p:` unspaced, and inside `(… : T)` means an unspaced successor `Nn+e` took the rest as its operand, so write `(5n+x) - 4n`; "expected : '='" at a later line means an unspaced `x+y` read `+y` as a let binder; "non-inferrable term" on a conjunction means prove it with `({==}, {==})`; "expected : Data" means a `&2` container holds a function, so drop the `&2` (`Maybe<Dec(A)>`, `List<Call(A)>`).
+- Match a callback's quantities exactly: a def with `x` does not fit `@+x: A -> B`, nor one with `+x` fit `@x: A -> B`, so change the def's parameter or pass `x => f(x)`.
 - Fork with `a b = f(x) g(y)` over halves of equal work, splitting on a `Nat` depth with the midpoint at `i + (1 << p)`; leaves run a tail loop over 8 to 64 items, and a head-and-tail recursion runs on one core.
 - Use `Array` for data that is indexed or updated in place, a tree for data a fork splits, and a list for data a leaf walks once.
-- Write `+` only for a second use and `Array.clone` only for a second array; count `term_keep`, `ctr_take`, and `rfc_seal` inside your defs in the emitted C, and treat a new one as a regression.
+- Write `+` only for a second use, where one use in each of two exclusive `match` arms is not a second use, and `Array.clone` only for a second array.
+- Count `term_keep`, `ctr_take`, and `rfc_seal` per def with `tools/rc.sh` on the emitted C: a seal wraps an unshared constructor in a new heap cell, a keep does the same or an atomic add, and a take on a shared value adds an atomic load and a free or a fade. A rise in a hot def (a per-item loop or a device def) is a regression; record any other rise with its reason in `bench/rc.txt`: moved from an inlined callee, or a lower keep+take+seal total across the changed defs.
+- Expect every argument to be evaluated before its call, including both branches of `Bool.pick` and both sides of `Maybe.or`. Put work that only one outcome needs, such as a failure message or the rest of a search after a hit, in a `match` arm of a helper def.
+- Pass a callee the fields it reads, not their record. Records flatten in C, so a `+` on one costs a keep per field (about 7 for `Matches`), and destructuring a constructor only to rebuild it for a call costs a `+` per reused field.
+- Have a lookup return what it found as a `Maybe` and branch on that; never test membership and then search again.
+- Find a def in the emitted C as `FID_<FILE>_<DEF>` in upper case, named after its file rather than its import alias, with continuations at `_K<n>`; an inlined def may have none.
+- Verify a refactor by building one harness to C and native from the old and new code, requiring byte-identical output, and comparing `tools/rc.sh new.c old.txt` per def and in total, where `old.txt` is `tools/rc.sh old.c`.
+- Keep the first `--`, `--threads`, `--gpu`, `--gpu-build`, and `--bend-help` out of app options, values, and tests; the runtime consumes them before `main` sees argv (README, Platform notes).
 - Build the deployment target; run it with `--threads 1` and with all cores, confirm equal output, and report the speedup.
 - Run `bend PROOF.bend --verdict` last; report commands, outputs, and open holes, since a passing proof covers only its stated laws.
