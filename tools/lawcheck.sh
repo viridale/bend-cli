@@ -5,8 +5,8 @@
 #   else the checker's output or the mismatch, exit 1.
 # Run: tools/lawcheck.sh [-b main] [-l LAWS.bend] [-m cli.bend] [-p] [stub.bend]
 #
-# The worktree (less .git, .claude, tmp and build) is copied to
-# tmp/lawcheck/new and the base ref is extracted to tmp/lawcheck/base. The
+# The worktree (less .git, .claude, tmp and build) and base ref are copied to
+# a unique tmp/lawcheck.* directory. The
 # stub holds the planned defs, with ?TODO bodies, and is appended to the
 # module (-m) in the copy, so every importer of the module (demo.bend and
 # LAWS.bend alike) sees one module with the planned signatures; a separate
@@ -15,6 +15,10 @@
 # -p then plants a law with a type error and requires the check to reject
 # it, so a passing count is not vacuous.
 set -euo pipefail
+BEND_TOOLS_PIN=2.0.36
+# shellcheck source=.bend-version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
+bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
 
 usage() {
   echo 'usage: tools/lawcheck.sh [-b ref] [-l laws.bend] [-m module.bend] [-p] [stub.bend]' >&2
@@ -45,8 +49,9 @@ cd "$root"
 git rev-parse -q --verify "$ref^{commit}" >/dev/null ||
   { echo "lawcheck: no commit $ref" >&2; exit 2; }
 
-work=tmp/lawcheck
-rm -rf "$work"
+mkdir -p "$root/tmp"
+work=$(mktemp -d "$root/tmp/lawcheck.XXXXXX")
+trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/base" "$work/new"
 git archive "$ref" | tar -x -C "$work/base"
 rsync -a --exclude=/.git --exclude=/.claude --exclude=/tmp --exclude=/build \

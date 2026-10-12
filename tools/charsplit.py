@@ -10,7 +10,24 @@ The checker reduces a match on a char only where the char's bits are
 constructors. A `case _:` arm leaves a bit it has ruled out one value of as
 a variable, so the view spells out every leaf instead.
 """
+import argparse
+from pathlib import Path
+import subprocess
 import sys
+
+
+BEND_TOOLS_PIN = '2.0.36'
+
+
+def warn_bend_version():
+    try:
+        subprocess.run(
+            ['bash', str(Path(__file__).resolve().with_name('.bend-version.sh')),
+             BEND_TOOLS_PIN, Path(__file__).name],
+            check=False,
+        )
+    except OSError as exc:
+        print(f'charsplit.py: version check unavailable: {exc}', file=sys.stderr)
 
 
 def bit(c, i):
@@ -39,7 +56,16 @@ def leaves(codes, bits=()):
 
 
 def main():
-    other, codes = sys.argv[1], [int(a) for a in sys.argv[2:]]
+    warn_bend_version()
+    parser = argparse.ArgumentParser(description='Generate exhaustive Char proof match arms.')
+    parser.add_argument('other', metavar='OTHER')
+    parser.add_argument('codes', metavar='CODE', type=int, nargs='+')
+    args = parser.parse_args()
+    other, codes = args.other, args.codes
+    if any(c < 0 or c >= 1 << 32 for c in codes):
+        parser.error('CODE must be in the range 0..4294967295')
+    if len(set(codes)) != len(codes):
+        parser.error('CODE values must be unique')
     n = len(codes)
     for p, c in leaves(codes):
         if c is None:

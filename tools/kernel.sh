@@ -6,12 +6,16 @@
 #   <reason>" with the reason's lines, exit 1.
 # Run: tools/kernel.sh [-t secs] [PROOF.bend]
 #
-# The file is translated with `bend <file> -o tmp/kernel/<name>.bendtt`.
+# The file is translated into a unique tmp/kernel.* directory.
 # The kernel is $BENDTT when set, as for bend; else the one bend built at
 # ~/.bend/bendtt/<hash>/bendtt, where <hash> is the first 16 hex digits of
 # sha256(<LEAN_VERSION> NUL <bendtt.lean>), LEAN_VERSION read from the bend
 # binary and bendtt.lean from the bend2 directory beside its bin directory.
 set -euo pipefail
+BEND_TOOLS_PIN=2.0.36
+# shellcheck source=.bend-version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
+bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
 
 usage() { echo 'usage: tools/kernel.sh [-t secs] [file.bend]' >&2; exit 2; }
 secs=1800
@@ -27,10 +31,11 @@ src=${1:-PROOF.bend}
 [ -r "$src" ] || { echo "kernel: cannot read $src" >&2; exit 2; }
 
 root=$(git rev-parse --show-toplevel)
-mkdir -p "$root/tmp/kernel"
+mkdir -p "$root/tmp"
+work=$(mktemp -d "$root/tmp/kernel.XXXXXX")
+trap 'rm -rf "$work"' EXIT
 name=$(basename "$src" .bend)
-tt=$root/tmp/kernel/$name.bendtt
-rm -f "$tt"
+tt=$work/$name.bendtt
 
 if [ -n "${BENDTT:-}" ]; then
   kernel=$BENDTT

@@ -10,10 +10,14 @@
 # law x of a file imported as A. The base file keeps every other block
 # (imports, types, lemmas) and each law file adds one unit; either also
 # keeps any unit its blocks call. Both go to a copy of the repo (less .git,
-# .claude, tmp and build) under tmp/perlaw, at the source's own path, so
-# relative imports resolve. A law is ok when its file leaves exactly the
+# .claude, tmp and build) under a unique tmp/perlaw.* directory, at the
+# source's own path, so relative imports resolve. A law is ok when its file leaves exactly the
 # base's TODOs less the imported laws it fills.
 set -euo pipefail
+BEND_TOOLS_PIN=2.0.36
+# shellcheck source=.bend-version.sh
+source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
+bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
 
 usage() {
   echo 'usage: tools/perlaw.sh [-j jobs] [-t secs] <file.bend> [name-regex]' >&2
@@ -39,8 +43,9 @@ case $src in
   *) echo "perlaw: $src is outside the repo $root" >&2; exit 2 ;;
 esac
 
-work=$root/tmp/perlaw
-rm -rf "$work"
+mkdir -p "$root/tmp"
+work=$(mktemp -d "$root/tmp/perlaw.XXXXXX")
+trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/tree" "$work/run"
 rsync -a --exclude=/.git --exclude=/.claude --exclude=/tmp --exclude=/build \
   "$root/" "$work/tree/"
@@ -55,8 +60,8 @@ while read -r path alias; do
 done < <(LC_ALL=C sed -nE 's/^import (\.{1,2}\/[^ ]+\.bend) as ([A-Za-z0-9_]+).*/\1 \2/p' "$src") \
   >"$work/imported"
 
-# Splits src into $dir/perlaw__base.bend and one $dir/perlaw_<law>.bend per
-# unit, and lists "<file> <fills> <unit>" in $work/units, base first.
+# Splits src into numbered files and lists "<id> <fills> <unit>" in
+# $work/units, base first. IDs avoid collisions between qualified law names.
 LC_ALL=C awk -v dir="$dir" -v pick="$pick" -v list="$work/units" \
     -v laws="$work/imported" '
   BEGIN { while ((getline l < laws) > 0) imported[l] = 1 }
@@ -91,7 +96,7 @@ LC_ALL=C awk -v dir="$dir" -v pick="$pick" -v list="$work/units" \
     for (i = 1; i <= nu; i++)
       if (pick == "" || order[i] ~ pick) emit(order[i], order[i])
   }
-  function emit(tag, target,   inc, b, i, more, f, n, file) {
+  function emit(tag, target,   inc, b, i, more, n, file, id) {
     split("", inc)
     if (target != "") inc[target] = 1
     do {
@@ -102,23 +107,24 @@ LC_ALL=C awk -v dir="$dir" -v pick="$pick" -v list="$work/units" \
           if ((b, order[i]) in calls && !(order[i] in inc)) { inc[order[i]] = 1; more = 1 }
       }
     } while (more)
-    f = tag; sub(/^.*\./, "", f); file = dir "/perlaw_" f ".bend"
+    id = emitted++
+    file = dir "/perlaw_" id ".bend"
     printf "" > file
     for (b = 0; b <= nb; b++)
       if (unit[b] == "" || unit[b] in inc) printf "%s", text[b] > file
     close(file)
     n = 0
     for (u in inc) if (u in fills) n++
-    print file, n, tag > list
+    print id, n, tag > list
   }
 ' "$src"
 
 # Each check writes <file>.out and <file>.rc; rc 124 is a timeout.
 # shellcheck disable=SC2016 # $1 and $2 expand in the inner bash
-cut -d' ' -f1 "$work/units" | tr '\n' '\0' |
-  xargs -0 -P "$jobs" -I{} bash -c \
-    'timeout "$1" bend "$2" --check-only >"$2.out" 2>&1 </dev/null; echo $? >"$2.rc"' \
-    _ "$secs" {}
+cut -d' ' -f1 "$work/units" |
+  xargs -P "$jobs" -I{} bash -c \
+    'file=$2/perlaw_$3.bend; timeout "$1" bend "$file" --check-only >"$file.out" 2>&1 </dev/null; echo $? >"$file.rc"' \
+    _ "$secs" "$dir" {}
 
 # todo_count <out>: the TODO count, 0 on a clean check, empty on an error.
 todo_count() {
@@ -136,14 +142,16 @@ failure() {
 }
 
 ok=0 open=0 fail=0 timeouts=0 status=0
-{ read -r base_file base_fills _; cat; } <"$work/units" >"$work/laws"
+{ read -r base_id base_fills _; cat; } <"$work/units" >"$work/laws"
+base_file=$dir/perlaw_$base_id.bend
 base=$(todo_count "$base_file.out")
 if [ "$(cat "$base_file.rc")" = 124 ] || [ -z "$base" ]; then
   echo "perlaw: the file without its laws fails; nothing below is per law:"
   failure "$base_file.out"
   exit 1
 fi
-while read -r file fills law; do
+while read -r id fills law; do
+  file=$dir/perlaw_$id.bend
   rc=$(cat "$file.rc")
   n=$(todo_count "$file.out")
   want=$((base - (fills - base_fills)))
