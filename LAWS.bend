@@ -18,10 +18,13 @@
 # against those raw lookups and verdict's arg against the scope the scan
 # reaches, and P20 fixes which route keys name a command against cutting the
 # key into words, and route's whole answer against references that walk its
-# table. P3-P6 and P15 fix the quoters against
-# models of how each shell and man(7) read text; G-COMP and G-MAN fix the
-# bytes of script and roff, and g_eval_builtins fixes V6. Nothing here fixes
-# what a real shell offers from a script, nor Run.main's IO, which
+# table. P21 fixes that at any path of a lint-clean command, a reader whose
+# verdict passes reads from the sample only values its type accepts; which
+# values a type accepts is G-VAL's, and that the converters (Nat.read,
+# U32.read, F32.read) read every one is open. P3-P6 and P15 fix the quoters
+# against models of how each shell and man(7) read text; G-COMP and G-MAN fix
+# the bytes of script and roff, and g_eval_builtins fixes V6. Nothing here
+# fixes what a real shell offers from a script, nor Run.main's IO, which
 # tests/e2e.bend covers (K4).
 
 import Base
@@ -1661,6 +1664,103 @@ law p20_route:
       table_bad(A, table, items), String.join(name <> path, " "),
       Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
     : Cli.Dec(A)}
+
+# P21: a value as the reader with stem converts it passes the check parse
+# applies for that type: valid_nat, valid_u32, valid_f32 or valid_bool; a str
+# reader reads any value.
+def read_typed(+stem: String, +value: String) -> Bool:
+  Bool.pick(Bool, String.eq(stem, "nat"), Cli.valid_nat(value),
+    Bool.pick(Bool, String.eq(stem, "u32"), Cli.valid_u32(value),
+      Bool.pick(Bool, String.eq(stem, "f32"), Cli.valid_f32(value),
+        Bool.pick(Bool, String.eq(stem, "bool"), Cli.valid_bool(value),
+          True{}))))
+
+def read_all(values: List<&2, String>, +stem: String) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case value <> tail:
+      Bool.and(read_typed(stem, value), read_all(tail, stem))
+
+# A flag's values are "true" or "false", which flag reads with String.eq.
+def read_flags(values: List<&2, String>) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case +value <> tail:
+      Bool.and(Bool.or(String.eq(value, "true"), String.eq(value, "false")),
+        read_flags(tail))
+
+# A count's values are non-empty decimal digits, which count reads with
+# Nat.read: what the scan records for each occurrence, or what env or the
+# default gives once valid_nat accepts it.
+def read_counts(values: List<&2, String>) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case +value <> tail:
+      Bool.and(Bool.and(Bool.not(String.is_empty(value)),
+        Cli.decimal_digits(value)), read_counts(tail))
+
+def read_one(values: List<&2, String>) -> Bool:
+  match values:
+    case Nil{}: False{}
+    case value <> tail: List.is_empty(&2, String, tail)
+
+def read_most_one(values: List<&2, String>) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case value <> tail: List.is_empty(&2, String, tail)
+
+def read_form(form: Cli.Form, values: List<&2, String>) -> Bool:
+  match form:
+    case Cli.ReadOne{}: read_one(values)
+    case Cli.ReadOpt{}: read_most_one(values)
+    case Cli.ReadMany{}: True{}
+
+def read_choose(opt: Bool, values: List<&2, String>) -> Bool:
+  match opt:
+    case True{}: read_most_one(values)
+    case False{}: read_one(values)
+
+def read_keys(values: List<&2, String>, +keys: List<&2, String>) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case value <> tail:
+      Bool.and(List.contains(~String, ~String.eq, keys, value),
+        read_keys(tail, keys))
+
+# What want's reader may read: values its type accepts, one for a bare
+# reader or choose, at most one for _opt, choose_opt, flag and count, a
+# flag's as "true" or "false", a count's as digits, and choose's among its
+# keys.
+def read_good(want: Cli.Want, +values: List<&2, String>) -> Bool:
+  match want:
+    case Cli.WFlag{}: Bool.and(read_flags(values), read_most_one(values))
+    case Cli.WCount{}: Bool.and(read_counts(values), read_most_one(values))
+    case Cli.WValue{stem, form}:
+      Bool.and(read_all(values, stem), read_form(form, values))
+    case Cli.WAny{}: True{}
+    case Cli.WChoose{opt, keys}:
+      Bool.and(read_choose(opt, values), read_keys(values, keys))
+
+# Once the verdict passes, the reader reads only what read_good allows.
+def read_at(verdict: Maybe<&2, String>, want: Cli.Want,
+    values: List<&2, String>) -> Bool:
+  match verdict:
+    case None{}: read_good(want, values)
+    case Some{msg}: True{}
+
+# P21: at any path of a lint-clean command, a reader, choose or choose_opt
+# whose verdict passes reads from the sample, which check runs the decoder
+# on, only what read_good allows: values its type accepts, one for a bare
+# reader or choose, and choose's among its keys.
+law p21_sample:
+  for +c: Cli.Cmd
+  for +path: List<&2, String>
+  for +id: String
+  for +want: Cli.Want
+  {Cli.problems(c) == [] : List<&2, Cli.Problem>} ->
+  {read_at(Cli.verdict(c, path, id, want), want,
+    Cli.field_values(Cli.field_find(Cli.sample_fields(c, path), id)))
+    == True{} : Bool}
 
 def sampled() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
