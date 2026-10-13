@@ -5,10 +5,13 @@
 #   "rc: <n> defs equal <baseline>", or each differing def and exit 1.
 # Run: tools/rc.sh build/bench.c [bench/rc.txt]
 #
-# A def's counts cover its segment, its continuations (FID_<def>_K<n>, which
-# follow it), and each spin helper they call, once per call site and expanded
-# through the spins that spin calls. Spin numbers change between builds, so a
-# spin counts only toward its callers.
+# A def's counts cover its segment, its continuations (FID_<def>_C<n> and
+# FID_<def>_K<n>, which follow it), and each spin helper they call, once per
+# call site and expanded through the spins that spin calls. Spin and
+# continuation numbers change between builds, so a spin counts only toward its
+# callers and a continuation only toward its def; a def with equal counts
+# compares equal whatever the numbering. A def whose own name ends in _c<n> or
+# _k<n> after another def's segment reads as that def's continuation.
 #
 # Bend names an imported def after its file's path from the harness, with
 # "_" for each "." and "/" ("../cli.bend" gives FID____CLI_<DEF>), and the
@@ -69,8 +72,8 @@ counts=$(LC_ALL=C awk '
   }
   sec == "Spins" && /^}/ { unit = "" }
   sec == "Segments" && match($0, /WL_CASE\(FID_[A-Z0-9_]+\)/) {
-    f = substr($0, RSTART + 8, RLENGTH - 9); b = f; sub(/_K[0-9]+$/, "", b)
-    if (b != def) def = f
+    f = substr($0, RSTART + 8, RLENGTH - 9); b = f; sub(/_[CK][0-9]+$/, "", b)
+    if (b != def) def = b
     unit = def ~ /^FID_(___)*(CLI|RUN)_/ ? def : ""
     if (unit != "") own[unit] = 1
   }

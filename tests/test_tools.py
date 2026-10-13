@@ -227,6 +227,34 @@ case WL_CASE(FID_CLI_SPEC):
         self.assertEqual(got.stdout.splitlines()[1:],
                          ['FID_CLI_FOO 2 0 0', 'FID_RUN_BAR 0 1 0'])
 
+    def test_rc_folds_c_and_k_continuations_into_their_def(self):
+        def build(name, c, k1, k2):
+            return self.write(name, f'''// Spins
+// =====
+// Segments
+// =====
+case WL_CASE(FID_CLI_EVAL_0):
+  term_keep(x);
+case WL_CASE(FID_CLI_EVAL_0_C{c}):
+  ctr_take(x);
+case WL_CASE(FID_CLI_EVAL_0_K{k1}):
+  rfc_seal(x);
+case WL_CASE(FID_CLI_EVAL_0_K{k2}):
+  rfc_seal(x);
+case WL_CASE(FID_CLI_NEXT):
+  ctr_take(x);
+''')
+        old = build('old.c', 2721, 2722, 2723)
+        new = build('new.c', 2666, 2667, 2668)
+        got = self.run_tool('rc.sh', old)
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertEqual(got.stdout.splitlines()[1:],
+                         ['FID_CLI_EVAL_0 1 1 2', 'FID_CLI_NEXT 0 1 0'])
+        base = self.write('base.txt', got.stdout)
+        got = self.run_tool('rc.sh', new, base)
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertIn('rc: 2 defs equal', got.stdout)
+
     def test_bench_compares_stdout_but_not_stderr(self):
         self.repo()
         self.write('app.bend', 'old\n')
