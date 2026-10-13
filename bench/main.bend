@@ -1,7 +1,9 @@
 # Purpose: the CLI benchmark (§14.4, G6). It builds a spec of 60 commands
-# and 300 args and a corpus of 1,024 argvs of up to 20 tokens, runs Cli.eval
-# on each argv and renders the long help page of every command. Both phases
-# split their work in halves across cores, and each half builds its own spec.
+# and 300 args and a corpus of 1,024 argvs of up to 20 tokens, runs
+# Cli.eval_linted on each argv, renders the long help page of every command
+# and lints the spec 16 times. The eval and help phases split their work in
+# halves across cores; each half builds its own spec, and each eval half
+# lints it once.
 # Expected output: on stdout, the spec's problem count and each phase's
 # tallies and checksum, the same at every thread count; on stderr, each
 # phase's time. It exits 1 if an argv hits a bug, as every argv does when the
@@ -340,13 +342,33 @@ def tallied(s: Cli.Step<Run>, t: Tally) -> Tally:
     case Cli.Exit{+code, out, err}:
       exited(t, code, fnv(err, fnv(out, code)))
 
-# t with each argv in argvs evaluated against c and h.
-def evaluated(argvs: List<&2, List<&2, String>>, +c: Cli.Cmd, +h: Cli.Host,
-    t: Tally) -> Tally:
+# t with each argv in argvs evaluated against l and h.
+def evaluated(argvs: List<&2, List<&2, String>>, +l: Cli.Linted,
+    +h: Cli.Host, t: Tally) -> Tally:
   match argvs:
     case Nil{}: t
     case a <> rest:
-      evaluated(rest, c, h, tallied(Cli.eval(~Run, ~decode, c, h, a), t))
+      evaluated(rest, l, h,
+        tallied(Cli.eval_linted(~Run, ~decode, l, h, a), t))
+
+# t with each argv in argvs evaluated against c and h, linting c each time,
+# so that each reports the problems lint found.
+def evaluated_unlinted(argvs: List<&2, List<&2, String>>, +c: Cli.Cmd,
+    +h: Cli.Host, t: Tally) -> Tally:
+  match argvs:
+    case Nil{}: t
+    case a <> rest:
+      evaluated_unlinted(rest, c, h,
+        tallied(Cli.eval(~Run, ~decode, c, h, a), t))
+
+# t with argvs evaluated against c, given what linted found in c: on a
+# problem, eval reports it for every argv.
+def evaluated_spec(found: Result<&2, &2, List<&2, Cli.Problem>, Cli.Linted>,
+    argvs: List<&2, List<&2, String>>, c: Cli.Cmd, h: Cli.Host, t: Tally) ->
+    Tally:
+  match found:
+    case Done{l}: evaluated(argvs, l, h, t)
+    case Fail{ps}: evaluated_unlinted(argvs, c, h, t)
 
 def tallies(a: Tally, b: Tally) -> Tally:
   match a b:
@@ -357,10 +379,21 @@ def tallies(a: Tally, b: Tally) -> Tally:
 def evals(t: Tree) -> Tally:
   match t:
     case Leaf{argvs}:
-      evaluated(argvs, cli(), Cli.host(80n), Tally{0, 0, 0, 0, 0})
+      +c = cli()
+      evaluated_spec(Cli.linted(c), argvs, c, Cli.host(80n),
+        Tally{0, 0, 0, 0, 0})
     case Node{l, r}:
       a b = evals(l) evals(r)
       tallies(a, b)
+
+# ---- Lint ----
+
+# The spec's problem count, summed over n lints of it.
+def lints(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p:
+      Nat.add(List.length(&2, Cli.Problem, Cli.problems(cli())), lints(p))
 
 # ---- Help ----
 
@@ -456,13 +489,16 @@ def main() -> IO(Unit):
     +tally : Tally = evals(corpus)
     +t2 : Nat <- IO.now()
     help : Pages = pages(split(3n, paths(), 60n))
-    t3 : Nat <- IO.now()
-    IO.print(String.concat(["spec: ",
-      Nat.show(List.length(&2, Cli.Problem, Cli.problems(cli()))),
+    +t3 : Nat <- IO.now()
+    # 16 lints, for a time per spec; each finds the same problems.
+    found : Nat = lints(16n)
+    t4 : Nat <- IO.now()
+    IO.print(String.concat(["spec: ", Nat.show(Nat.div(found, 16n)),
       " problems"]))
     IO.print(tally_text(tally))
     IO.print(pages_text(help))
     IO.print_err(String.concat(["corpus: ", Nat.show(Nat.sub(t1, t0)), " ms"]))
     IO.print_err(timed("eval", Nat.sub(t2, t1), 1024n, "argv"))
     IO.print_err(timed("help", Nat.sub(t3, t2), 60n, "page"))
+    IO.print_err(timed("lint", Nat.sub(t4, t3), 16n, "spec"))
     verdict(U32.is_eq(bugs(tally), 0))

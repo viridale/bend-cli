@@ -9,7 +9,10 @@
 # G-HELP, G-ERR, G-TIP and G-COLOR fix outcome's bytes for V1-V5. P10 and
 # P11 fix eval's codes and streams for every decoder through eval_with,
 # which eval calls (eval_bridge); the M5 goldens fix eval's bytes and Go
-# values for chosen cases. P3-P6 and P15 fix the quoters against models of
+# values for chosen cases. P16 makes eval_linted on the Linted that linted
+# returns answer as eval does, P17 fixes its success and failure answers, and
+# p10_linted and p11_linted carry P10 and P11 to eval_linted on every
+# Linted (eval_linted_bridge). P3-P6 and P15 fix the quoters against models of
 # how each shell and man(7) read text; G-COMP and G-MAN fix the bytes of
 # script and roff, and g_eval_builtins fixes V6. Nothing here fixes what a
 # real shell offers from a script, nor Run.main's IO, which tests/e2e.bend
@@ -2269,6 +2272,96 @@ law eval_bridge:
     : Cli.Step<Cli.Matches>} &
   {Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), h, argv)
     == Cli.eval_with(Demo.Action, Demo.decode, Demo.cli(), h, argv)
+    : Cli.Step<Demo.Action>}
+
+# Lint once: linted lints a spec, returning either a Linted or its problems;
+# eval_linted evals the Linted without linting it again. outcome_linted is
+# outcome without the lint; eval_linted_with passes the decoder as a value,
+# and eval_linted forwards to it as eval does to eval_with.
+
+# P16: on the Linted that linted returns, outcome_linted answers as outcome
+# does on its spec. through_linted renders the saved problems on failure.
+# eval_with_step and eval_linted_step carry P16 to eval_with and
+# eval_linted_with for every decoder: a law can use a decoder only once.
+def through_linted(found: Result<&2, &2, List<&2, Cli.Problem>, Cli.Linted>,
+    c: Cli.Cmd, h: Cli.Host, argv: List<&2, String>) -> Cli.Outcome:
+  match found:
+    case Fail{ps}: Cli.outcome_lint(ps, c, h, argv)
+    case Done{l}: Cli.outcome_linted(l, h, argv)
+
+law p16:
+  for +c: Cli.Cmd
+  for +h: Cli.Host
+  for +argv: List<&2, String>
+  {through_linted(Cli.linted(c), c, h, argv) == Cli.outcome(c, h, argv)
+    : Cli.Outcome}
+
+law eval_with_step:
+  for -A: Type
+  for decode: @+m: Cli.Matches -> Cli.Dec(A)
+  for c: Cli.Cmd
+  for +h: Cli.Host
+  for +argv: List<&2, String>
+  {Cli.eval_with(A, decode, c, h, argv)
+    == Cli.eval_step(A, decode, Cli.outcome(c, h, argv), h, argv)
+    : Cli.Step<A>}
+
+law eval_linted_step:
+  for -A: Type
+  for decode: @+m: Cli.Matches -> Cli.Dec(A)
+  for l: Cli.Linted
+  for +h: Cli.Host
+  for +argv: List<&2, String>
+  {Cli.eval_linted_with(A, decode, l, h, argv)
+    == Cli.eval_step(A, decode, Cli.outcome_linted(l, h, argv), h, argv)
+    : Cli.Step<A>}
+
+# P17: linted returns a Linted exactly when lint finds no problem, and its
+# failure carries the same problems, in order.
+def linted_problems(
+    found: Result<&2, &2, List<&2, Cli.Problem>, Cli.Linted>) ->
+    List<&2, Cli.Problem>:
+  match found:
+    case Fail{ps}: ps
+    case Done{l}: []
+
+law p17:
+  for +c: Cli.Cmd
+  {Result.is_done(&2, &2, List<&2, Cli.Problem>, Cli.Linted, Cli.linted(c))
+    == List.is_empty(&2, Cli.Problem, Cli.problems(c)) : Bool} &
+  {linted_problems(Cli.linted(c)) == Cli.problems(c)
+    : List<&2, Cli.Problem>}
+
+# P10 and P11 hold of eval_linted_with for every Linted, including one
+# built from a spec that lint rejects.
+law p10_linted:
+  for -A: Type
+  for decode: @+m: Cli.Matches -> Cli.Dec(A)
+  for l: Cli.Linted
+  for h: Cli.Host
+  for argv: List<&2, String>
+  {p10_code(A, Cli.eval_linted_with(A, decode, l, h, argv)) == True{} : Bool}
+
+law p11_linted:
+  for -A: Type
+  for decode: @+m: Cli.Matches -> Cli.Dec(A)
+  for l: Cli.Linted
+  for h: Cli.Host
+  for argv: List<&2, String>
+  {p11_streams(A, Cli.eval_linted_with(A, decode, l, h, argv))
+    == True{} : Bool}
+
+# eval_linted is eval_linted_with with its template arguments as values:
+# with keep, and with pkg's decoder, for every Linted.
+law eval_linted_bridge:
+  for +l: Cli.Linted
+  for +h: Cli.Host
+  for +argv: List<&2, String>
+  {Cli.eval_linted(~Cli.Matches, ~Cli.keep, l, h, argv)
+    == Cli.eval_linted_with(Cli.Matches, Cli.keep, l, h, argv)
+    : Cli.Step<Cli.Matches>} &
+  {Cli.eval_linted(~Demo.Action, ~Demo.decode, l, h, argv)
+    == Cli.eval_linted_with(Demo.Action, Demo.decode, l, h, argv)
     : Cli.Step<Demo.Action>}
 
 # The parse a decoder sees, without the spec it came from.

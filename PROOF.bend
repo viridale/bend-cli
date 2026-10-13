@@ -3644,6 +3644,66 @@ def Laws.p11(A, decode, c, h, argv):
 def Laws.eval_bridge(c, h, argv):
   ({==}, {==})
 
+def p16_found(found: List<&2, Cli.Problem>, +c: Cli.Cmd, +h: Cli.Host,
+    +argv: List<&2, String>) ->
+    {Laws.through_linted(Cli.linted_found(found, c), c, h, argv)
+      == Cli.outcome_lint(found, c, h, argv) : Cli.Outcome}:
+  match found:
+    case Nil{}: {==}
+    case p <> tail: {==}
+
+def Laws.p16(c, h, argv):
+  p16_found(Cli.problems(c), c, h, argv)
+
+def Laws.eval_with_step(A, decode, c, h, argv):
+  {==}
+
+def Laws.eval_linted_step(A, decode, l, h, argv):
+  {==}
+
+def p17_done(found: List<&2, Cli.Problem>, c: Cli.Cmd) ->
+    {Result.is_done(&2, &2, List<&2, Cli.Problem>, Cli.Linted,
+      Cli.linted_found(found, c))
+      == List.is_empty(&2, Cli.Problem, found) : Bool}:
+  match found:
+    case Nil{}: {==}
+    case p <> tail: {==}
+
+def p17_problems(found: List<&2, Cli.Problem>, c: Cli.Cmd) ->
+    {Laws.linted_problems(Cli.linted_found(found, c)) == found
+      : List<&2, Cli.Problem>}:
+  match found:
+    case Nil{}: {==}
+    case p <> tail: {==}
+
+def Laws.p17(c):
+  (p17_done(Cli.problems(c), c), p17_problems(Cli.problems(c), c))
+
+def p10_on_linted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    l: Cli.Linted, +h: Cli.Host, +argv: List<&2, String>) ->
+    {Laws.p10_code(A, Cli.eval_linted_with(A, decode, l, h, argv))
+      == True{} : Bool}:
+  match l:
+    case Cli.Linted{+c}:
+      p10_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
+
+def Laws.p10_linted(A, decode, l, h, argv):
+  p10_on_linted(A, decode, l, h, argv)
+
+def p11_on_linted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
+    l: Cli.Linted, +h: Cli.Host, +argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.eval_linted_with(A, decode, l, h, argv))
+      == True{} : Bool}:
+  match l:
+    case Cli.Linted{+c}:
+      p11_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
+
+def Laws.p11_linted(A, decode, l, h, argv):
+  p11_on_linted(A, decode, l, h, argv)
+
+def Laws.eval_linted_bridge(l, h, argv):
+  ({==}, {==})
+
 def Laws.g_lex_cluster_eval():
   {==}
 

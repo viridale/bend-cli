@@ -52,3 +52,18 @@
 #   keeps that list for its four readers.
 # FID_CLI_LINT 30 23 29 -> 26 24 29: takes a LintSub's parsed children; its
 #   total falls.
+#
+# Lint once (linted, eval_linted), against main's build (e39d078), both from
+# bench/main.bend; main.bend's counts are unchanged, as run.bend still calls
+# eval. Builds counting executed ops show every kind falling on bench
+# --threads 1 (keeps 35.7M -> 11.3M, takes 80.8M -> 46.1M, seals 171M ->
+# 93.4M), the new 16-lint phase included:
+# The new FID_CLI_EVAL_STEP 7 4 12 and FID_CLI_OUTCOME_PARSE 17 3 7: each
+#   now has two callers, eval and eval_linted, so neither is inlined; they
+#   move out of FID_CLI_EVAL_0 (37 9 51 over its segment and continuations)
+#   and FID_CLI_OUTCOME 25 17 37 -> 8 14 30.
+# The new FID_CLI_EVAL_LINTED_0 2 2 17 (segment and continuations),
+#   FID_CLI_OUTCOME_LINTED 5 0 0 and FID_CLI_LINTED 3 14 30: an argv's path
+#   through eval_linted totals 31 9 36, where eval's totalled 62 26 88 with
+#   outcome's lint; linted runs once per spec. Continuations of the eval
+#   instance are renumbered, so tools/rc.sh lists them as gone and new.

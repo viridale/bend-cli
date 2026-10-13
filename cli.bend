@@ -6600,6 +6600,25 @@ def outcome_lint(found: List<&2, Problem>, +c: Cmd, +h: Host,
 def outcome(+c: Cmd, h: Host, argv: List<&2, String>) -> Outcome:
   outcome_lint(problems(c), c, h, argv)
 
+# A Cmd that passed lint, from linted: eval_linted skips the lint eval runs.
+type Linted is Data:
+  Linted{cmd: Cmd}
+
+def linted_found(found: List<&2, Problem>, c: Cmd) ->
+    Result<&2, &2, List<&2, Problem>, Linted>:
+  match found:
+    case Nil{}: Done{Linted{c}}
+    case p <> tail: Fail{p <> tail}
+
+# Lint c once: a Linted, or lint's problems in the order problems lists.
+def linted(+c: Cmd) -> Result<&2, &2, List<&2, Problem>, Linted>:
+  linted_found(problems(c), c)
+
+# outcome on a Linted's spec, without the lint.
+def outcome_linted(l: Linted, +h: Host, +argv: List<&2, String>) -> Outcome:
+  match l:
+    case Linted{+c}: outcome_parse(parse(c, h, argv), c, h, argv)
+
 # ---- Eval (§6.6, §7.2, §7.3, V7) ----
 
 type Step<-A: Type> is Type:
@@ -6647,6 +6666,18 @@ def eval_with(-A: Type, decode: @+m: Matches -> Dec(A), c: Cmd, +h: Host,
 def eval(~A: Type, ~decode: @+m: Matches -> Dec(A), c: Cmd, h: Host,
     argv: List<&2, String>) -> Step<A>:
   eval_with(A, decode, c, h, argv)
+
+# eval_linted with the decoder as a value.
+def eval_linted_with(-A: Type, decode: @+m: Matches -> Dec(A), l: Linted,
+    +h: Host, +argv: List<&2, String>) -> Step<A>:
+  eval_step(A, decode, outcome_linted(l, h, argv), h, argv)
+
+# eval on a Linted, without linting its spec again. It must stay a direct
+# forwarding definition: P16, p10_linted and p11_linted are proved of
+# eval_linted_with.
+def eval_linted(~A: Type, ~decode: @+m: Matches -> Dec(A), l: Linted,
+    h: Host, argv: List<&2, String>) -> Step<A>:
+  eval_linted_with(A, decode, l, h, argv)
 
 # Each arg's env name in pre-order: an arg's own, then its subcommands'.
 def env_names(items: List<&2, Item>) -> List<&2, String>:

@@ -123,6 +123,12 @@ is needed to test parsing or exact output. `Cli.check` checks the command
 definition and exercises the decoder on one sample per completable command
 path.
 
+`Cli.eval` lints the command on every call. To evaluate many argvs against
+one command, lint it once with `Cli.linted(c)`, which returns `Done{l}` or
+`Fail{problems}` with the problems `Cli.problems(c)` lists, then call
+`Cli.eval_linted(~A, ~decode, l, h, argv)` for each argv. It answers as
+`Cli.eval` does without linting again.
+
 For the quickstart app, `LAWS.bend` can state both its definition check and
 a parsing case:
 
