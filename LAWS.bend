@@ -18,8 +18,8 @@
 # against those raw lookups and verdict's arg against the scope the scan
 # reaches, and P20 fixes which route keys name a command against cutting the
 # key into words, and route's whole answer against references that walk its
-# table. P21 fixes that at any path of a lint-clean command, a reader whose
-# verdict passes reads from the sample only values its type accepts; which
+# table. P21 fixes that a reader whose verdict passes reads only values the
+# parse or the sample validated, on any argv of a lint-clean command; which
 # values a type accepts is G-VAL's, and that the converters (Nat.read,
 # U32.read, F32.read) read every one is open. P3-P6 and P15 fix the quoters
 # against models of how each shell and man(7) read text; G-COMP and G-MAN fix
@@ -1748,10 +1748,29 @@ def read_at(verdict: Maybe<&2, String>, want: Cli.Want,
     case None{}: read_good(want, values)
     case Some{msg}: True{}
 
-# P21: at any path of a lint-clean command, a reader, choose or choose_opt
-# whose verdict passes reads from the sample, which check runs the decoder
-# on, only what read_good allows: values its type accepts, one for a bare
-# reader or choose, and choose's among its keys.
+def read_parsed(found: Maybe<&2, Cli.Matches>, +id: String,
+    +want: Cli.Want) -> Type:
+  match found:
+    case None{}: Unit
+    case Some{Cli.Matches{cmd, +path, fields, external}}:
+      {read_at(Cli.verdict(cmd, path, id, want), want,
+        Cli.field_values(Cli.field_find(fields, id))) == True{} : Bool}
+
+# P21: on any argv that a lint-clean command parses, a reader, choose or
+# choose_opt whose verdict passes reads only what the parse validated, so it
+# never fails (SPEC 6.5): the field its id finds holds values its type
+# accepts, one for a bare reader or choose, and choose's among its keys.
+law p21:
+  for +c: Cli.Cmd
+  for h: Cli.Host
+  for argv: List<&2, String>
+  for +id: String
+  for +want: Cli.Want
+  {Cli.problems(c) == [] : List<&2, Cli.Problem>} ->
+  read_parsed(Cli.matches(c, Cli.parse(c, h, argv)), id, want)
+
+# P21: so does the sample at any path of a lint-clean command, which check
+# runs the decoder on.
 law p21_sample:
   for +c: Cli.Cmd
   for +path: List<&2, String>

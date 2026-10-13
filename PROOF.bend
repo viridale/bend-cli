@@ -7160,6 +7160,6588 @@ def Laws.p21_sample(c, path, id, want, e):
           deep_scope(path, items, Nil{}, lint_clean(name, about, items, e),
             Unit{}), Unit{}))
 
+# P21 fields: what any field's values satisfy (vs_ok), and that a field that
+# satisfies it, and is there unless its arg may be absent, reads well once
+# its verdict passes (final).
+
+def no_bad(m: Maybe<&2, Cli.Bad>) -> Bool:
+  match m:
+    case None{}: True{}
+    case Some{b}: False{}
+
+def vs_ok(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +vs: List<&2, String>) -> Bool:
+  match kind:
+    case Cli.FlagKind{}:
+      Bool.and(Laws.read_flags(vs), Laws.read_most_one(vs))
+    case Cli.CountKind{}:
+      Bool.and(Laws.read_counts(vs), Laws.read_most_one(vs))
+    case Cli.NegatableKind{}:
+      Bool.and(Laws.read_flags(vs), Laws.read_most_one(vs))
+    case Cli.OptionKind{many}:
+      Bool.and(no_bad(Cli.first_bad(vs, attrs)),
+        Bool.or(many, Laws.read_most_one(vs)))
+    case Cli.BareOptionKind{}:
+      Bool.and(no_bad(Cli.first_bad(vs, attrs)), Laws.read_most_one(vs))
+    case Cli.PosKind{required, many}:
+      Bool.and(no_bad(Cli.first_bad(vs, attrs)),
+        Bool.or(many, Laws.read_most_one(vs)))
+
+# Empty values for a single-valued arg that is always present.
+def gap(+kind: Cli.UsageKind, attrs: List<&2, Cli.Item>,
+    vs: List<&2, String>) -> Bool:
+  Bool.and(List.is_empty(&2, String, vs),
+    Bool.and(Bool.not(Cli.kind_many(kind)), Cli.always_present(kind, attrs)))
+
+def no_bad_none(m: Maybe<&2, Cli.Bad>, e: {no_bad(m) == True{} : Bool}) ->
+    {m == None{} : Maybe<&2, Cli.Bad>}:
+  match m:
+    case None{}: {==}
+    case Some{b}:
+      Empty.absurd({Some{b} == None{} : Maybe<&2, Cli.Bad>},
+        false_true_absurd(e))
+
+def absent_none(b: Bool, -id: String, -r: String,
+    e: {Cli.absent_verdict(b, id, r) == None{} : Maybe<&2, String>}) ->
+    {b == False{} : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool},
+        why_some_absurd(String.concat(["'", id,
+          "' may be absent; read it with Cli.", r, "_opt"]), e))
+    case False{}: {==}
+
+def and_true_false(a: Bool, e: {Bool.and(a, True{}) == False{} : Bool}) ->
+    {a == False{} : Bool}:
+  match a:
+    case True{}: e
+    case False{}: {==}
+
+# An always-present arg's values, which gap says are not empty, hold one
+# value once they hold at most one.
+def one_present(ap: Bool, +vs: List<&2, String>,
+    ex: {Bool.not(ap) == False{} : Bool},
+    ep: {Bool.and(List.is_empty(&2, String, vs), ap) == False{} : Bool},
+    em: {Laws.read_most_one(vs) == True{} : Bool}) ->
+    {Laws.read_one(vs) == True{} : Bool}:
+  match ap:
+    case True{}:
+      match vs:
+        case Nil{}:
+          Empty.absurd({Laws.read_one(Nil{}) == True{} : Bool},
+            true_false_absurd(ep))
+        case v <> t: em
+    case False{}:
+      Empty.absurd({Laws.read_one(vs) == True{} : Bool},
+        true_false_absurd(ex))
+
+def flag_final(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +id: String,
+    +vs: List<&2, String>, ev: {vs_ok(kind, attrs, vs) == True{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(Cli.WFlag{}, id, kind, attrs), Cli.WFlag{},
+      vs) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: ev
+    case Cli.CountKind{}: {==}
+    case Cli.NegatableKind{}: ev
+    case Cli.OptionKind{many}: {==}
+    case Cli.BareOptionKind{}: {==}
+    case Cli.PosKind{required, many}: {==}
+
+def count_final(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +id: String,
+    +vs: List<&2, String>, ev: {vs_ok(kind, attrs, vs) == True{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(Cli.WCount{}, id, kind, attrs),
+      Cli.WCount{}, vs) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: {==}
+    case Cli.CountKind{}: ev
+    case Cli.NegatableKind{}: {==}
+    case Cli.OptionKind{many}: {==}
+    case Cli.BareOptionKind{}: {==}
+    case Cli.PosKind{required, many}: {==}
+
+# want_verdict for a value or choose reader, given its kind check, absence
+# check and (for choose) keys check pass.
+def at_two(a: Bool, x: Maybe<&2, String>, -id: String, -kind: Cli.UsageKind,
+    -attrs: List<&2, Cli.Item>, -w: Cli.Want, -vals: List<&2, String>,
+    g: {a == True{} : Bool} -> {x == None{} : Maybe<&2, String>} ->
+      {Laws.read_good(w, vals) == True{} : Bool}) ->
+    {Laws.read_at(Maybe.or(&2, String, Cli.kind_verdict(a, id, kind, attrs),
+      x), w, vals) == True{} : Bool}:
+  match a:
+    case True{}:
+      match x:
+        case None{}: g({==})({==})
+        case Some{m}: {==}
+    case False{}: {==}
+
+def xy_none(x: Maybe<&2, String>, y: Maybe<&2, String>, -w: Cli.Want,
+    -vals: List<&2, String>,
+    g: {x == None{} : Maybe<&2, String>} -> {y == None{} : Maybe<&2, String>} ->
+      {Laws.read_good(w, vals) == True{} : Bool}) ->
+    {Laws.read_at(Maybe.or(&2, String, x, y), w, vals) == True{} : Bool}:
+  match x y:
+    case Some{m} _: {==}
+    case None{} Some{m}: {==}
+    case None{} None{}: g({==})({==})
+
+def at_three(a: Bool, x: Maybe<&2, String>, y: Maybe<&2, String>,
+    -id: String, -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    -w: Cli.Want, -vals: List<&2, String>,
+    g: {a == True{} : Bool} -> {x == None{} : Maybe<&2, String>} ->
+      {y == None{} : Maybe<&2, String>} ->
+      {Laws.read_good(w, vals) == True{} : Bool}) ->
+    {Laws.read_at(Maybe.or(&2, String, Cli.kind_verdict(a, id, kind, attrs),
+      Maybe.or(&2, String, x, y)), w, vals) == True{} : Bool}:
+  match a:
+    case True{}: xy_none(x, y, w, vals, g({==}))
+    case False{}: {==}
+
+def all_stem(+stem: String, +attrs: List<&2, Cli.Item>, +vs: List<&2, String>,
+    es: {String.eq(stem, Cli.type_stem(Cli.find_as(attrs))) == True{} : Bool},
+    nb: {Cli.first_bad(vs, attrs) == None{} : Maybe<&2, Cli.Bad>}) ->
+    {Laws.read_all(vs, stem) == True{} : Bool}:
+  %Equal.sym(String, stem, Cli.type_stem(Cli.find_as(attrs)),
+    eq_reflect(stem, Cli.type_stem(Cli.find_as(attrs)), es)) :
+    {Laws.read_all(vs, _) == True{} : Bool}
+  first_bad_ok(vs, attrs, nb)
+
+# A valued arg's values, m saying whether it takes many, under form.
+def form_good(form: Cli.Form, m: Bool, ap: Bool, +vs: List<&2, String>,
+    em: {Bool.or(m, Laws.read_most_one(vs)) == True{} : Bool},
+    ep: {Bool.and(List.is_empty(&2, String, vs), Bool.and(Bool.not(m), ap))
+      == False{} : Bool},
+    ef: {Cli.form_fits(form, m) == True{} : Bool},
+    ex: {Bool.and(Cli.form_one(form), Bool.and(Bool.not(m), Bool.not(ap)))
+      == False{} : Bool}) ->
+    {Laws.read_form(form, vs) == True{} : Bool}:
+  match form m:
+    case Cli.ReadOne{} True{}:
+      Empty.absurd({Laws.read_one(vs) == True{} : Bool},
+        false_true_absurd(ef))
+    case Cli.ReadOne{} False{}: one_present(ap, vs, ex, ep, em)
+    case Cli.ReadOpt{} True{}:
+      Empty.absurd({Laws.read_most_one(vs) == True{} : Bool},
+        false_true_absurd(ef))
+    case Cli.ReadOpt{} False{}: em
+    case Cli.ReadMany{} _: {==}
+
+def valued_good(+m: Bool, ap: Bool, +stem: String, +form: Cli.Form,
+    +attrs: List<&2, Cli.Item>, +vs: List<&2, String>,
+    +ev: {Bool.and(no_bad(Cli.first_bad(vs, attrs)),
+      Bool.or(m, Laws.read_most_one(vs))) == True{} : Bool},
+    ep: {Bool.and(List.is_empty(&2, String, vs), Bool.and(Bool.not(m), ap))
+      == False{} : Bool},
+    +ea: {Bool.and(String.eq(stem, Cli.type_stem(Cli.find_as(attrs))),
+      Cli.form_fits(form, m)) == True{} : Bool},
+    ex: {Bool.and(Cli.form_one(form), Bool.and(Bool.not(m), Bool.not(ap)))
+      == False{} : Bool}) ->
+    {Laws.read_good(Cli.WValue{stem, form}, vs) == True{} : Bool}:
+  and_true(Laws.read_all(vs, stem), Laws.read_form(form, vs),
+    all_stem(stem, attrs, vs,
+      and_left(String.eq(stem, Cli.type_stem(Cli.find_as(attrs))),
+        Cli.form_fits(form, m), ea),
+      no_bad_none(Cli.first_bad(vs, attrs),
+        and_left(no_bad(Cli.first_bad(vs, attrs)),
+          Bool.or(m, Laws.read_most_one(vs)), ev))),
+    form_good(form, m, ap, vs,
+      and_right(no_bad(Cli.first_bad(vs, attrs)),
+        Bool.or(m, Laws.read_most_one(vs)), ev),
+      ep,
+      and_right(String.eq(stem, Cli.type_stem(Cli.find_as(attrs))),
+        Cli.form_fits(form, m), ea),
+      ex))
+
+def value_kind(kind: Cli.UsageKind, +stem: String, +form: Cli.Form,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    ev: {vs_ok(kind, attrs, vs) == True{} : Bool},
+    ep: {gap(kind, attrs, vs) == False{} : Bool},
+    ea: {Cli.value_fits(stem, form, kind, attrs) == True{} : Bool},
+    ex: {Cli.absent_verdict(Bool.and(Cli.form_one(form),
+      Cli.may_absent(kind, attrs)), id, stem) == None{} : Maybe<&2, String>}) ->
+    {Laws.read_good(Cli.WValue{stem, form}, vs) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}:
+      Empty.absurd({Laws.read_good(Cli.WValue{stem, form}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case Cli.CountKind{}:
+      Empty.absurd({Laws.read_good(Cli.WValue{stem, form}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case Cli.NegatableKind{}:
+      Empty.absurd({Laws.read_good(Cli.WValue{stem, form}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case Cli.OptionKind{+many}:
+      valued_good(many, Cli.always_present(Cli.OptionKind{many}, attrs), stem,
+        form, attrs, vs, ev, ep, ea,
+        absent_none(Bool.and(Cli.form_one(form),
+          Cli.may_absent(Cli.OptionKind{many}, attrs)), id, stem, ex))
+    case Cli.BareOptionKind{}:
+      valued_good(False{}, Cli.always_present(Cli.BareOptionKind{}, attrs),
+        stem, form, attrs, vs, ev, ep, ea,
+        absent_none(Bool.and(Cli.form_one(form),
+          Cli.may_absent(Cli.BareOptionKind{}, attrs)), id, stem, ex))
+    case Cli.PosKind{+required, +many}:
+      valued_good(many, Cli.always_present(Cli.PosKind{required, many},
+          attrs), stem, form, attrs, vs, ev, ep, ea,
+        absent_none(Bool.and(Cli.form_one(form),
+          Cli.may_absent(Cli.PosKind{required, many}, attrs)), id, stem, ex))
+
+def value_final(+kind: Cli.UsageKind, +stem: String, +form: Cli.Form,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    ev: {vs_ok(kind, attrs, vs) == True{} : Bool},
+    ep: {gap(kind, attrs, vs) == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(Cli.WValue{stem, form}, id, kind, attrs),
+      Cli.WValue{stem, form}, vs) == True{} : Bool}:
+  at_two(Cli.value_fits(stem, form, kind, attrs),
+    Cli.absent_verdict(Bool.and(Cli.form_one(form),
+      Cli.may_absent(kind, attrs)), id, stem), id, kind, attrs,
+    Cli.WValue{stem, form}, vs,
+    ea => ex => value_kind(kind, stem, form, attrs, id, vs, ev, ep, ea, ex))
+
+# Each value first_bad passes is among choose's keys.
+def keys_all(vs: List<&2, String>, +keys: List<&2, String>,
+    +attrs: List<&2, Cli.Item>, +id: String,
+    nb: {Cli.first_bad(vs, attrs) == None{} : Maybe<&2, Cli.Bad>},
+    +es: {Maybe.is_some(&2, List<&2, String>, Cli.find_one_of(attrs))
+      == True{} : Bool},
+    +ey: {Cli.keys_verdict(Cli.find_one_of(attrs), keys, id) == None{}
+      : Maybe<&2, String>}) ->
+    {Laws.read_keys(vs, keys) == True{} : Bool}:
+  match vs:
+    case Nil{}: {==}
+    case +head <> +tail:
+      pair_elim({Cli.bad_value(Cli.value_reason(attrs, head), head) == None{}
+        : Maybe<&2, Cli.Bad>},
+        {Cli.first_bad(tail, attrs) == None{} : Maybe<&2, Cli.Bad>},
+        {Laws.read_keys(head <> tail, keys) == True{} : Bool},
+        or_bad_none(Cli.bad_value(Cli.value_reason(attrs, head), head),
+          Cli.first_bad(tail, attrs), nb),
+        eh => et => and_true(
+          List.contains(~String, ~String.eq, keys, head),
+          Laws.read_keys(tail, keys),
+          choice_in(Cli.find_one_of(attrs), keys, id, head, es,
+            Pair.snd({Cli.reason_from_type(Cli.find_as(attrs), head) == None{}
+              : Maybe<&2, String>},
+              {Cli.choice_reason(Cli.find_one_of(attrs), head) == None{}
+                : Maybe<&2, String>},
+              first_reason_none(Cli.reason_from_type(Cli.find_as(attrs), head),
+                Cli.choice_reason(Cli.find_one_of(attrs), head),
+                bad_value_none(Cli.value_reason(attrs, head), head, eh))),
+            ey),
+          keys_all(tail, keys, attrs, id, et, es, ey)))
+
+def choose_read(opt: Bool, ap: Bool, +vs: List<&2, String>,
+    em: {Laws.read_most_one(vs) == True{} : Bool},
+    ep: {Bool.and(List.is_empty(&2, String, vs), ap) == False{} : Bool},
+    ex: {Bool.and(Bool.not(opt), Bool.not(ap)) == False{} : Bool}) ->
+    {Laws.read_choose(opt, vs) == True{} : Bool}:
+  match opt:
+    case True{}: em
+    case False{}: one_present(ap, vs, ex, ep, em)
+
+def chosen_good(ap: Bool, +opt: Bool, +keys: List<&2, String>,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    +ev: {Bool.and(no_bad(Cli.first_bad(vs, attrs)), Laws.read_most_one(vs))
+      == True{} : Bool},
+    ep: {Bool.and(List.is_empty(&2, String, vs), ap) == False{} : Bool},
+    es: {Maybe.is_some(&2, List<&2, String>, Cli.find_one_of(attrs))
+      == True{} : Bool},
+    ex: {Bool.and(Bool.not(opt), Bool.not(ap)) == False{} : Bool},
+    ey: {Cli.keys_verdict(Cli.find_one_of(attrs), keys, id) == None{}
+      : Maybe<&2, String>}) ->
+    {Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{} : Bool}:
+  and_true(Laws.read_choose(opt, vs), Laws.read_keys(vs, keys),
+    choose_read(opt, ap, vs,
+      and_right(no_bad(Cli.first_bad(vs, attrs)), Laws.read_most_one(vs), ev),
+      ep, ex),
+    keys_all(vs, keys, attrs, id,
+      no_bad_none(Cli.first_bad(vs, attrs),
+        and_left(no_bad(Cli.first_bad(vs, attrs)), Laws.read_most_one(vs),
+          ev)), es, ey))
+
+def single_many(many: Bool, e: {Bool.not(many) == True{} : Bool}) ->
+    {many == False{} : Bool}:
+  match many:
+    case True{}: Equal.sym(Bool, False{}, True{}, e)
+    case False{}: {==}
+
+def choose_many(many: Bool, +opt: Bool, +keys: List<&2, String>,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>, ap: Bool,
+    +ev: {Bool.and(no_bad(Cli.first_bad(vs, attrs)),
+      Bool.or(many, Laws.read_most_one(vs))) == True{} : Bool},
+    ep: {Bool.and(List.is_empty(&2, String, vs), Bool.and(Bool.not(many), ap))
+      == False{} : Bool},
+    ea: {Bool.and(Bool.not(many), Maybe.is_some(&2, List<&2, String>,
+      Cli.find_one_of(attrs))) == True{} : Bool},
+    ex: {Bool.and(Bool.not(opt), Bool.and(Bool.not(many), Bool.not(ap)))
+      == False{} : Bool},
+    ey: {Cli.keys_verdict(Cli.find_one_of(attrs), keys, id) == None{}
+      : Maybe<&2, String>}) ->
+    {Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{} : Bool}:
+  match many:
+    case True{}:
+      Empty.absurd({Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case False{}: chosen_good(ap, opt, keys, attrs, id, vs, ev, ep, ea, ex, ey)
+
+def choose_kind(kind: Cli.UsageKind, +opt: Bool, +keys: List<&2, String>,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    ev: {vs_ok(kind, attrs, vs) == True{} : Bool},
+    ep: {gap(kind, attrs, vs) == False{} : Bool},
+    ea: {Cli.choose_fits(kind, attrs) == True{} : Bool},
+    ex: {Cli.absent_verdict(Bool.and(Bool.not(opt),
+      Cli.may_absent(kind, attrs)), id, "choose") == None{}
+      : Maybe<&2, String>},
+    ey: {Cli.keys_verdict(Cli.find_one_of(attrs), keys, id) == None{}
+      : Maybe<&2, String>}) ->
+    {Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}:
+      Empty.absurd({Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case Cli.CountKind{}:
+      Empty.absurd({Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case Cli.NegatableKind{}:
+      Empty.absurd({Laws.read_good(Cli.WChoose{opt, keys}, vs) == True{}
+        : Bool}, false_true_absurd(ea))
+    case Cli.OptionKind{+many}:
+      choose_many(many, opt, keys, attrs, id, vs,
+        Cli.always_present(Cli.OptionKind{many}, attrs), ev, ep, ea,
+        absent_none(Bool.and(Bool.not(opt),
+          Cli.may_absent(Cli.OptionKind{many}, attrs)), id, "choose", ex), ey)
+    case Cli.BareOptionKind{}:
+      chosen_good(Cli.always_present(Cli.BareOptionKind{}, attrs), opt, keys,
+        attrs, id, vs, ev, ep, ea,
+        absent_none(Bool.and(Bool.not(opt),
+          Cli.may_absent(Cli.BareOptionKind{}, attrs)), id, "choose", ex), ey)
+    case Cli.PosKind{+required, +many}:
+      choose_many(many, opt, keys, attrs, id, vs,
+        Cli.always_present(Cli.PosKind{required, many}, attrs), ev, ep, ea,
+        absent_none(Bool.and(Bool.not(opt),
+          Cli.may_absent(Cli.PosKind{required, many}, attrs)), id, "choose",
+          ex), ey)
+
+def choose_final(+kind: Cli.UsageKind, +opt: Bool, +keys: List<&2, String>,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    ev: {vs_ok(kind, attrs, vs) == True{} : Bool},
+    ep: {gap(kind, attrs, vs) == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(Cli.WChoose{opt, keys}, id, kind, attrs),
+      Cli.WChoose{opt, keys}, vs) == True{} : Bool}:
+  at_three(Cli.choose_fits(kind, attrs),
+    Cli.absent_verdict(Bool.and(Bool.not(opt), Cli.may_absent(kind, attrs)),
+      id, "choose"),
+    Cli.keys_verdict(Cli.find_one_of(attrs), keys, id), id, kind, attrs,
+    Cli.WChoose{opt, keys}, vs,
+    ea => ex => ey => choose_kind(kind, opt, keys, attrs, id, vs, ev, ep, ea,
+      ex, ey))
+
+def final(want: Cli.Want, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +id: String, +vs: List<&2, String>,
+    ev: {vs_ok(kind, attrs, vs) == True{} : Bool},
+    ep: {gap(kind, attrs, vs) == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want, vs)
+      == True{} : Bool}:
+  match want:
+    case Cli.WFlag{}: flag_final(kind, attrs, id, vs, ev)
+    case Cli.WCount{}: count_final(kind, attrs, id, vs, ev)
+    case Cli.WValue{stem, form}: value_final(kind, stem, form, attrs, id, vs, ev, ep)
+    case Cli.WAny{}: {==}
+    case Cli.WChoose{opt, keys}: choose_final(kind, opt, keys, attrs, id, vs, ev, ep)
+
+# P21 field values: what env, a default and the argv give an arg satisfy
+# (fgood), which gap and final then read.
+
+def fgood(+kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +vs: List<&2, String>) -> Bool:
+  Bool.and(vs_ok(kind, attrs, vs),
+    Bool.or(Cli.kind_many(kind), Bool.not(List.is_empty(&2, String, vs))))
+
+def gap_off(em: Bool, m: Bool, -ap: Bool,
+    e: {Bool.or(m, Bool.not(em)) == True{} : Bool}) ->
+    {Bool.and(em, Bool.and(Bool.not(m), ap)) == False{} : Bool}:
+  match em:
+    case True{}:
+      match m:
+        case True{}: {==}
+        case False{}:
+          Empty.absurd({Bool.and(True{}, Bool.and(True{}, ap)) == False{}
+            : Bool}, false_true_absurd(e))
+    case False{}: {==}
+
+def fgood_ok(+kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +vs: List<&2, String>, e: {fgood(kind, attrs, vs) == True{} : Bool}) ->
+    {vs_ok(kind, attrs, vs) == True{} : Bool}:
+  and_left(vs_ok(kind, attrs, vs),
+    Bool.or(Cli.kind_many(kind), Bool.not(List.is_empty(&2, String, vs))), e)
+
+def fgood_gap(+kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +vs: List<&2, String>, e: {fgood(kind, attrs, vs) == True{} : Bool}) ->
+    {gap(kind, attrs, vs) == False{} : Bool}:
+  gap_off(List.is_empty(&2, String, vs), Cli.kind_many(kind),
+    Cli.always_present(kind, attrs),
+    and_right(vs_ok(kind, attrs, vs),
+      Bool.or(Cli.kind_many(kind), Bool.not(List.is_empty(&2, String, vs))),
+      e))
+
+def nb_of(m: Maybe<&2, Cli.Bad>, e: {m == None{} : Maybe<&2, Cli.Bad>}) ->
+    {no_bad(m) == True{} : Bool}:
+  match m:
+    case None{}: {==}
+    case Some{b}:
+      Empty.absurd({no_bad(Some{b}) == True{} : Bool}, bad_some_absurd(b, e))
+
+def or_none2(m: Maybe<&2, Cli.Bad>, n: Maybe<&2, Cli.Bad>,
+    em: {m == None{} : Maybe<&2, Cli.Bad>},
+    en: {n == None{} : Maybe<&2, Cli.Bad>}) ->
+    {Maybe.or(&2, Cli.Bad, m, n) == None{} : Maybe<&2, Cli.Bad>}:
+  match m:
+    case None{}: en
+    case Some{b}:
+      Empty.absurd({Maybe.or(&2, Cli.Bad, Some{b}, n) == None{}
+        : Maybe<&2, Cli.Bad>}, bad_some_absurd(b, em))
+
+# first_bad finds nothing in xs ++ ys when it finds nothing in either.
+def fb_app(xs: List<&2, String>, +ys: List<&2, String>,
+    +attrs: List<&2, Cli.Item>,
+    ex: {Cli.first_bad(xs, attrs) == None{} : Maybe<&2, Cli.Bad>},
+    ey: {Cli.first_bad(ys, attrs) == None{} : Maybe<&2, Cli.Bad>}) ->
+    {Cli.first_bad(List.append(&2, String, xs, ys), attrs) == None{}
+      : Maybe<&2, Cli.Bad>}:
+  match xs:
+    case Nil{}: ey
+    case +head <> +tail:
+      pair_elim({Cli.bad_value(Cli.value_reason(attrs, head), head) == None{}
+        : Maybe<&2, Cli.Bad>},
+        {Cli.first_bad(tail, attrs) == None{} : Maybe<&2, Cli.Bad>},
+        {Cli.first_bad(List.append(&2, String, head <> tail, ys), attrs)
+          == None{} : Maybe<&2, Cli.Bad>},
+        or_bad_none(Cli.bad_value(Cli.value_reason(attrs, head), head),
+          Cli.first_bad(tail, attrs), ex),
+        eh => et => or_none2(Cli.bad_value(Cli.value_reason(attrs, head), head),
+          Cli.first_bad(List.append(&2, String, tail, ys), attrs), eh,
+          fb_app(tail, ys, attrs, et, ey)))
+
+def fb_one(+attrs: List<&2, Cli.Item>, +v: String,
+    e: {Cli.bad_value(Cli.value_reason(attrs, v), v) == None{}
+      : Maybe<&2, Cli.Bad>}) ->
+    {Cli.first_bad([v], attrs) == None{} : Maybe<&2, Cli.Bad>}:
+  or_none2(Cli.bad_value(Cli.value_reason(attrs, v), v), None{}, e, {==})
+
+def fb_nil(xs: List<&2, String>, +attrs: List<&2, Cli.Item>,
+    e: {Cli.first_bad(xs, attrs) == None{} : Maybe<&2, Cli.Bad>}) ->
+    {Cli.first_bad(List.append(&2, String, xs, Nil{}), attrs) == None{}
+      : Maybe<&2, Cli.Bad>}:
+  fb_app(xs, Nil{}, attrs, e, {==})
+
+# A flag's text, from env or the argv, is "true" or "false".
+def flag_env(+attrs: List<&2, Cli.Item>, b: Bool) ->
+    {fgood(Cli.FlagKind{}, attrs, [Cli.bool_text(b)]) == True{} : Bool}:
+  match b:
+    case True{}: {==}
+    case False{}: {==}
+
+def neg_env(+attrs: List<&2, Cli.Item>, b: Bool) ->
+    {fgood(Cli.NegatableKind{}, attrs, [Cli.bool_text(b)]) == True{} : Bool}:
+  match b:
+    case True{}: {==}
+    case False{}: {==}
+
+def nat_digits(+v: String, +e: {Cli.valid_nat(v) == True{} : Bool}) ->
+    {Bool.and(Bool.not(String.is_empty(v)), Cli.decimal_digits(v)) == True{}
+      : Bool}:
+  and_true(Bool.not(String.is_empty(v)), Cli.decimal_digits(v),
+    and_left(Bool.not(String.is_empty(v)), Bool.and(Cli.decimal_digits(v),
+      Cli.nat_fits(Cli.trim_zeroes(v))), e),
+    and_left(Cli.decimal_digits(v), Cli.nat_fits(Cli.trim_zeroes(v)),
+      and_right(Bool.not(String.is_empty(v)), Bool.and(Cli.decimal_digits(v),
+        Cli.nat_fits(Cli.trim_zeroes(v))), e)))
+
+def count_one(+attrs: List<&2, Cli.Item>, +v: String,
+    e: {Bool.and(Bool.not(String.is_empty(v)), Cli.decimal_digits(v))
+      == True{} : Bool}) ->
+    {fgood(Cli.CountKind{}, attrs, [v]) == True{} : Bool}:
+  and_true(vs_ok(Cli.CountKind{}, attrs, [v]), True{},
+    and_true(Laws.read_counts([v]), True{},
+      and_true(Bool.and(Bool.not(String.is_empty(v)), Cli.decimal_digits(v)),
+        True{}, e, {==}), {==}), {==})
+
+def count_env(+attrs: List<&2, Cli.Item>, +v: String,
+    iss: {Cli.value_issue(Cli.CountKind{}, attrs, v) == None{}
+      : Maybe<&2, Cli.Bad>}) ->
+    {fgood(Cli.CountKind{}, attrs, [v]) == True{} : Bool}:
+  count_one(attrs, v, nat_digits(v,
+    pick_none_true(Cli.valid_nat(v),
+      "expected a whole number from 0 to 281474976710655",
+      bad_value_none(Cli.type_reason(Cli.TNat{}, v), v, iss))))
+
+# A many-valued kind's split, or a lone value.
+def many_good(found: Maybe<&2, Char>, +many: Bool, +attrs: List<&2, Cli.Item>,
+    +v: String,
+    ev: {Cli.split_bad(found, attrs, v) == None{} : Maybe<&2, Cli.Bad>},
+    okl: DelimMany(found, many)) ->
+    {Bool.and(Bool.and(no_bad(Cli.first_bad(Cli.apply_delim(found, [v]),
+        attrs)), Bool.or(many, Laws.read_most_one(Cli.apply_delim(found, [v])))),
+      Bool.or(many, Bool.not(List.is_empty(&2, String,
+        Cli.apply_delim(found, [v]))))) == True{} : Bool}:
+  match found:
+    case None{}:
+      and_true(Bool.and(no_bad(Cli.first_bad([v], attrs)),
+        Bool.or(many, True{})), Bool.or(many, True{}),
+        and_true(no_bad(Cli.first_bad([v], attrs)), Bool.or(many, True{}),
+          nb_of(Cli.first_bad([v], attrs), fb_one(attrs, v, ev)),
+          or_true_right(many)), or_true_right(many))
+    case Some{+sep}:
+      match many:
+        case True{}:
+          and_true(Bool.and(no_bad(Cli.first_bad(List.append(&2, String,
+            String.split(v, sep), Nil{}), attrs)), True{}), True{},
+            and_true(no_bad(Cli.first_bad(List.append(&2, String,
+              String.split(v, sep), Nil{}), attrs)), True{},
+              nb_of(Cli.first_bad(List.append(&2, String,
+                String.split(v, sep), Nil{}), attrs),
+                fb_nil(String.split(v, sep), attrs, ev)), {==}), {==})
+        case False{}:
+          Empty.absurd({Bool.and(Bool.and(no_bad(Cli.first_bad(
+            Cli.apply_delim(Some{sep}, [v]), attrs)), Bool.or(False{},
+            Laws.read_most_one(Cli.apply_delim(Some{sep}, [v])))),
+            Bool.or(False{}, Bool.not(List.is_empty(&2, String,
+              Cli.apply_delim(Some{sep}, [v]))))) == True{} : Bool},
+            false_true_absurd(okl))
+
+def bare_good(found: Maybe<&2, Char>, +attrs: List<&2, Cli.Item>,
+    +v: String,
+    ev: {Cli.split_bad(found, attrs, v) == None{} : Maybe<&2, Cli.Bad>},
+    okl: DelimOk(found, Cli.BareOptionKind{})) ->
+    {fgood(Cli.BareOptionKind{}, attrs, Cli.apply_delim(found, [v]))
+      == True{} : Bool}:
+  match found:
+    case None{}:
+      and_true(Bool.and(no_bad(Cli.first_bad([v], attrs)), True{}), True{},
+        and_true(no_bad(Cli.first_bad([v], attrs)), True{},
+          nb_of(Cli.first_bad([v], attrs), fb_one(attrs, v, ev)), {==}),
+        {==})
+    case Some{sep}:
+      Empty.absurd({fgood(Cli.BareOptionKind{}, attrs,
+        Cli.apply_delim(Some{sep}, [v])) == True{} : Bool},
+        false_true_absurd(okl))
+
+# A value env or a default gives, once value_issue passes it.
+def env_good(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +v: String,
+    iss: {Cli.value_issue(kind, attrs, v) == None{} : Maybe<&2, Cli.Bad>},
+    okl: DelimOk(Cli.find_delim(attrs), kind)) ->
+    {fgood(kind, attrs, Cli.env_values(kind, attrs, v)) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: flag_env(attrs, Cli.env_bool_true(v))
+    case Cli.CountKind{}: count_env(attrs, v, iss)
+    case Cli.NegatableKind{}: neg_env(attrs, Cli.env_bool_true(v))
+    case Cli.OptionKind{+many}:
+      many_good(Cli.find_delim(attrs), many, attrs, v, iss,
+        delim_many(Cli.find_delim(attrs), Cli.OptionKind{many}, okl))
+    case Cli.BareOptionKind{}:
+      bare_good(Cli.find_delim(attrs), attrs, v, iss, okl)
+    case Cli.PosKind{required, +many}:
+      many_good(Cli.find_delim(attrs), many, attrs, v, iss,
+        delim_many(Cli.find_delim(attrs), Cli.PosKind{required, many}, okl))
+
+# P21 counts: Nat.show writes only decimal digits, at least one, since
+# divmod.go's remainder stays at most 9 while it and m add up to 9.
+
+def digit_ok(r: Nat) -> Bool:
+  Char.is_digit(Chr{U32.from_nat(Nat.add(48n, r))})
+
+def npred(n: Nat) -> Nat:
+  match n:
+    case 0n: 0n
+    case 1n+p: p
+
+def succ_inj(-a: Nat, -b: Nat, e: {1n+a == 1n+b : Nat}) -> {a == b : Nat}:
+  %e : {a == npred(_) : Nat}
+  {==}
+
+def nat_nz(n: Nat) -> Data:
+  match n:
+    case 0n: Empty
+    case 1n+p: Unit
+
+def succ_zero_absurd(-a: Nat, e: {1n+a == 0n : Nat}) -> Empty:
+  %e : nat_nz(_)
+  Unit{}
+
+def dig0(r: Nat, -m: Nat, e: {Nat.add(r, m) == 0n : Nat}) ->
+    {digit_ok(Nat.add(9n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p:
+      Empty.absurd({digit_ok(Nat.add(9n, 1n+p)) == True{} : Bool},
+        succ_zero_absurd(Nat.add(p, m), e))
+
+def dig1(r: Nat, -m: Nat, e: {Nat.add(r, m) == 1n : Nat}) ->
+    {digit_ok(Nat.add(8n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig0(p, m, succ_inj(Nat.add(p, m), 0n, e))
+
+def dig2(r: Nat, -m: Nat, e: {Nat.add(r, m) == 2n : Nat}) ->
+    {digit_ok(Nat.add(7n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig1(p, m, succ_inj(Nat.add(p, m), 1n, e))
+
+def dig3(r: Nat, -m: Nat, e: {Nat.add(r, m) == 3n : Nat}) ->
+    {digit_ok(Nat.add(6n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig2(p, m, succ_inj(Nat.add(p, m), 2n, e))
+
+def dig4(r: Nat, -m: Nat, e: {Nat.add(r, m) == 4n : Nat}) ->
+    {digit_ok(Nat.add(5n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig3(p, m, succ_inj(Nat.add(p, m), 3n, e))
+
+def dig5(r: Nat, -m: Nat, e: {Nat.add(r, m) == 5n : Nat}) ->
+    {digit_ok(Nat.add(4n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig4(p, m, succ_inj(Nat.add(p, m), 4n, e))
+
+def dig6(r: Nat, -m: Nat, e: {Nat.add(r, m) == 6n : Nat}) ->
+    {digit_ok(Nat.add(3n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig5(p, m, succ_inj(Nat.add(p, m), 5n, e))
+
+def dig7(r: Nat, -m: Nat, e: {Nat.add(r, m) == 7n : Nat}) ->
+    {digit_ok(Nat.add(2n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig6(p, m, succ_inj(Nat.add(p, m), 6n, e))
+
+def dig8(r: Nat, -m: Nat, e: {Nat.add(r, m) == 8n : Nat}) ->
+    {digit_ok(Nat.add(1n, r)) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig7(p, m, succ_inj(Nat.add(p, m), 7n, e))
+
+def dig9(r: Nat, -m: Nat, e: {Nat.add(r, m) == 9n : Nat}) ->
+    {digit_ok(r) == True{} : Bool}:
+  match r:
+    case 0n: {==}
+    case 1n+p: dig8(p, m, succ_inj(Nat.add(p, m), 8n, e))
+
+def DmOk(qr: Nat & Nat) -> Type:
+  match qr:
+    case (q, r): {digit_ok(r) == True{} : Bool}
+
+def dm_ok(n: Nat, m: Nat, -d: Nat, +r: Nat,
+    e: {Nat.add(r, m) == 9n : Nat}) -> DmOk(Nat.divmod.go(n, m, d, r)):
+  match n:
+    case 0n: dig9(r, m, e)
+    case 1n+np:
+      match m:
+        case 0n:
+          dm_ok(np, r, 1n+d, 0n, Equal.trans(Nat, r, Nat.add(r, 0n), 9n,
+            Equal.sym(Nat, Nat.add(r, 0n), r, add_zero_right(r)), e))
+        case 1n+(+mp):
+          dm_ok(np, mp, d, 1n+r, Equal.trans(Nat, 1n+Nat.add(r, mp),
+            Nat.add(r, 1n+mp), 9n, Equal.sym(Nat, Nat.add(r, 1n+mp),
+              1n+Nat.add(r, mp), add_succ_right(r, mp)), e))
+
+def DigOk(dq: Char & Nat) -> Type:
+  match dq:
+    case (d, q): {Char.is_digit(d) == True{} : Bool}
+
+def put_dig(qr: Nat & Nat, ok: DmOk(qr)) -> DigOk(Nat.show.put(qr)):
+  match qr:
+    case (q, r): ok
+
+def put_ok(+n: Nat) -> DigOk(Nat.show.put(Nat.divmod(n, 10n))):
+  put_dig(Nat.divmod(n, 10n), dm_ok(n, 9n, 0n, 0n, {==}))
+
+def cnt_ok(+s: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(s)), Cli.decimal_digits(s))
+
+def fin_ok(-g: Nat, +acc: String, dq: Char & Nat,
+    ea: {Cli.decimal_digits(acc) == True{} : Bool}, ed: DigOk(dq),
+    ih: @n2: Nat -> @acc2: String -> {cnt_ok(acc2) == True{} : Bool} ->
+      {cnt_ok(Nat.show.go(g, n2, acc2)) == True{} : Bool}) ->
+    {cnt_ok(Nat.show.fin(g, acc, dq)) == True{} : Bool}:
+  match dq:
+    case (+d, q):
+      match q:
+        case 0n: and_true(Char.is_digit(d), Cli.decimal_digits(acc), ed, ea)
+        case 1n+p:
+          ih(1n+p, SCon{d, acc},
+            and_true(Char.is_digit(d), Cli.decimal_digits(acc), ed, ea))
+
+def cnt_digits(+s: String, e: {cnt_ok(s) == True{} : Bool}) ->
+    {Cli.decimal_digits(s) == True{} : Bool}:
+  and_right(Bool.not(String.is_empty(s)), Cli.decimal_digits(s), e)
+
+def show_go_ok(f: Nat, +n: Nat, +acc: String,
+    ea: {cnt_ok(acc) == True{} : Bool}) ->
+    {cnt_ok(Nat.show.go(f, n, acc)) == True{} : Bool}:
+  match f:
+    case 0n: ea
+    case 1n+g:
+      fin_ok(g, acc, Nat.show.put(Nat.divmod(n, 10n)), cnt_digits(acc, ea),
+        put_ok(n), n2 => acc2 => e2 => show_go_ok(g, n2, acc2, e2))
+
+def show_ok(+n: Nat) -> {cnt_ok(Nat.show(n)) == True{} : Bool}:
+  fin_ok(n, SNil{}, Nat.show.put(Nat.divmod(n, 10n)), {==}, put_ok(n),
+    n2 => acc2 => e2 => show_go_ok(n, n2, acc2, e2))
+
+# P21 argv: what gather keeps for an arg once each of its hits is valid for
+# it (ev_ok), and the field resolve builds from that.
+
+def allv(vs: List<&2, String>, +found: Maybe<&2, Char>,
+    +attrs: List<&2, Cli.Item>) -> Bool:
+  match vs:
+    case Nil{}: True{}
+    case v <> t:
+      Bool.and(no_bad(Cli.split_bad(found, attrs, v)), allv(t, found, attrs))
+
+def g_flag(g: Cli.Gather) -> Bool:
+  match g:
+    case Cli.Gather{seen, +values, count}:
+      Bool.and(Laws.read_flags(values),
+        Bool.or(Bool.not(seen), Laws.read_one(values)))
+
+def g_count(g: Cli.Gather) -> Bool:
+  match g:
+    case Cli.Gather{seen, +values, count}:
+      Bool.and(Laws.read_counts(values),
+        Bool.or(Bool.not(seen), Laws.read_one(values)))
+
+def g_many(g: Cli.Gather, many: Bool, +attrs: List<&2, Cli.Item>) -> Bool:
+  match g:
+    case Cli.Gather{seen, +values, count}:
+      Bool.and(allv(values, Cli.find_delim(attrs), attrs),
+        Bool.or(Bool.not(seen), Bool.or(many, Laws.read_one(values))))
+
+def gib(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, g: Cli.Gather) ->
+    Bool:
+  match kind:
+    case Cli.FlagKind{}: g_flag(g)
+    case Cli.CountKind{}: g_count(g)
+    case Cli.NegatableKind{}: g_flag(g)
+    case Cli.OptionKind{many}: g_many(g, many, attrs)
+    case Cli.BareOptionKind{}: g_many(g, False{}, attrs)
+    case Cli.PosKind{required, many}: True{}
+
+# A hit for id is valid for an arg of kind and attrs when that arg could
+# have made it: a value its attrs accept, or a flag or count hit.
+def ev_ok(e: Cli.ScanEvent, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String) -> Bool:
+  match e:
+    case Cli.ValueHit{k, v}:
+      Bool.or(Bool.not(String.eq(k, id)),
+        Bool.and(Cli.kind_valued(kind), no_bad(Cli.value_bad(attrs, v))))
+    case Cli.FlagHit{k, b}:
+      Bool.or(Bool.not(String.eq(k, id)), Cli.kind_flag(kind))
+    case Cli.CountHit{k}:
+      Bool.or(Bool.not(String.eq(k, id)), Cli.kind_count(kind))
+    case Cli.Operand{t}: True{}
+    case Cli.Enter{n}: True{}
+    case Cli.HelpHit{l}: True{}
+    case Cli.VersionHit{}: True{}
+
+def evs_ok(events: List<&2, Cli.ScanEvent>, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String) -> Bool:
+  match events:
+    case Nil{}: True{}
+    case e <> t: Bool.and(ev_ok(e, kind, attrs, id), evs_ok(t, kind, attrs, id))
+
+def allv_snoc(vs: List<&2, String>, +v: String, +found: Maybe<&2, Char>,
+    +attrs: List<&2, Cli.Item>, +ea: {allv(vs, found, attrs) == True{} : Bool},
+    nb: {no_bad(Cli.split_bad(found, attrs, v)) == True{} : Bool}) ->
+    {allv(List.append(&2, String, vs, [v]), found, attrs) == True{} : Bool}:
+  match vs:
+    case Nil{}:
+      and_true(no_bad(Cli.split_bad(found, attrs, v)), True{}, nb, {==})
+    case +h <> +t:
+      and_true(no_bad(Cli.split_bad(found, attrs, h)),
+        allv(List.append(&2, String, t, [v]), found, attrs),
+        and_left(no_bad(Cli.split_bad(found, attrs, h)), allv(t, found, attrs),
+          ea),
+        allv_snoc(t, v, found, attrs, and_right(no_bad(Cli.split_bad(found,
+          attrs, h)), allv(t, found, attrs), ea), nb))
+
+def many_step(g: Cli.Gather, many: Bool, +attrs: List<&2, Cli.Item>,
+    +v: String, nb: {no_bad(Cli.value_bad(attrs, v)) == True{} : Bool},
+    ok: {g_many(g, many, attrs) == True{} : Bool}) ->
+    {g_many(Cli.gather_value(g, v, many), many, attrs) == True{} : Bool}:
+  match g:
+    case Cli.Gather{seen, +values, count}:
+      match many:
+        case True{}:
+          and_true(allv(List.append(&2, String, values, [v]),
+            Cli.find_delim(attrs), attrs), True{},
+            allv_snoc(values, v, Cli.find_delim(attrs), attrs,
+              and_left(allv(values, Cli.find_delim(attrs), attrs),
+                Bool.or(Bool.not(seen), True{}), ok), nb), {==})
+        case False{}:
+          and_true(Bool.and(no_bad(Cli.value_bad(attrs, v)), True{}), True{},
+            and_true(no_bad(Cli.value_bad(attrs, v)), True{}, nb, {==}), {==})
+
+def value_step(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    g: Cli.Gather, +v: String,
+    e: {Bool.and(Cli.kind_valued(kind), no_bad(Cli.value_bad(attrs, v)))
+      == True{} : Bool},
+    ok: {gib(kind, attrs, g) == True{} : Bool}) ->
+    {gib(kind, attrs, Cli.gather_value(g, v, Cli.kind_many(kind))) == True{}
+      : Bool}:
+  match kind:
+    case Cli.FlagKind{}:
+      Empty.absurd({gib(Cli.FlagKind{}, attrs, Cli.gather_value(g, v,
+        False{})) == True{} : Bool}, false_true_absurd(e))
+    case Cli.CountKind{}:
+      Empty.absurd({gib(Cli.CountKind{}, attrs, Cli.gather_value(g, v,
+        False{})) == True{} : Bool}, false_true_absurd(e))
+    case Cli.NegatableKind{}:
+      Empty.absurd({gib(Cli.NegatableKind{}, attrs, Cli.gather_value(g, v,
+        False{})) == True{} : Bool}, false_true_absurd(e))
+    case Cli.OptionKind{many}: many_step(g, many, attrs, v, e, ok)
+    case Cli.BareOptionKind{}: many_step(g, False{}, attrs, v, e, ok)
+    case Cli.PosKind{required, many}: {==}
+
+def value_hit(b: Bool, kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +g: Cli.Gather, +v: String,
+    ev: {Bool.or(Bool.not(b), Bool.and(Cli.kind_valued(kind),
+      no_bad(Cli.value_bad(attrs, v)))) == True{} : Bool},
+    ok: {gib(kind, attrs, g) == True{} : Bool}) ->
+    {gib(kind, attrs, Bool.pick(Cli.Gather, b,
+      Cli.gather_value(g, v, Cli.kind_many(kind)), g)) == True{} : Bool}:
+  match b:
+    case True{}: value_step(kind, attrs, g, v, ev, ok)
+    case False{}: ok
+
+def flag_g(g: Cli.Gather, b: Bool) ->
+    {g_flag(Cli.gather_flag(g, b)) == True{} : Bool}:
+  match g:
+    case Cli.Gather{seen, values, count}:
+      match b:
+        case True{}: {==}
+        case False{}: {==}
+
+def flag_step(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    g: Cli.Gather, b: Bool, e: {Cli.kind_flag(kind) == True{} : Bool}) ->
+    {gib(kind, attrs, Cli.gather_flag(g, b)) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: flag_g(g, b)
+    case Cli.CountKind{}:
+      Empty.absurd({gib(Cli.CountKind{}, attrs, Cli.gather_flag(g, b))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.NegatableKind{}: flag_g(g, b)
+    case Cli.OptionKind{many}:
+      Empty.absurd({gib(Cli.OptionKind{many}, attrs, Cli.gather_flag(g, b))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.BareOptionKind{}:
+      Empty.absurd({gib(Cli.BareOptionKind{}, attrs, Cli.gather_flag(g, b))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.PosKind{required, many}: {==}
+
+def flag_hit(b: Bool, kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +g: Cli.Gather, bv: Bool,
+    ev: {Bool.or(Bool.not(b), Cli.kind_flag(kind)) == True{} : Bool},
+    ok: {gib(kind, attrs, g) == True{} : Bool}) ->
+    {gib(kind, attrs, Bool.pick(Cli.Gather, b, Cli.gather_flag(g, bv), g))
+      == True{} : Bool}:
+  match b:
+    case True{}: flag_step(kind, attrs, g, bv, ev)
+    case False{}: ok
+
+def count_g(g: Cli.Gather) -> {g_count(Cli.gather_count(g)) == True{} : Bool}:
+  match g:
+    case Cli.Gather{seen, values, +count}:
+      and_true(Bool.and(cnt_ok(Nat.show(Nat.add(count, 1n))), True{}), True{},
+        and_true(cnt_ok(Nat.show(Nat.add(count, 1n))), True{},
+          show_ok(Nat.add(count, 1n)), {==}), {==})
+
+def count_step(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    g: Cli.Gather, e: {Cli.kind_count(kind) == True{} : Bool}) ->
+    {gib(kind, attrs, Cli.gather_count(g)) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}:
+      Empty.absurd({gib(Cli.FlagKind{}, attrs, Cli.gather_count(g))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.CountKind{}: count_g(g)
+    case Cli.NegatableKind{}:
+      Empty.absurd({gib(Cli.NegatableKind{}, attrs, Cli.gather_count(g))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.OptionKind{many}:
+      Empty.absurd({gib(Cli.OptionKind{many}, attrs, Cli.gather_count(g))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.BareOptionKind{}:
+      Empty.absurd({gib(Cli.BareOptionKind{}, attrs, Cli.gather_count(g))
+        == True{} : Bool}, false_true_absurd(e))
+    case Cli.PosKind{required, many}: {==}
+
+def count_hit(b: Bool, kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +g: Cli.Gather,
+    ev: {Bool.or(Bool.not(b), Cli.kind_count(kind)) == True{} : Bool},
+    ok: {gib(kind, attrs, g) == True{} : Bool}) ->
+    {gib(kind, attrs, Bool.pick(Cli.Gather, b, Cli.gather_count(g), g))
+      == True{} : Bool}:
+  match b:
+    case True{}: count_step(kind, attrs, g, ev)
+    case False{}: ok
+
+def gather_step(e: Cli.ScanEvent, +id: String, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +g: Cli.Gather,
+    ok: {gib(kind, attrs, g) == True{} : Bool},
+    ev: {ev_ok(e, kind, attrs, id) == True{} : Bool}) ->
+    {gib(kind, attrs, Cli.gather_event(e, id, kind, g)) == True{} : Bool}:
+  match e:
+    case Cli.ValueHit{k, +v}:
+      value_hit(String.eq(k, id), kind, attrs, g, v, ev, ok)
+    case Cli.FlagHit{k, b}:
+      flag_hit(String.eq(k, id), kind, attrs, g, b, ev, ok)
+    case Cli.CountHit{k}:
+      count_hit(String.eq(k, id), kind, attrs, g, ev, ok)
+    case Cli.Operand{t}: ok
+    case Cli.Enter{n}: ok
+    case Cli.HelpHit{l}: ok
+    case Cli.VersionHit{}: ok
+
+def gather_all(events: List<&2, Cli.ScanEvent>, +id: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +g: Cli.Gather,
+    ok: {gib(kind, attrs, g) == True{} : Bool},
+    +ev: {evs_ok(events, kind, attrs, id) == True{} : Bool}) ->
+    {gib(kind, attrs, Cli.gather_events(events, id, kind, g)) == True{}
+      : Bool}:
+  match events:
+    case Nil{}: ok
+    case +e <> +t:
+      gather_all(t, id, kind, attrs, Cli.gather_event(e, id, kind, g),
+        gather_step(e, id, kind, attrs, g, ok,
+          and_left(ev_ok(e, kind, attrs, id), evs_ok(t, kind, attrs, id), ev)),
+        and_right(ev_ok(e, kind, attrs, id), evs_ok(t, kind, attrs, id), ev))
+
+def gather_init(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>) ->
+    {gib(kind, attrs, Cli.Gather{False{}, [], 0n}) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: {==}
+    case Cli.CountKind{}: {==}
+    case Cli.NegatableKind{}: {==}
+    case Cli.OptionKind{many}: {==}
+    case Cli.BareOptionKind{}: {==}
+    case Cli.PosKind{required, many}: {==}
+
+def allv_none(values: List<&2, String>, +attrs: List<&2, Cli.Item>,
+    +e: {allv(values, None{}, attrs) == True{} : Bool}) ->
+    {Cli.first_bad(values, attrs) == None{} : Maybe<&2, Cli.Bad>}:
+  match values:
+    case Nil{}: {==}
+    case +h <> +t:
+      or_none2(Cli.bad_value(Cli.value_reason(attrs, h), h),
+        Cli.first_bad(t, attrs),
+        no_bad_none(Cli.bad_value(Cli.value_reason(attrs, h), h),
+          and_left(no_bad(Cli.bad_value(Cli.value_reason(attrs, h), h)),
+            allv(t, None{}, attrs), e)),
+        allv_none(t, attrs, and_right(no_bad(Cli.bad_value(Cli.value_reason(
+          attrs, h), h)), allv(t, None{}, attrs), e)))
+
+def allv_split(values: List<&2, String>, +sep: Char,
+    +attrs: List<&2, Cli.Item>,
+    +e: {allv(values, Some{sep}, attrs) == True{} : Bool}) ->
+    {Cli.first_bad(Cli.split_each(values, sep), attrs) == None{}
+      : Maybe<&2, Cli.Bad>}:
+  match values:
+    case Nil{}: {==}
+    case +h <> +t:
+      fb_app(String.split(h, sep), Cli.split_each(t, sep), attrs,
+        no_bad_none(Cli.first_bad(String.split(h, sep), attrs),
+          and_left(no_bad(Cli.first_bad(String.split(h, sep), attrs)),
+            allv(t, Some{sep}, attrs), e)),
+        allv_split(t, sep, attrs, and_right(no_bad(Cli.first_bad(
+          String.split(h, sep), attrs)), allv(t, Some{sep}, attrs), e)))
+
+# Exactly one value, with r: at most one, and some.
+def one_vals(values: List<&2, String>, r: Bool,
+    ok: {Bool.and(r, Laws.read_one(values)) == True{} : Bool}) ->
+    {Bool.and(Bool.and(r, Laws.read_most_one(values)),
+      Bool.not(List.is_empty(&2, String, values))) == True{} : Bool}:
+  match values:
+    case Nil{}:
+      match r:
+        case True{}:
+          Empty.absurd({Bool.and(Bool.and(True{}, True{}), False{}) == True{}
+            : Bool}, false_true_absurd(ok))
+        case False{}:
+          Empty.absurd({Bool.and(Bool.and(False{}, True{}), False{})
+            == True{} : Bool}, false_true_absurd(ok))
+    case v <> +t:
+      and_true(Bool.and(r, List.is_empty(&2, String, t)), True{}, ok, {==})
+
+def flag_seen(found: Maybe<&2, Char>, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>,
+    ok: {Bool.and(Laws.read_flags(values), Laws.read_one(values)) == True{}
+      : Bool},
+    okl: DelimOk(found, Cli.FlagKind{})) ->
+    {fgood(Cli.FlagKind{}, attrs, Cli.apply_delim(found, values)) == True{}
+      : Bool}:
+  match found:
+    case None{}: one_vals(values, Laws.read_flags(values), ok)
+    case Some{sep}:
+      Empty.absurd({fgood(Cli.FlagKind{}, attrs,
+        Cli.apply_delim(Some{sep}, values)) == True{} : Bool},
+        false_true_absurd(okl))
+
+def neg_seen(found: Maybe<&2, Char>, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>,
+    ok: {Bool.and(Laws.read_flags(values), Laws.read_one(values)) == True{}
+      : Bool},
+    okl: DelimOk(found, Cli.NegatableKind{})) ->
+    {fgood(Cli.NegatableKind{}, attrs, Cli.apply_delim(found, values))
+      == True{} : Bool}:
+  match found:
+    case None{}: one_vals(values, Laws.read_flags(values), ok)
+    case Some{sep}:
+      Empty.absurd({fgood(Cli.NegatableKind{}, attrs,
+        Cli.apply_delim(Some{sep}, values)) == True{} : Bool},
+        false_true_absurd(okl))
+
+def count_seen(found: Maybe<&2, Char>, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>,
+    ok: {Bool.and(Laws.read_counts(values), Laws.read_one(values)) == True{}
+      : Bool},
+    okl: DelimOk(found, Cli.CountKind{})) ->
+    {fgood(Cli.CountKind{}, attrs, Cli.apply_delim(found, values)) == True{}
+      : Bool}:
+  match found:
+    case None{}: one_vals(values, Laws.read_counts(values), ok)
+    case Some{sep}:
+      Empty.absurd({fgood(Cli.CountKind{}, attrs,
+        Cli.apply_delim(Some{sep}, values)) == True{} : Bool},
+        false_true_absurd(okl))
+
+def many_seen(found: Maybe<&2, Char>, +many: Bool, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>,
+    ea: {allv(values, found, attrs) == True{} : Bool},
+    eo: {Bool.or(many, Laws.read_one(values)) == True{} : Bool},
+    okl: DelimMany(found, many)) ->
+    {Bool.and(Bool.and(no_bad(Cli.first_bad(Cli.apply_delim(found, values),
+        attrs)), Bool.or(many,
+        Laws.read_most_one(Cli.apply_delim(found, values)))),
+      Bool.or(many, Bool.not(List.is_empty(&2, String,
+        Cli.apply_delim(found, values))))) == True{} : Bool}:
+  match found:
+    case None{}:
+      match many:
+        case True{}:
+          and_true(Bool.and(no_bad(Cli.first_bad(values, attrs)), True{}),
+            True{}, and_true(no_bad(Cli.first_bad(values, attrs)), True{},
+              nb_of(Cli.first_bad(values, attrs),
+                allv_none(values, attrs, ea)), {==}), {==})
+        case False{}:
+          one_vals(values, no_bad(Cli.first_bad(values, attrs)),
+            and_true(no_bad(Cli.first_bad(values, attrs)),
+              Laws.read_one(values), nb_of(Cli.first_bad(values, attrs),
+                allv_none(values, attrs, ea)), eo))
+    case Some{+sep}:
+      match many:
+        case True{}:
+          and_true(Bool.and(no_bad(Cli.first_bad(Cli.split_each(values, sep),
+            attrs)), True{}), True{},
+            and_true(no_bad(Cli.first_bad(Cli.split_each(values, sep), attrs)),
+              True{}, nb_of(Cli.first_bad(Cli.split_each(values, sep), attrs),
+                allv_split(values, sep, attrs, ea)), {==}), {==})
+        case False{}:
+          Empty.absurd({Bool.and(Bool.and(no_bad(Cli.first_bad(
+            Cli.split_each(values, sep), attrs)), Bool.or(False{},
+            Laws.read_most_one(Cli.split_each(values, sep)))),
+            Bool.or(False{}, Bool.not(List.is_empty(&2, String,
+              Cli.split_each(values, sep))))) == True{} : Bool},
+            false_true_absurd(okl))
+
+# An option the argv names: the values gather kept, split at its delimiter.
+def seen_good(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>, -count: Nat,
+    +ok: {gib(kind, attrs, Cli.Gather{True{}, values, count}) == True{} : Bool},
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    np: {Cli.kind_pos(kind) == False{} : Bool}) ->
+    {fgood(kind, attrs, Cli.apply_delim(Cli.find_delim(attrs), values))
+      == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: flag_seen(Cli.find_delim(attrs), attrs, values, ok, okl)
+    case Cli.CountKind{}:
+      count_seen(Cli.find_delim(attrs), attrs, values, ok, okl)
+    case Cli.NegatableKind{}:
+      neg_seen(Cli.find_delim(attrs), attrs, values, ok, okl)
+    case Cli.OptionKind{+many}:
+      many_seen(Cli.find_delim(attrs), many, attrs, values,
+        and_left(allv(values, Cli.find_delim(attrs), attrs),
+          Bool.or(many, Laws.read_one(values)), ok),
+        and_right(allv(values, Cli.find_delim(attrs), attrs),
+          Bool.or(many, Laws.read_one(values)), ok),
+        delim_many(Cli.find_delim(attrs), Cli.OptionKind{many}, okl))
+    case Cli.BareOptionKind{}:
+      many_seen(Cli.find_delim(attrs), False{}, attrs, values,
+        and_left(allv(values, Cli.find_delim(attrs), attrs),
+          Laws.read_one(values), ok),
+        and_right(allv(values, Cli.find_delim(attrs), attrs),
+          Laws.read_one(values), ok),
+        delim_many(Cli.find_delim(attrs), Cli.BareOptionKind{}, okl))
+    case Cli.PosKind{required, many}:
+      Empty.absurd({fgood(Cli.PosKind{required, many}, attrs,
+        Cli.apply_delim(Cli.find_delim(attrs), values)) == True{} : Bool},
+        true_false_absurd(np))
+
+# P21 lists: the args of a scope that have id, and the hits each accepts.
+
+def b_or_l(a: Bool, -b: Bool, e: {a == True{} : Bool}) ->
+    {Bool.or(a, b) == True{} : Bool}:
+  match a:
+    case True{}: {==}
+    case False{}:
+      Empty.absurd({Bool.or(False{}, b) == True{} : Bool},
+        false_true_absurd(e))
+
+def b_or_r(a: Bool, -b: Bool, e: {b == True{} : Bool}) ->
+    {Bool.or(a, b) == True{} : Bool}:
+  match a:
+    case True{}: {==}
+    case False{}: e
+
+def b_orf_l(a: Bool, -b: Bool, e: {Bool.or(a, b) == False{} : Bool}) ->
+    {a == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, true_false_absurd(e))
+    case False{}: {==}
+
+def b_orf_r(a: Bool, -b: Bool, e: {Bool.or(a, b) == False{} : Bool}) ->
+    {b == False{} : Bool}:
+  match a:
+    case True{}: Empty.absurd({b == False{} : Bool}, true_false_absurd(e))
+    case False{}: e
+
+def b_or_ff(a: Bool, -b: Bool, ea: {a == False{} : Bool},
+    eb: {b == False{} : Bool}) -> {Bool.or(a, b) == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({Bool.or(True{}, b) == False{} : Bool},
+        true_false_absurd(ea))
+    case False{}: eb
+
+def b_not_f(c: Bool, e: {c == False{} : Bool}) ->
+    {Bool.not(c) == True{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({Bool.not(True{}) == True{} : Bool}, true_false_absurd(e))
+    case False{}: {==}
+
+def b_not_t(c: Bool, e: {c == True{} : Bool}) ->
+    {Bool.not(c) == False{} : Bool}:
+  match c:
+    case True{}: {==}
+    case False{}:
+      Empty.absurd({Bool.not(False{}) == False{} : Bool},
+        false_true_absurd(e))
+
+# c is false when or(not(c), d) holds and d does not.
+def b_ornot(c: Bool, d: Bool, e: {Bool.or(Bool.not(c), d) == True{} : Bool},
+    ed: {d == False{} : Bool}) -> {c == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool},
+        true_false_absurd(Equal.trans(Bool, True{}, d, False{},
+          Equal.sym(Bool, d, True{}, e), ed)))
+    case False{}: {==}
+
+# d is false when or(not(c), not(d)) holds and c does.
+def b_nand(c: Bool, d: Bool,
+    e: {Bool.or(Bool.not(c), Bool.not(d)) == True{} : Bool},
+    ec: {c == True{} : Bool}) -> {d == False{} : Bool}:
+  match c:
+    case True{}:
+      match d:
+        case True{}:
+          Empty.absurd({True{} == False{} : Bool}, false_true_absurd(e))
+        case False{}: {==}
+    case False{}:
+      Empty.absurd({d == False{} : Bool}, false_true_absurd(ec))
+
+def b_or_assoc(a: Bool, b: Bool, c: Bool) ->
+    {Bool.or(a, Bool.or(b, c)) == Bool.or(Bool.or(a, b), c) : Bool}:
+  match a:
+    case True{}: {==}
+    case False{}: {==}
+
+def b_excl(c: Bool) -> {Bool.or(c, Bool.not(c)) == True{} : Bool}:
+  match c:
+    case True{}: {==}
+    case False{}: {==}
+
+def has(L: List<&2, Cli.Item>, +id: String) -> Bool:
+  match L:
+    case Nil{}: False{}
+    case Cli.Arg{usage, help, attrs} <> tail:
+      Bool.or(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        has(tail, id))
+    case head <> tail: has(tail, id)
+
+def am1(L: List<&2, Cli.Item>, +id: String) -> Bool:
+  match L:
+    case Nil{}: True{}
+    case Cli.Arg{usage, help, attrs} <> +tail:
+      Bool.and(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage,
+        attrs)), id)), Bool.not(has(tail, id))), am1(tail, id))
+    case head <> tail: am1(tail, id)
+
+def nonpos(L: List<&2, Cli.Item>) -> Bool:
+  match L:
+    case Nil{}: True{}
+    case Cli.Arg{usage, help, attrs} <> tail:
+      Bool.and(Bool.not(Cli.kind_pos(Cli.info_kind(Cli.arg_info(usage,
+        attrs)))), nonpos(tail))
+    case head <> tail: nonpos(tail)
+
+# A hit event names an id other than id; other events name none.
+def off(e: Cli.ScanEvent, +id: String) -> Bool:
+  match e:
+    case Cli.FlagHit{k, b}: Bool.not(String.eq(k, id))
+    case Cli.CountHit{k}: Bool.not(String.eq(k, id))
+    case Cli.ValueHit{k, v}: Bool.not(String.eq(k, id))
+    case Cli.Operand{t}: True{}
+    case Cli.Enter{n}: True{}
+    case Cli.HelpHit{l}: True{}
+    case Cli.VersionHit{}: True{}
+
+def ok_at(+info: Cli.ArgInfo, e: Cli.ScanEvent, +id: String) -> Bool:
+  Bool.or(Bool.not(String.eq(Cli.info_id(info), id)),
+    ev_ok(e, Cli.info_kind(info), Cli.info_attrs(info), id))
+
+# Every arg of L with id accepts e.
+def acc(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String) -> Bool:
+  match L:
+    case Nil{}: True{}
+    case Cli.Arg{usage, help, attrs} <> tail:
+      Bool.and(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id))
+    case head <> tail: acc(tail, e, id)
+
+def ev_all(events: List<&2, Cli.ScanEvent>, +L: List<&2, Cli.Item>,
+    +id: String) -> Bool:
+  match events:
+    case Nil{}: True{}
+    case e <> tail: Bool.and(acc(L, e, id), ev_all(tail, L, id))
+
+def off_ev(e: Cli.ScanEvent, -kind: Cli.UsageKind,
+    -attrs: List<&2, Cli.Item>, +id: String,
+    eo: {off(e, id) == True{} : Bool}) ->
+    {ev_ok(e, kind, attrs, id) == True{} : Bool}:
+  match e:
+    case Cli.FlagHit{k, b}:
+      b_or_l(Bool.not(String.eq(k, id)), Cli.kind_flag(kind), eo)
+    case Cli.CountHit{k}:
+      b_or_l(Bool.not(String.eq(k, id)), Cli.kind_count(kind), eo)
+    case Cli.ValueHit{k, v}:
+      b_or_l(Bool.not(String.eq(k, id)), Bool.and(Cli.kind_valued(kind),
+        no_bad(Cli.value_bad(attrs, v))), eo)
+    case Cli.Operand{t}: {==}
+    case Cli.Enter{n}: {==}
+    case Cli.HelpHit{l}: {==}
+    case Cli.VersionHit{}: {==}
+
+def ok_off(+info: Cli.ArgInfo, e: Cli.ScanEvent, +id: String,
+    eo: {off(e, id) == True{} : Bool}) ->
+    {ok_at(info, e, id) == True{} : Bool}:
+  b_or_r(Bool.not(String.eq(Cli.info_id(info), id)),
+    ev_ok(e, Cli.info_kind(info), Cli.info_attrs(info), id),
+    off_ev(e, Cli.info_kind(info), Cli.info_attrs(info), id, eo))
+
+def ok_none(+info: Cli.ArgInfo, -e: Cli.ScanEvent, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    {ok_at(info, e, id) == True{} : Bool}:
+  b_or_l(Bool.not(String.eq(Cli.info_id(info), id)),
+    ev_ok(e, Cli.info_kind(info), Cli.info_attrs(info), id),
+    b_not_f(String.eq(Cli.info_id(info), id), ec))
+
+# Every arg accepts an event off id.
+def acc_off(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    +eo: {off(e, id) == True{} : Bool}) -> {acc(L, e, id) == True{} : Bool}:
+  match L:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      and_true(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id),
+        ok_off(Cli.arg_info(usage, attrs), e, id, eo),
+        acc_off(tail, e, id, eo))
+    case Cli.Sub{x0, x1, x2} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Version{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Alias{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Hidden{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Example{x0, x1} <> tail: acc_off(tail, e, id, eo)
+    case Cli.After{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.SubOptional{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.External{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Exclusive{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.NeedOne{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Id{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Required{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.AttrDefault{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.AttrEnv{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Global{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Heading{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.As{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.OneOf{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Delim{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Hyphen{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Rest{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Bare{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Conflicts{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Requires{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Group{x0} <> tail: acc_off(tail, e, id, eo)
+    case Cli.Builtin{} <> tail: acc_off(tail, e, id, eo)
+
+# A list with no arg of id accepts every event.
+def acc_none(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    +en: {has(L, id) == False{} : Bool}) ->
+    {acc(L, e, id) == True{} : Bool}:
+  match L:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      and_true(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id),
+        ok_none(Cli.arg_info(usage, attrs), e, id,
+          b_orf_l(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+            has(tail, id), en)),
+        acc_none(tail, e, id,
+          b_orf_r(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+            has(tail, id), en)))
+    case Cli.Sub{x0, x1, x2} <> tail: acc_none(tail, e, id, en)
+    case Cli.Version{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Alias{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Hidden{} <> tail: acc_none(tail, e, id, en)
+    case Cli.Example{x0, x1} <> tail: acc_none(tail, e, id, en)
+    case Cli.After{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.SubOptional{} <> tail: acc_none(tail, e, id, en)
+    case Cli.External{} <> tail: acc_none(tail, e, id, en)
+    case Cli.Exclusive{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.NeedOne{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Id{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Required{} <> tail: acc_none(tail, e, id, en)
+    case Cli.AttrDefault{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.AttrEnv{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Global{} <> tail: acc_none(tail, e, id, en)
+    case Cli.Heading{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.As{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.OneOf{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Delim{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Hyphen{} <> tail: acc_none(tail, e, id, en)
+    case Cli.Rest{} <> tail: acc_none(tail, e, id, en)
+    case Cli.Bare{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Conflicts{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Requires{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Group{x0} <> tail: acc_none(tail, e, id, en)
+    case Cli.Builtin{} <> tail: acc_none(tail, e, id, en)
+
+def has_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String) ->
+    {has(List.append(&2, Cli.Item, xs, ys), id)
+      == Bool.or(has(xs, id), has(ys, id)) : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      Equal.trans(Bool,
+        Bool.or(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+          has(List.append(&2, Cli.Item, tail, ys), id)),
+        Bool.or(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+          Bool.or(has(tail, id), has(ys, id))),
+        Bool.or(Bool.or(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)),
+          id), has(tail, id)), has(ys, id)),
+        Equal.cong(Bool, Bool,
+          x => Bool.or(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+            x),
+          has(List.append(&2, Cli.Item, tail, ys), id),
+          Bool.or(has(tail, id), has(ys, id)), has_app(tail, ys, id)),
+        b_or_assoc(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+          has(tail, id), has(ys, id)))
+    case Cli.Sub{x0, x1, x2} <> tail: has_app(tail, ys, id)
+    case Cli.Version{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Alias{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Hidden{} <> tail: has_app(tail, ys, id)
+    case Cli.Example{x0, x1} <> tail: has_app(tail, ys, id)
+    case Cli.After{x0} <> tail: has_app(tail, ys, id)
+    case Cli.SubOptional{} <> tail: has_app(tail, ys, id)
+    case Cli.External{} <> tail: has_app(tail, ys, id)
+    case Cli.Exclusive{x0} <> tail: has_app(tail, ys, id)
+    case Cli.NeedOne{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Id{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Required{} <> tail: has_app(tail, ys, id)
+    case Cli.AttrDefault{x0} <> tail: has_app(tail, ys, id)
+    case Cli.AttrEnv{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Global{} <> tail: has_app(tail, ys, id)
+    case Cli.Heading{x0} <> tail: has_app(tail, ys, id)
+    case Cli.As{x0} <> tail: has_app(tail, ys, id)
+    case Cli.OneOf{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Delim{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Hyphen{} <> tail: has_app(tail, ys, id)
+    case Cli.Rest{} <> tail: has_app(tail, ys, id)
+    case Cli.Bare{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Conflicts{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Requires{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Group{x0} <> tail: has_app(tail, ys, id)
+    case Cli.Builtin{} <> tail: has_app(tail, ys, id)
+
+def has_app_f(+xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String,
+    ex: {has(xs, id) == False{} : Bool}, ey: {has(ys, id) == False{} : Bool})
+    -> {has(List.append(&2, Cli.Item, xs, ys), id) == False{} : Bool}:
+  %Equal.sym(Bool, has(List.append(&2, Cli.Item, xs, ys), id),
+    Bool.or(has(xs, id), has(ys, id)), has_app(xs, ys, id)) :
+    {_ == False{} : Bool}
+  b_or_ff(has(xs, id), has(ys, id), ex, ey)
+
+def has_app_t(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String,
+    e: {Bool.or(has(xs, id), has(ys, id)) == True{} : Bool}) ->
+    {has(List.append(&2, Cli.Item, xs, ys), id) == True{} : Bool}:
+  %Equal.sym(Bool, has(List.append(&2, Cli.Item, xs, ys), id),
+    Bool.or(has(xs, id), has(ys, id)), has_app(xs, ys, id)) :
+    {_ == True{} : Bool}
+  e
+
+# am1 over an Arg: what the arg's own id and the rest give.
+def am1_head(c: Bool, ht: Bool, hy: Bool,
+    p: {Bool.or(Bool.not(c), Bool.not(ht)) == True{} : Bool},
+    d: {Bool.or(Bool.not(Bool.or(c, ht)), Bool.not(hy)) == True{} : Bool}) ->
+    {Bool.or(Bool.not(c), Bool.not(Bool.or(ht, hy))) == True{} : Bool}:
+  match c:
+    case False{}: {==}
+    case True{}:
+      match ht:
+        case True{}:
+          Empty.absurd({Bool.or(Bool.not(True{}), Bool.not(Bool.or(True{},
+            hy))) == True{} : Bool}, false_true_absurd(p))
+        case False{}:
+          match hy:
+            case True{}:
+              Empty.absurd({Bool.or(Bool.not(True{}), Bool.not(Bool.or(
+                False{}, True{}))) == True{} : Bool}, false_true_absurd(d))
+            case False{}: {==}
+
+def am1_rest(c: Bool, ht: Bool, hy: Bool,
+    d: {Bool.or(Bool.not(Bool.or(c, ht)), Bool.not(hy)) == True{} : Bool}) ->
+    {Bool.or(Bool.not(ht), Bool.not(hy)) == True{} : Bool}:
+  match c:
+    case True{}:
+      match ht:
+        case False{}: {==}
+        case True{}: d
+    case False{}:
+      match ht:
+        case False{}: {==}
+        case True{}: d
+
+def am1_arg(+x: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +ys: List<&2, Cli.Item>, +id: String,
+    ax: {Bool.and(Bool.or(Bool.not(String.eq(Cli.info_id(x), id)),
+      Bool.not(has(tail, id))), am1(tail, id)) == True{} : Bool},
+    +d: {Bool.or(Bool.not(Bool.or(String.eq(Cli.info_id(x), id),
+      has(tail, id))), Bool.not(has(ys, id))) == True{} : Bool},
+    ih: {Bool.or(Bool.not(has(tail, id)), Bool.not(has(ys, id))) == True{}
+      : Bool} -> {am1(List.append(&2, Cli.Item, tail, ys), id) == True{}
+      : Bool}) ->
+    {Bool.and(Bool.or(Bool.not(String.eq(Cli.info_id(x), id)),
+      Bool.not(has(List.append(&2, Cli.Item, tail, ys), id))),
+      am1(List.append(&2, Cli.Item, tail, ys), id)) == True{} : Bool}:
+  +c = String.eq(Cli.info_id(x), id)
+  %Equal.sym(Bool, has(List.append(&2, Cli.Item, tail, ys), id),
+    Bool.or(has(tail, id), has(ys, id)), has_app(tail, ys, id)) :
+    {Bool.and(Bool.or(Bool.not(c), Bool.not(_)),
+      am1(List.append(&2, Cli.Item, tail, ys), id)) == True{} : Bool}
+  and_true(Bool.or(Bool.not(c), Bool.not(Bool.or(has(tail, id),
+    has(ys, id)))), am1(List.append(&2, Cli.Item, tail, ys), id),
+    am1_head(c, has(tail, id), has(ys, id),
+      and_left(Bool.or(Bool.not(c), Bool.not(has(tail, id))),
+        am1(tail, id), ax), d),
+    ih(am1_rest(c, has(tail, id), has(ys, id), d)))
+
+def am1_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String,
+    +ax: {am1(xs, id) == True{} : Bool}, +ay: {am1(ys, id) == True{} : Bool},
+    d: {Bool.or(Bool.not(has(xs, id)), Bool.not(has(ys, id))) == True{}
+      : Bool}) ->
+    {am1(List.append(&2, Cli.Item, xs, ys), id) == True{} : Bool}:
+  match xs:
+    case Nil{}: ay
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      am1_arg(Cli.arg_info(usage, attrs), tail, ys, id, ax, d,
+        dt => am1_app(tail, ys, id,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
+            usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id),
+            ax), ay, dt))
+    case Cli.Sub{x0, x1, x2} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Version{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Alias{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Hidden{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Example{x0, x1} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.After{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.SubOptional{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.External{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Exclusive{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.NeedOne{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Id{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Required{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.AttrDefault{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.AttrEnv{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Global{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Heading{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.As{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.OneOf{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Delim{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Hyphen{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Rest{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Bare{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Conflicts{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Requires{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Group{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.Builtin{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+
+def has_glob_pick(g: Bool, +usage: String, -help: String,
+    +attrs: List<&2, Cli.Item>, +gt: List<&2, Cli.Item>, +id: String,
+    ec: {String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id) == False{}
+      : Bool}, ih: {has(gt, id) == False{} : Bool}) ->
+    {has(Bool.pick(List<&2, Cli.Item>, g, Cli.Arg{usage, help, attrs} <> gt,
+      gt), id) == False{} : Bool}:
+  match g:
+    case True{}:
+      b_or_ff(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        has(gt, id), ec, ih)
+    case False{}: ih
+
+# A list's globals have no arg of id when the list has none.
+def has_glob(L: List<&2, Cli.Item>, +id: String,
+    +e: {has(L, id) == False{} : Bool}) ->
+    {has(Cli.global_items(L), id) == False{} : Bool}:
+  match L:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      has_glob_pick(Cli.has_global(attrs), usage, help, attrs,
+        Cli.global_items(tail), id,
+        b_orf_l(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+          has(tail, id), e),
+        has_glob(tail, id,
+          b_orf_r(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+            has(tail, id), e)))
+    case Cli.Sub{x0, x1, x2} <> tail: has_glob(tail, id, e)
+    case Cli.Version{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Alias{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Hidden{} <> tail: has_glob(tail, id, e)
+    case Cli.Example{x0, x1} <> tail: has_glob(tail, id, e)
+    case Cli.After{x0} <> tail: has_glob(tail, id, e)
+    case Cli.SubOptional{} <> tail: has_glob(tail, id, e)
+    case Cli.External{} <> tail: has_glob(tail, id, e)
+    case Cli.Exclusive{x0} <> tail: has_glob(tail, id, e)
+    case Cli.NeedOne{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Id{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Required{} <> tail: has_glob(tail, id, e)
+    case Cli.AttrDefault{x0} <> tail: has_glob(tail, id, e)
+    case Cli.AttrEnv{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Global{} <> tail: has_glob(tail, id, e)
+    case Cli.Heading{x0} <> tail: has_glob(tail, id, e)
+    case Cli.As{x0} <> tail: has_glob(tail, id, e)
+    case Cli.OneOf{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Delim{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Hyphen{} <> tail: has_glob(tail, id, e)
+    case Cli.Rest{} <> tail: has_glob(tail, id, e)
+    case Cli.Bare{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Conflicts{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Requires{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Group{x0} <> tail: has_glob(tail, id, e)
+    case Cli.Builtin{} <> tail: has_glob(tail, id, e)
+
+def am1_glob_c(c: Bool, ht: Bool, hg: Bool,
+    p: {Bool.or(Bool.not(c), Bool.not(ht)) == True{} : Bool},
+    m: {ht == False{} : Bool} -> {hg == False{} : Bool}) ->
+    {Bool.or(Bool.not(c), Bool.not(hg)) == True{} : Bool}:
+  match c:
+    case False{}: {==}
+    case True{}:
+      match ht:
+        case True{}:
+          Empty.absurd({Bool.or(Bool.not(True{}), Bool.not(hg)) == True{}
+            : Bool}, false_true_absurd(p))
+        case False{}: b_not_f(hg, m({==}))
+
+def am1_glob_pick(g: Bool, +usage: String, -help: String,
+    +attrs: List<&2, Cli.Item>, +gt: List<&2, Cli.Item>, +id: String,
+    p: {Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)),
+      id)), Bool.not(has(gt, id))) == True{} : Bool},
+    ih: {am1(gt, id) == True{} : Bool}) ->
+    {am1(Bool.pick(List<&2, Cli.Item>, g, Cli.Arg{usage, help, attrs} <> gt,
+      gt), id) == True{} : Bool}:
+  match g:
+    case True{}:
+      and_true(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage,
+        attrs)), id)), Bool.not(has(gt, id))), am1(gt, id), p, ih)
+    case False{}: ih
+
+def am1_glob(L: List<&2, Cli.Item>, +id: String,
+    +a: {am1(L, id) == True{} : Bool}) ->
+    {am1(Cli.global_items(L), id) == True{} : Bool}:
+  match L:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      am1_glob_pick(Cli.has_global(attrs), usage, help, attrs,
+        Cli.global_items(tail), id,
+        am1_glob_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+          has(tail, id), has(Cli.global_items(tail), id),
+          and_left(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage,
+            attrs)), id)), Bool.not(has(tail, id))), am1(tail, id), a),
+          ht => has_glob(tail, id, ht)),
+        am1_glob(tail, id,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
+            usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id), a)))
+    case Cli.Sub{x0, x1, x2} <> tail: am1_glob(tail, id, a)
+    case Cli.Version{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Alias{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Hidden{} <> tail: am1_glob(tail, id, a)
+    case Cli.Example{x0, x1} <> tail: am1_glob(tail, id, a)
+    case Cli.After{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.SubOptional{} <> tail: am1_glob(tail, id, a)
+    case Cli.External{} <> tail: am1_glob(tail, id, a)
+    case Cli.Exclusive{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.NeedOne{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Id{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Required{} <> tail: am1_glob(tail, id, a)
+    case Cli.AttrDefault{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.AttrEnv{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Global{} <> tail: am1_glob(tail, id, a)
+    case Cli.Heading{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.As{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.OneOf{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Delim{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Hyphen{} <> tail: am1_glob(tail, id, a)
+    case Cli.Rest{} <> tail: am1_glob(tail, id, a)
+    case Cli.Bare{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Conflicts{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Requires{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Group{x0} <> tail: am1_glob(tail, id, a)
+    case Cli.Builtin{} <> tail: am1_glob(tail, id, a)
+
+def nonpos_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>,
+    +nx: {nonpos(xs) == True{} : Bool}, ny: {nonpos(ys) == True{} : Bool}) ->
+    {nonpos(List.append(&2, Cli.Item, xs, ys)) == True{} : Bool}:
+  match xs:
+    case Nil{}: ny
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      and_true(Bool.not(Cli.kind_pos(Cli.info_kind(Cli.arg_info(usage,
+        attrs)))), nonpos(List.append(&2, Cli.Item, tail, ys)),
+        and_left(Bool.not(Cli.kind_pos(Cli.info_kind(Cli.arg_info(usage,
+          attrs)))), nonpos(tail), nx),
+        nonpos_app(tail, ys, and_right(Bool.not(Cli.kind_pos(Cli.info_kind(
+          Cli.arg_info(usage, attrs)))), nonpos(tail), nx), ny))
+    case Cli.Sub{x0, x1, x2} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Version{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Alias{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Hidden{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Example{x0, x1} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.After{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.SubOptional{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.External{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Exclusive{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.NeedOne{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Id{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Required{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.AttrDefault{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.AttrEnv{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Global{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Heading{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.As{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.OneOf{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Delim{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Hyphen{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Rest{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Bare{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Conflicts{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Requires{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Group{x0} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.Builtin{} <> tail: nonpos_app(tail, ys, nx, ny)
+
+def acc_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>,
+    +e: Cli.ScanEvent, +id: String, +ax: {acc(xs, e, id) == True{} : Bool},
+    ay: {acc(ys, e, id) == True{} : Bool}) ->
+    {acc(List.append(&2, Cli.Item, xs, ys), e, id) == True{} : Bool}:
+  match xs:
+    case Nil{}: ay
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      and_true(ok_at(Cli.arg_info(usage, attrs), e, id),
+        acc(List.append(&2, Cli.Item, tail, ys), e, id),
+        and_left(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id),
+          ax),
+        acc_app(tail, ys, e, id, and_right(ok_at(Cli.arg_info(usage, attrs),
+          e, id), acc(tail, e, id), ax), ay))
+    case Cli.Sub{x0, x1, x2} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Version{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Alias{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Hidden{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Example{x0, x1} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.After{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.SubOptional{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.External{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Exclusive{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.NeedOne{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Id{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Required{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.AttrDefault{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.AttrEnv{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Global{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Heading{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.As{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.OneOf{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Delim{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Hyphen{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Rest{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Bare{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Conflicts{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Requires{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Group{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.Builtin{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+
+def acc_glob_pick(g: Bool, +usage: String, -help: String,
+    +attrs: List<&2, Cli.Item>, +gt: List<&2, Cli.Item>, +e: Cli.ScanEvent,
+    +id: String, p: {ok_at(Cli.arg_info(usage, attrs), e, id) == True{}
+      : Bool}, ih: {acc(gt, e, id) == True{} : Bool}) ->
+    {acc(Bool.pick(List<&2, Cli.Item>, g, Cli.Arg{usage, help, attrs} <> gt,
+      gt), e, id) == True{} : Bool}:
+  match g:
+    case True{}:
+      and_true(ok_at(Cli.arg_info(usage, attrs), e, id), acc(gt, e, id), p,
+        ih)
+    case False{}: ih
+
+def acc_glob(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    +a: {acc(L, e, id) == True{} : Bool}) ->
+    {acc(Cli.global_items(L), e, id) == True{} : Bool}:
+  match L:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      acc_glob_pick(Cli.has_global(attrs), usage, help, attrs,
+        Cli.global_items(tail), e, id,
+        and_left(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id),
+          a),
+        acc_glob(tail, e, id, and_right(ok_at(Cli.arg_info(usage, attrs), e,
+          id), acc(tail, e, id), a)))
+    case Cli.Sub{x0, x1, x2} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Version{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Alias{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Hidden{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Example{x0, x1} <> tail: acc_glob(tail, e, id, a)
+    case Cli.After{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.SubOptional{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.External{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Exclusive{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.NeedOne{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Id{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Required{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.AttrDefault{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.AttrEnv{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Global{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Heading{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.As{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.OneOf{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Delim{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Hyphen{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Rest{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Bare{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Conflicts{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Requires{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Group{x0} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Builtin{} <> tail: acc_glob(tail, e, id, a)
+
+def ev_app(events: List<&2, Cli.ScanEvent>, +xs: List<&2, Cli.Item>,
+    +ys: List<&2, Cli.Item>, +id: String,
+    +ex: {ev_all(events, xs, id) == True{} : Bool},
+    +ey: {ev_all(events, ys, id) == True{} : Bool}) ->
+    {ev_all(events, List.append(&2, Cli.Item, xs, ys), id) == True{} : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +tail:
+      and_true(acc(List.append(&2, Cli.Item, xs, ys), e, id),
+        ev_all(tail, List.append(&2, Cli.Item, xs, ys), id),
+        acc_app(xs, ys, e, id,
+          and_left(acc(xs, e, id), ev_all(tail, xs, id), ex),
+          and_left(acc(ys, e, id), ev_all(tail, ys, id), ey)),
+        ev_app(tail, xs, ys, id,
+          and_right(acc(xs, e, id), ev_all(tail, xs, id), ex),
+          and_right(acc(ys, e, id), ev_all(tail, ys, id), ey)))
+
+def ev_glob(events: List<&2, Cli.ScanEvent>, +L: List<&2, Cli.Item>,
+    +id: String, +ev: {ev_all(events, L, id) == True{} : Bool}) ->
+    {ev_all(events, Cli.global_items(L), id) == True{} : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +tail:
+      and_true(acc(Cli.global_items(L), e, id),
+        ev_all(tail, Cli.global_items(L), id),
+        acc_glob(L, e, id, and_left(acc(L, e, id), ev_all(tail, L, id), ev)),
+        ev_glob(tail, L, id, and_right(acc(L, e, id), ev_all(tail, L, id),
+          ev)))
+
+def kept_step(b: Bool, +e: Cli.ScanEvent, +rest: List<&2, Cli.ScanEvent>,
+    +L: List<&2, Cli.Item>, +id: String,
+    ok: {Bool.or(Bool.not(b), acc(L, e, id)) == True{} : Bool},
+    ih: {ev_all(rest, L, id) == True{} : Bool}) ->
+    {ev_all(Cli.events_kept(b, e, rest), L, id) == True{} : Bool}:
+  match b:
+    case True{}: and_true(acc(L, e, id), ev_all(rest, L, id), ok, ih)
+    case False{}: ih
+
+# L accepts each event the scan keeps on entering a subcommand.
+def kacc(events: List<&2, Cli.ScanEvent>, +globals: List<&2, Cli.SpecItem>,
+    +L: List<&2, Cli.Item>, +id: String) -> Bool:
+  match events:
+    case Nil{}: True{}
+    case +e <> tail:
+      Bool.and(Bool.or(Bool.not(Cli.event_inherited(Cli.event_id(e),
+        globals)), acc(L, e, id)), kacc(tail, globals, L, id))
+
+def ev_kept(events: List<&2, Cli.ScanEvent>, +globals: List<&2, Cli.SpecItem>,
+    +L: List<&2, Cli.Item>, +id: String,
+    +k: {kacc(events, globals, L, id) == True{} : Bool}) ->
+    {ev_all(Cli.events_inherited(events, globals), L, id) == True{} : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +tail:
+      kept_step(Cli.event_inherited(Cli.event_id(e), globals), e,
+        Cli.events_inherited(tail, globals), L, id,
+        and_left(Bool.or(Bool.not(Cli.event_inherited(Cli.event_id(e),
+          globals)), acc(L, e, id)), kacc(tail, globals, L, id), k),
+        ev_kept(tail, globals, L, id,
+          and_right(Bool.or(Bool.not(Cli.event_inherited(Cli.event_id(e),
+            globals)), acc(L, e, id)), kacc(tail, globals, L, id), k)))
+
+def kacc_all(events: List<&2, Cli.ScanEvent>,
+    +globals: List<&2, Cli.SpecItem>, +L: List<&2, Cli.Item>, +id: String,
+    +ev: {ev_all(events, L, id) == True{} : Bool}) ->
+    {kacc(events, globals, L, id) == True{} : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +tail:
+      and_true(Bool.or(Bool.not(Cli.event_inherited(Cli.event_id(e),
+        globals)), acc(L, e, id)), kacc(tail, globals, L, id),
+        b_or_r(Bool.not(Cli.event_inherited(Cli.event_id(e), globals)),
+          acc(L, e, id), and_left(acc(L, e, id), ev_all(tail, L, id), ev)),
+        kacc_all(tail, globals, L, id,
+          and_right(acc(L, e, id), ev_all(tail, L, id), ev)))
+
+def b_imp(c: Bool, d: Bool,
+    e: {Bool.or(Bool.not(c), d) == True{} : Bool},
+    ec: {c == True{} : Bool}) -> {d == True{} : Bool}:
+  match c:
+    case True{}: e
+    case False{}:
+      Empty.absurd({d == True{} : Bool}, false_true_absurd(ec))
+
+def info_or(m: Maybe<&2, Cli.ArgInfo>, +d: Cli.ArgInfo) -> Cli.ArgInfo:
+  match m:
+    case None{}: d
+    case Some{x}: x
+
+def some_inj(-a: Cli.ArgInfo, -b: Cli.ArgInfo,
+    e: {Some{a} == Some{b} : Maybe<&2, Cli.ArgInfo>}) ->
+    {a == b : Cli.ArgInfo}:
+  Equal.cong(Maybe<&2, Cli.ArgInfo>, Cli.ArgInfo, m => info_or(m, a),
+    Some{a}, Some{b}, e)
+
+def some_none_absurd(-a: Cli.ArgInfo,
+    e: {Some{a} == None{} : Maybe<&2, Cli.ArgInfo>}) -> Empty:
+  true_false_absurd(Equal.cong(Maybe<&2, Cli.ArgInfo>, Bool,
+    m => Maybe.is_some(&2, Cli.ArgInfo, m), Some{a}, None{}, e))
+
+def arg_none_some(-a: Cli.ArgInfo,
+    e: {None{} == Some{a} : Maybe<&2, Cli.ArgInfo>}) -> Empty:
+  false_true_absurd(Equal.cong(Maybe<&2, Cli.ArgInfo>, Bool,
+    m => Maybe.is_some(&2, Cli.ArgInfo, m), None{}, Some{a}, e))
+
+def ref_pick(c: Bool, -info: Cli.ArgInfo, -r: Maybe<&2, Cli.ArgInfo>,
+    -h: Bool, e: {Maybe.is_some(&2, Cli.ArgInfo, r) == h : Bool}) ->
+    {Maybe.is_some(&2, Cli.ArgInfo, Bool.pick(Maybe<&2, Cli.ArgInfo>, c,
+      Some{info}, r)) == Bool.or(c, h) : Bool}:
+  match c:
+    case True{}: {==}
+    case False{}: e
+
+# arg_ref finds an arg exactly when has says L has one.
+def ref_has(L: List<&2, Cli.Item>, +id: String) ->
+    {Maybe.is_some(&2, Cli.ArgInfo, Laws.arg_ref(L, id)) == has(L, id) : Bool}:
+  match L:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      ref_pick(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), Laws.arg_ref(tail, id), has(tail, id),
+        ref_has(tail, id))
+    case Cli.Sub{x0, x1, x2} <> tail: ref_has(tail, id)
+    case Cli.Version{x0} <> tail: ref_has(tail, id)
+    case Cli.Alias{x0} <> tail: ref_has(tail, id)
+    case Cli.Hidden{} <> tail: ref_has(tail, id)
+    case Cli.Example{x0, x1} <> tail: ref_has(tail, id)
+    case Cli.After{x0} <> tail: ref_has(tail, id)
+    case Cli.SubOptional{} <> tail: ref_has(tail, id)
+    case Cli.External{} <> tail: ref_has(tail, id)
+    case Cli.Exclusive{x0} <> tail: ref_has(tail, id)
+    case Cli.NeedOne{x0} <> tail: ref_has(tail, id)
+    case Cli.Id{x0} <> tail: ref_has(tail, id)
+    case Cli.Required{} <> tail: ref_has(tail, id)
+    case Cli.AttrDefault{x0} <> tail: ref_has(tail, id)
+    case Cli.AttrEnv{x0} <> tail: ref_has(tail, id)
+    case Cli.Global{} <> tail: ref_has(tail, id)
+    case Cli.Heading{x0} <> tail: ref_has(tail, id)
+    case Cli.As{x0} <> tail: ref_has(tail, id)
+    case Cli.OneOf{x0} <> tail: ref_has(tail, id)
+    case Cli.Delim{x0} <> tail: ref_has(tail, id)
+    case Cli.Hyphen{} <> tail: ref_has(tail, id)
+    case Cli.Rest{} <> tail: ref_has(tail, id)
+    case Cli.Bare{x0} <> tail: ref_has(tail, id)
+    case Cli.Conflicts{x0} <> tail: ref_has(tail, id)
+    case Cli.Requires{x0} <> tail: ref_has(tail, id)
+    case Cli.Group{x0} <> tail: ref_has(tail, id)
+    case Cli.Builtin{} <> tail: ref_has(tail, id)
+
+def ref_none_m(m: Maybe<&2, Cli.ArgInfo>, -h: Bool,
+    e: {Maybe.is_some(&2, Cli.ArgInfo, m) == h : Bool},
+    eh: {h == False{} : Bool}) ->
+    {m == None{} : Maybe<&2, Cli.ArgInfo>}:
+  match m:
+    case None{}: {==}
+    case Some{x}:
+      Empty.absurd({Some{x} == None{} : Maybe<&2, Cli.ArgInfo>},
+        true_false_absurd(Equal.trans(Bool, True{}, h, False{}, e, eh)))
+
+def ref_none(+L: List<&2, Cli.Item>, +id: String,
+    e: {has(L, id) == False{} : Bool}) ->
+    {Laws.arg_ref(L, id) == None{} : Maybe<&2, Cli.ArgInfo>}:
+  ref_none_m(Laws.arg_ref(L, id), has(L, id), ref_has(L, id), e)
+
+def ref_some_m(m: Maybe<&2, Cli.ArgInfo>, -h: Bool, -r: Cli.ArgInfo,
+    e: {Maybe.is_some(&2, Cli.ArgInfo, m) == h : Bool},
+    er: {m == Some{r} : Maybe<&2, Cli.ArgInfo>}) -> {h == True{} : Bool}:
+  match m:
+    case None{}:
+      Empty.absurd({h == True{} : Bool}, arg_none_some(r, er))
+    case Some{x}: Equal.sym(Bool, True{}, h, e)
+
+def ref_found(+L: List<&2, Cli.Item>, +id: String, -r: Cli.ArgInfo,
+    er: {Laws.arg_ref(L, id) == Some{r} : Maybe<&2, Cli.ArgInfo>}) ->
+    {has(L, id) == True{} : Bool}:
+  ref_some_m(Laws.arg_ref(L, id), has(L, id), r, ref_has(L, id), er)
+
+def ref_app_pick(c: Bool, -info: Cli.ArgInfo,
+    -x: Maybe<&2, Cli.ArgInfo>, -y: Maybe<&2, Cli.ArgInfo>,
+    -xy: Maybe<&2, Cli.ArgInfo>,
+    e: {xy == Maybe.or(&2, Cli.ArgInfo, x, y) : Maybe<&2, Cli.ArgInfo>}) ->
+    {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info}, xy)
+      == Maybe.or(&2, Cli.ArgInfo, Bool.pick(Maybe<&2, Cli.ArgInfo>, c,
+        Some{info}, x), y) : Maybe<&2, Cli.ArgInfo>}:
+  match c:
+    case True{}: {==}
+    case False{}: e
+
+# arg_ref over xs ++ ys answers from xs first, then from ys.
+def ref_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String) ->
+    {Laws.arg_ref(List.append(&2, Cli.Item, xs, ys), id)
+      == Maybe.or(&2, Cli.ArgInfo, Laws.arg_ref(xs, id), Laws.arg_ref(ys, id))
+      : Maybe<&2, Cli.ArgInfo>}:
+  match xs:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      ref_app_pick(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), Laws.arg_ref(tail, id), Laws.arg_ref(ys, id),
+        Laws.arg_ref(List.append(&2, Cli.Item, tail, ys), id), ref_app(tail, ys, id))
+    case Cli.Sub{x0, x1, x2} <> tail: ref_app(tail, ys, id)
+    case Cli.Version{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Alias{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Hidden{} <> tail: ref_app(tail, ys, id)
+    case Cli.Example{x0, x1} <> tail: ref_app(tail, ys, id)
+    case Cli.After{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.SubOptional{} <> tail: ref_app(tail, ys, id)
+    case Cli.External{} <> tail: ref_app(tail, ys, id)
+    case Cli.Exclusive{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.NeedOne{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Id{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Required{} <> tail: ref_app(tail, ys, id)
+    case Cli.AttrDefault{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.AttrEnv{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Global{} <> tail: ref_app(tail, ys, id)
+    case Cli.Heading{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.As{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.OneOf{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Delim{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Hyphen{} <> tail: ref_app(tail, ys, id)
+    case Cli.Rest{} <> tail: ref_app(tail, ys, id)
+    case Cli.Bare{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Conflicts{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Requires{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Group{x0} <> tail: ref_app(tail, ys, id)
+    case Cli.Builtin{} <> tail: ref_app(tail, ys, id)
+
+def acc_ref_pick(c: Bool, +info: Cli.ArgInfo, -rest: Maybe<&2, Cli.ArgInfo>,
+    +e: Cli.ScanEvent, +id: String, -r: Cli.ArgInfo,
+    ec: {String.eq(Cli.info_id(info), id) == c : Bool},
+    ok: {ok_at(info, e, id) == True{} : Bool},
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info}, rest) == Some{r}
+      : Maybe<&2, Cli.ArgInfo>},
+    ih: {rest == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      {ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id) == True{} : Bool}) ->
+    {ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id) == True{} : Bool}:
+  match c:
+    case True{}:
+      %some_inj(info, r, er) : {ev_ok(e, Cli.info_kind(_),
+        Cli.info_attrs(_), id) == True{} : Bool}
+      b_imp(String.eq(Cli.info_id(info), id), ev_ok(e, Cli.info_kind(info),
+        Cli.info_attrs(info), id), ok, ec)
+    case False{}: ih(er)
+
+# The arg arg_ref finds in L accepts each event L accepts.
+def acc_ref(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    -r: Cli.ArgInfo, +a: {acc(L, e, id) == True{} : Bool},
+    er: {Laws.arg_ref(L, id) == Some{r} : Maybe<&2, Cli.ArgInfo>}) ->
+    {ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id) == True{} : Bool}:
+  match L:
+    case Nil{}:
+      Empty.absurd({ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id)
+        == True{} : Bool}, arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      acc_ref_pick(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), Laws.arg_ref(tail, id), e, id, r, {==},
+        and_left(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id),
+          a), er,
+        et => acc_ref(tail, e, id, r, and_right(ok_at(Cli.arg_info(usage,
+          attrs), e, id), acc(tail, e, id), a), et))
+    case Cli.Sub{x0, x1, x2} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Version{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Alias{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Hidden{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Example{x0, x1} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.After{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.SubOptional{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.External{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Exclusive{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.NeedOne{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Id{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Required{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.AttrDefault{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.AttrEnv{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Global{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Heading{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.As{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.OneOf{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Delim{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Hyphen{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Rest{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Bare{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Conflicts{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Requires{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Group{x0} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.Builtin{} <> tail: acc_ref(tail, e, id, r, a, er)
+
+def ev_ref(events: List<&2, Cli.ScanEvent>, +L: List<&2, Cli.Item>,
+    +id: String, +r: Cli.ArgInfo,
+    +ev: {ev_all(events, L, id) == True{} : Bool},
+    +er: {Laws.arg_ref(L, id) == Some{r} : Maybe<&2, Cli.ArgInfo>}) ->
+    {evs_ok(events, Cli.info_kind(r), Cli.info_attrs(r), id) == True{}
+      : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +tail:
+      and_true(ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id),
+        evs_ok(tail, Cli.info_kind(r), Cli.info_attrs(r), id),
+        acc_ref(L, e, id, r, and_left(acc(L, e, id), ev_all(tail, L, id), ev),
+          er),
+        ev_ref(tail, L, id, r, and_right(acc(L, e, id), ev_all(tail, L, id),
+          ev), er))
+
+def ev_rev_go(xs: List<&2, Cli.ScanEvent>, +acc_l: List<&2, Cli.ScanEvent>,
+    +L: List<&2, Cli.Item>, +id: String,
+    +ex: {ev_all(xs, L, id) == True{} : Bool},
+    ea: {ev_all(acc_l, L, id) == True{} : Bool}) ->
+    {ev_all(List.reverse.go(&2, Cli.ScanEvent, xs, acc_l), L, id) == True{}
+      : Bool}:
+  match xs:
+    case Nil{}: ea
+    case +h <> +t:
+      ev_rev_go(t, h <> acc_l, L, id,
+        and_right(acc(L, h, id), ev_all(t, L, id), ex),
+        and_true(acc(L, h, id), ev_all(acc_l, L, id),
+          and_left(acc(L, h, id), ev_all(t, L, id), ex), ea))
+
+def ev_rev(xs: List<&2, Cli.ScanEvent>, +L: List<&2, Cli.Item>, +id: String,
+    ex: {ev_all(xs, L, id) == True{} : Bool}) ->
+    {ev_all(List.reverse(&2, Cli.ScanEvent, xs), L, id) == True{} : Bool}:
+  ev_rev_go(xs, Nil{}, L, id, ex, {==})
+
+# P21 lint tree: what lint checks of a scope's items that the scan reads, as
+# one Bool (qt), which no def is barred from using twice. sh: whether seen
+# holds an arg id x.
+
+def sh(seen: List<&2, Cli.Seen>, +x: String) -> Bool:
+  match seen:
+    case Nil{}: False{}
+    case Cli.SeenArg{old, s, l} <> tail:
+      Bool.or(String.eq(x, old), sh(tail, x))
+    case Cli.SeenSub{n} <> tail: sh(tail, x)
+    case Cli.SeenArgAlias{n} <> tail: sh(tail, x)
+    case Cli.SeenSubAlias{n} <> tail: sh(tail, x)
+
+def argq(parsed: Cli.Usage, +attrs: List<&2, Cli.Item>,
+    +seen: List<&2, Cli.Seen>) -> Bool:
+  match parsed:
+    case Cli.Invalid{col}: False{}
+    case Cli.Parsed{d, s, l, k}:
+      Bool.and(Bool.not(sh(seen, Cli.use_id(Cli.find_id(attrs), d))),
+        Bool.or(Bool.not(Cli.has_global(attrs)), Bool.not(Cli.kind_pos(k))))
+
+def qt(items: List<&2, Cli.Item>, +seen: List<&2, Cli.Seen>,
+    +inh: List<&2, Cli.Seen>) -> Bool:
+  match items:
+    case Nil{}: True{}
+    case Cli.Arg{+usage, help, +attrs} <> tail:
+      Bool.and(argq(Cli.parse_usage(usage), attrs, seen),
+        qt(tail, List.append(&2, Cli.Seen,
+          Cli.arg_entries(Cli.parse_usage(usage), attrs), seen), inh))
+    case Cli.Sub{+name, about, +children} <> tail:
+      Bool.and(Bool.not(Cli.sub_collision(seen, name)),
+        Bool.and(qt(children, inh, List.append(&2, Cli.Seen,
+          Cli.global_entries(Cli.lint_items(children)), inh)),
+          qt(tail, List.append(&2, Cli.Seen,
+            Cli.sub_alias_entries(Cli.find_aliases(children)),
+            Cli.SeenSub{name} <> seen), inh)))
+    case head <> tail: qt(tail, seen, inh)
+
+def nt_f(c: Bool, e: {Bool.not(c) == True{} : Bool}) -> {c == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, false_true_absurd(e))
+    case False{}: {==}
+
+def b_nand2(c: Bool, d: Bool,
+    e: {Bool.or(Bool.not(c), Bool.not(d)) == True{} : Bool},
+    ed: {d == True{} : Bool}) -> {c == False{} : Bool}:
+  match c:
+    case True{}:
+      match d:
+        case True{}:
+          Empty.absurd({True{} == False{} : Bool}, false_true_absurd(e))
+        case False{}:
+          Empty.absurd({True{} == False{} : Bool}, false_true_absurd(ed))
+    case False{}: {==}
+
+def b_weak(h: Bool, +a: Bool, +b: Bool,
+    e: {Bool.or(Bool.not(h), Bool.not(Bool.or(a, b))) == True{} : Bool}) ->
+    {Bool.or(Bool.not(h), Bool.not(b)) == True{} : Bool}:
+  match h:
+    case True{}: b_not_f(b, b_orf_r(a, b, nt_f(Bool.or(a, b), e)))
+    case False{}: {==}
+
+def b_notnot(c: Bool) -> {Bool.or(Bool.not(c), c) == True{} : Bool}:
+  match c:
+    case True{}: {==}
+    case False{}: {==}
+
+def b_or_mid(a: Bool, c: Bool, -b: Bool,
+    e: {Bool.or(Bool.not(a), b) == True{} : Bool}) ->
+    {Bool.or(Bool.not(a), Bool.or(c, b)) == True{} : Bool}:
+  match a:
+    case True{}: b_or_r(c, b, e)
+    case False{}: {==}
+
+def eq_flip(+a: String, +b: String, e: {String.eq(a, b) == True{} : Bool}) ->
+    {String.eq(b, a) == True{} : Bool}:
+  %eq_reflect(a, b, e) : {String.eq(_, a) == True{} : Bool}
+  string_eq_refl(a)
+
+def eq_flip_c(c: Bool, +a: String, +b: String,
+    ec: {String.eq(b, a) == c : Bool},
+    e: {String.eq(a, b) == False{} : Bool}) -> {c == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool},
+        true_false_absurd(Equal.trans(Bool, True{}, String.eq(a, b), False{},
+          Equal.sym(Bool, String.eq(a, b), True{}, eq_flip(b, a, ec)), e)))
+    case False{}: {==}
+
+def eq_flip_f(+a: String, +b: String, e: {String.eq(a, b) == False{} : Bool})
+    -> {String.eq(b, a) == False{} : Bool}:
+  eq_flip_c(String.eq(b, a), a, b, {==}, e)
+
+def text_false(+a: String, +b: String,
+    e: {Cli.same_text(a, b) == False{} : Bool}) ->
+    {String.eq(a, b) == False{} : Bool}:
+  Equal.trans(Bool, String.eq(a, b), Cli.same_text(a, b), False{},
+    Equal.sym(Bool, Cli.same_text(a, b), String.eq(a, b), Laws.p18_text(a, b)),
+    e)
+
+def sh_tr(-S: List<&2, Cli.Seen>, +a: String, +b: String,
+    e: {String.eq(a, b) == True{} : Bool},
+    n: {sh(S, a) == False{} : Bool}) -> {sh(S, b) == False{} : Bool}:
+  %eq_reflect(a, b, e) : {sh(S, _) == False{} : Bool}
+  n
+
+# What lint's arg and subcommand problems being empty give qt.
+
+def help_dup(h: Bool, c: Bool, -at: String, -name: String,
+    e: {Bool.pick(List<&2, Cli.Problem>, h, [Cli.Reserved{at, name}],
+      Cli.when_problem(c, Cli.Dup{at, name})) == Nil{}
+      : List<&2, Cli.Problem>}) -> {Bool.not(c) == True{} : Bool}:
+  match h:
+    case True{}:
+      Empty.absurd({Bool.not(c) == True{} : Bool},
+        plist_cons_absurd(Cli.Reserved{at, name}, Nil{}, e))
+    case False{}:
+      match c:
+        case True{}:
+          Empty.absurd({Bool.not(True{}) == True{} : Bool},
+            plist_cons_absurd(Cli.Dup{at, name}, Nil{}, e))
+        case False{}: {==}
+
+def rd_pick(r: Bool, m: Maybe<&2, String>, -at: String, -long: String,
+    e: {Bool.pick(List<&2, Cli.Problem>, r, [Cli.Reserved{at, long}],
+      Cli.maybe_dup(m, at)) == Nil{} : List<&2, Cli.Problem>}) ->
+    {m == None{} : Maybe<&2, String>}:
+  match r:
+    case True{}:
+      Empty.absurd({m == None{} : Maybe<&2, String>},
+        plist_cons_absurd(Cli.Reserved{at, long}, Nil{}, e))
+    case False{}:
+      match m:
+        case None{}: {==}
+        case Some{x}:
+          Empty.absurd({Some{x} == None{} : Maybe<&2, String>},
+            plist_cons_absurd(Cli.Dup{at, x}, Nil{}, e))
+
+def mor_l(m: Maybe<&2, String>, -n: Maybe<&2, String>,
+    e: {Maybe.or(&2, String, m, n) == None{} : Maybe<&2, String>}) ->
+    {m == None{} : Maybe<&2, String>}:
+  match m:
+    case None{}: {==}
+    case Some{x}:
+      Empty.absurd({Some{x} == None{} : Maybe<&2, String>},
+        why_some_absurd(x, e))
+
+def mor_r(m: Maybe<&2, String>, -n: Maybe<&2, String>,
+    e: {Maybe.or(&2, String, m, n) == None{} : Maybe<&2, String>}) ->
+    {n == None{} : Maybe<&2, String>}:
+  match m:
+    case None{}: e
+    case Some{x}:
+      Empty.absurd({n == None{} : Maybe<&2, String>}, why_some_absurd(x, e))
+
+def here_none(a: Bool, b: Bool, c: Bool, -short: String, -long: String,
+    -id: String,
+    e: {Bool.pick(Maybe<&2, String>, a, Some{short},
+      Bool.pick(Maybe<&2, String>, b, Some{long},
+        Bool.pick(Maybe<&2, String>, c, Some{id}, None{}))) == None{}
+      : Maybe<&2, String>}) -> {c == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({c == False{} : Bool}, why_some_absurd(short, e))
+    case False{}:
+      match b:
+        case True{}:
+          Empty.absurd({c == False{} : Bool}, why_some_absurd(long, e))
+        case False{}:
+          match c:
+            case True{}:
+              Empty.absurd({True{} == False{} : Bool}, why_some_absurd(id, e))
+            case False{}: {==}
+
+def alias_rest(a: Bool, b: Bool, -short: String, -long: String,
+    -m: Maybe<&2, String>,
+    e: {Bool.pick(Maybe<&2, String>, a, Some{short},
+      Bool.pick(Maybe<&2, String>, b, Some{long}, m)) == None{}
+      : Maybe<&2, String>}) -> {m == None{} : Maybe<&2, String>}:
+  match a:
+    case True{}:
+      Empty.absurd({m == None{} : Maybe<&2, String>},
+        why_some_absurd(short, e))
+    case False{}:
+      match b:
+        case True{}:
+          Empty.absurd({m == None{} : Maybe<&2, String>},
+            why_some_absurd(long, e))
+        case False{}: e
+
+# No collision with seen: seen holds no arg of that id.
+def coll_sh(seen: List<&2, Cli.Seen>, +id: String, +short: String,
+    +long: String,
+    +e: {Cli.arg_collision(seen, id, short, long) == None{}
+      : Maybe<&2, String>}) -> {sh(seen, id) == False{} : Bool}:
+  match seen:
+    case Nil{}: {==}
+    case Cli.SeenArg{+oi, +os, +ol} <> +tail:
+      b_or_ff(String.eq(id, oi), sh(tail, id),
+        text_false(id, oi, here_none(Cli.same_nonempty(short, os),
+          Cli.same_nonempty(long, ol), Cli.same_text(id, oi), short, long, id,
+          mor_l(Bool.pick(Maybe<&2, String>, Cli.same_nonempty(short, os),
+            Some{short}, Bool.pick(Maybe<&2, String>,
+              Cli.same_nonempty(long, ol), Some{long},
+              Bool.pick(Maybe<&2, String>, Cli.same_text(id, oi), Some{id},
+                None{}))), Cli.arg_collision(tail, id, short, long), e))),
+        coll_sh(tail, id, short, long,
+          mor_r(Bool.pick(Maybe<&2, String>, Cli.same_nonempty(short, os),
+            Some{short}, Bool.pick(Maybe<&2, String>,
+              Cli.same_nonempty(long, ol), Some{long},
+              Bool.pick(Maybe<&2, String>, Cli.same_text(id, oi), Some{id},
+                None{}))), Cli.arg_collision(tail, id, short, long), e)))
+    case Cli.SeenSub{n} <> tail: coll_sh(tail, id, short, long, e)
+    case Cli.SeenArgAlias{+old} <> tail:
+      coll_sh(tail, id, short, long,
+        alias_rest(Cli.same_nonempty(short, old), Cli.same_nonempty(long, old),
+          short, long, Cli.arg_collision(tail, id, short, long), e))
+    case Cli.SeenSubAlias{n} <> tail: coll_sh(tail, id, short, long, e)
+
+def glob_hit(c: Bool, -at: String, -rest: List<&2, Cli.Problem>,
+    e: {List.append(&2, Cli.Problem,
+      Cli.maybe_misplaced(Cli.bad_attr(c, "global"), at), rest) == Nil{}
+      : List<&2, Cli.Problem>}) -> {Bool.not(c) == True{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({Bool.not(True{}) == True{} : Bool},
+        plist_cons_absurd(Cli.Misplaced{at, "global"}, rest, e))
+    case False{}: {==}
+
+# A global arg isn't positional, as placement_issues checks.
+def glob_place(attrs: List<&2, Cli.Item>, +kind: Cli.UsageKind, +at: String,
+    +e: {Cli.placement_issues(attrs, kind, at) == Nil{}
+      : List<&2, Cli.Problem>}) ->
+    {Bool.or(Bool.not(Cli.has_global(attrs)), Bool.not(Cli.kind_pos(kind)))
+      == True{} : Bool}:
+  match attrs:
+    case Nil{}: {==}
+    case Cli.Global{} <> +tail:
+      glob_hit(Cli.kind_pos(kind), at, Cli.placement_issues(tail, kind, at), e)
+    case Cli.Arg{x0, x1, x2} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Arg{x0, x1, x2}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Sub{x0, x1, x2} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Sub{x0, x1, x2}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Version{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Version{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Alias{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Alias{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Hidden{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Hidden{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Example{x0, x1} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Example{x0, x1}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.After{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.After{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.SubOptional{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.SubOptional{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.External{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.External{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Exclusive{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Exclusive{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.NeedOne{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.NeedOne{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Id{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Id{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Required{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Required{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.AttrDefault{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.AttrDefault{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.AttrEnv{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.AttrEnv{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Heading{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Heading{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.As{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.As{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.OneOf{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.OneOf{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Delim{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Delim{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Hyphen{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Hyphen{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Rest{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Rest{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Bare{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Bare{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Conflicts{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Conflicts{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Requires{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Requires{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Group{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Group{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.Builtin{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Builtin{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+
+def argq_take(+kind: Cli.UsageKind, +id: String, +short: String,
+    +long: String, +usage: String, +help: String, +attrs: List<&2, Cli.Item>,
+    +remaining: List<&2, Cli.LintItem>, +at: String, +ids: List<&2, String>,
+    +seen: List<&2, Cli.Seen>, +optional: Bool, +variadic: Bool,
+    +version: Bool,
+    parts: AllNil(issue_list(kind, id, short, long, usage, help, attrs,
+      remaining, at, ids, seen, optional, variadic, version))) ->
+    {Bool.and(Bool.not(sh(seen, id)), Bool.or(Bool.not(Cli.has_global(attrs)),
+      Bool.not(Cli.kind_pos(kind)))) == True{} : Bool}:
+  (e1, r1) = parts
+  (e2, r2) = r1
+  and_true(Bool.not(sh(seen, id)),
+    Bool.or(Bool.not(Cli.has_global(attrs)), Bool.not(Cli.kind_pos(kind))),
+    b_not_f(sh(seen, id), coll_sh(seen, id, short, long,
+      rd_pick(Bool.or(String.eq(long, "--help"), Bool.and(version,
+        String.eq(long, "--version"))), Cli.arg_collision(seen, id, short,
+        long), at, long, e1))),
+    glob_place(attrs, kind, at, app_nil_left(Cli.placement_issues(attrs,
+      kind, at), Cli.duplicate_type_issues(Cli.value_type_names(attrs), at),
+      e2)))
+
+def argq_of(parsed: Cli.Usage, +usage: String, +help: String,
+    +attrs: List<&2, Cli.Item>, +remaining: List<&2, Cli.LintItem>,
+    +at: String, +ids: List<&2, String>, +seen: List<&2, Cli.Seen>,
+    +optional: Bool, +variadic: Bool, +version: Bool,
+    e: {Cli.arg_problems(parsed, usage, help, attrs, remaining, at, ids, seen,
+      optional, variadic, version) == Nil{} : List<&2, Cli.Problem>}) ->
+    {argq(parsed, attrs, seen) == True{} : Bool}:
+  match parsed:
+    case Cli.Invalid{+col}:
+      Empty.absurd({argq(Cli.Invalid{col}, attrs, seen) == True{} : Bool},
+        plist_cons_absurd(Cli.BadUsage{at, usage, col},
+          Cli.when_problem(Bool.and(String.is_empty(help),
+            Bool.not(Cli.has_hidden(attrs))), Cli.NoHelp{at, usage}), e))
+    case Cli.Parsed{+derived, +short, +long, +kind}:
+      argq_take(kind, Cli.use_id(Cli.find_id(attrs), derived), short, long,
+        usage, help, attrs, remaining, at, ids, seen, optional, variadic,
+        version, concat_all(issue_list(kind, Cli.use_id(Cli.find_id(attrs),
+        derived), short, long, usage, help, attrs, remaining, at, ids, seen,
+        optional, variadic, version), app_nil_left(Cli.arg_issues(kind,
+          Cli.use_id(Cli.find_id(attrs), derived), short, long, usage, help,
+          attrs, remaining, at, ids, seen, optional, variadic, version),
+          Cli.arg_alias_issues(Cli.find_aliases(attrs), at,
+            Cli.SeenArg{Cli.use_id(Cli.find_id(attrs), derived), short, long}
+              <> seen, version), e)))
+
+def qsub(+name: String, +about: String, +children: List<&2, Cli.Item>,
+    +tail: List<&2, Cli.Item>, +at: String, +ids: List<&2, String>,
+    +seen: List<&2, Cli.Seen>, +inherited: List<&2, Cli.Seen>,
+    +optional: Bool, +variadic: Bool, +version: Bool, +root: Bool,
+    parts: AllNil(sub_list(name, about, children, Cli.lint_items(children),
+      Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic,
+      version, root)),
+    ih_c: {Cli.lint(Cli.lint_items(children), String.concat([at, " ", name]),
+      Cli.scope_ids(Cli.lint_items(children)), inherited,
+      List.append(&2, Cli.Seen, Cli.global_entries(Cli.lint_items(children)),
+        inherited), False{}, False{}, version, False{}) == Nil{}
+      : List<&2, Cli.Problem>} ->
+      {qt(children, inherited, List.append(&2, Cli.Seen,
+        Cli.global_entries(Cli.lint_items(children)), inherited)) == True{}
+        : Bool},
+    ih_t: {Cli.lint(Cli.lint_items(tail), at, ids, List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(Cli.find_aliases(children)),
+      Cli.SeenSub{name} <> seen), inherited, optional, variadic, version, root)
+      == Nil{} : List<&2, Cli.Problem>} ->
+      {qt(tail, List.append(&2, Cli.Seen,
+        Cli.sub_alias_entries(Cli.find_aliases(children)),
+        Cli.SeenSub{name} <> seen), inherited) == True{} : Bool}) ->
+    {qt(Cli.Sub{name, about, children} <> tail, seen, inherited) == True{}
+      : Bool}:
+  (e1, r1) = parts
+  (e2, r2) = r1
+  (e3, r3) = r2
+  (e4, r4) = r3
+  (e5, r5) = r4
+  and_true(Bool.not(Cli.sub_collision(seen, name)),
+    Bool.and(qt(children, inherited, List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(children)), inherited)),
+      qt(tail, List.append(&2, Cli.Seen,
+        Cli.sub_alias_entries(Cli.find_aliases(children)),
+        Cli.SeenSub{name} <> seen), inherited)),
+    help_dup(String.eq(name, "help"), Cli.sub_collision(seen, name), at, name,
+      app_nil_right(Cli.when_problem(Bool.not(Cli.valid_command_name(name)),
+        Cli.BadName{at, name}), Bool.pick(List<&2, Cli.Problem>,
+        String.eq(name, "help"), [Cli.Reserved{at, name}],
+        Cli.when_problem(Cli.sub_collision(seen, name), Cli.Dup{at, name})),
+        e1)),
+    and_true(qt(children, inherited, List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(children)), inherited)),
+      qt(tail, List.append(&2, Cli.Seen,
+        Cli.sub_alias_entries(Cli.find_aliases(children)),
+        Cli.SeenSub{name} <> seen), inherited), ih_c(e4), ih_t(e5)))
+
+# lint finding nothing in items: the tree qt holds of them.
+def qtree(items: List<&2, Cli.Item>, +at: String, +ids: List<&2, String>,
+    +seen: List<&2, Cli.Seen>, +inherited: List<&2, Cli.Seen>,
+    +optional: Bool, +variadic: Bool, +version: Bool, +root: Bool,
+    +e: {Cli.lint(Cli.lint_items(items), at, ids, seen, inherited, optional,
+      variadic, version, root) == Nil{} : List<&2, Cli.Problem>}) ->
+    {qt(items, seen, inherited) == True{} : Bool}:
+  match items:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, +help, +attrs} <> +tail:
+      and_true(argq(Cli.parse_usage(usage), attrs, seen),
+        qt(tail, List.append(&2, Cli.Seen,
+          Cli.arg_entries(Cli.parse_usage(usage), attrs), seen), inherited),
+        argq_of(Cli.parse_usage(usage), usage, help, attrs,
+          Cli.lint_items(tail), at, ids, seen, optional, variadic, version,
+          app_nil_left(Cli.arg_problems(Cli.parse_usage(usage), usage, help, attrs, Cli.lint_items(tail), at, ids, seen, optional, variadic, version), Cli.lint(Cli.lint_items(tail), at, ids, List.append(&2, Cli.Seen, Cli.arg_entries(Cli.parse_usage(usage), attrs), seen), inherited, Bool.or(optional, Cli.usage_kind(~Cli.kind_optional_pos, Cli.parse_usage(usage))), Bool.or(variadic, Cli.usage_kind(~Cli.kind_variadic_pos, Cli.parse_usage(usage))), version, root), e)),
+        qtree(tail, at, ids, List.append(&2, Cli.Seen, Cli.arg_entries(Cli.parse_usage(usage), attrs), seen), inherited, Bool.or(optional, Cli.usage_kind(~Cli.kind_optional_pos, Cli.parse_usage(usage))), Bool.or(variadic, Cli.usage_kind(~Cli.kind_variadic_pos, Cli.parse_usage(usage))), version, root, app_nil_right(Cli.arg_problems(Cli.parse_usage(usage), usage, help, attrs, Cli.lint_items(tail), at, ids, seen, optional, variadic, version), Cli.lint(Cli.lint_items(tail), at, ids, List.append(&2, Cli.Seen, Cli.arg_entries(Cli.parse_usage(usage), attrs), seen), inherited, Bool.or(optional, Cli.usage_kind(~Cli.kind_optional_pos, Cli.parse_usage(usage))), Bool.or(variadic, Cli.usage_kind(~Cli.kind_variadic_pos, Cli.parse_usage(usage))), version, root), e)))
+    case Cli.Sub{+name, +about, +children} <> +tail:
+      qsub(name, about, children, tail, at, ids, seen, inherited, optional, variadic, version, root,
+        concat_all(sub_list(name, about, children, Cli.lint_items(children),
+          Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e),
+        ec => qtree(children, String.concat([at, " ", name]), Cli.scope_ids(Cli.lint_items(children)), inherited, List.append(&2, Cli.Seen, Cli.global_entries(Cli.lint_items(children)), inherited), False{}, False{}, version, False{}, ec),
+        et => qtree(tail, at, ids, List.append(&2, Cli.Seen, Cli.sub_alias_entries(Cli.find_aliases(children)), Cli.SeenSub{name} <> seen), inherited, optional, variadic, version, root, et))
+    case Cli.Version{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Version{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Alias{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Alias{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Hidden{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Hidden{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Example{x0, x1} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Example{x0, x1}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.After{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.After{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.SubOptional{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.SubOptional{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.External{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.External{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Exclusive{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Exclusive{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.NeedOne{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.NeedOne{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Id{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Id{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Required{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Required{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.AttrDefault{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.AttrDefault{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.AttrEnv{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.AttrEnv{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Global{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Global{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Heading{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Heading{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.As{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.As{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.OneOf{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.OneOf{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Delim{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Delim{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Hyphen{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Hyphen{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Rest{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Rest{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Bare{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Bare{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Conflicts{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Conflicts{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Requires{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Requires{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Group{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Group{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.Builtin{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Builtin{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+
+# What qt gives: at most one arg of id in items, none if seen holds one
+# (qam); seen's globals cover the items' global args (gcov); no global is
+# positional (gnonpos); and the subcommand a query finds is the one its own
+# name finds, with its children's tree (canon).
+
+def sh_sub(xs: List<&2, String>, +n: String, +S: List<&2, Cli.Seen>,
+    +x: String) ->
+    {sh(List.append(&2, Cli.Seen, Cli.sub_alias_entries(xs),
+      Cli.SeenSub{n} <> S), x) == sh(S, x) : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case a <> t: sh_sub(t, n, S, x)
+
+def sh_alias(xs: List<&2, String>, +S: List<&2, Cli.Seen>, +x: String) ->
+    {sh(List.append(&2, Cli.Seen, Cli.arg_alias_entries(xs), S), x)
+      == sh(S, x) : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case a <> t: sh_alias(t, S, x)
+
+def sh_up(xs: List<&2, Cli.Seen>, +ys: List<&2, Cli.Seen>, +x: String) ->
+    {Bool.or(Bool.not(sh(ys, x)), sh(List.append(&2, Cli.Seen, xs, ys), x))
+      == True{} : Bool}:
+  match xs:
+    case Nil{}: b_notnot(sh(ys, x))
+    case Cli.SeenArg{+old, s, l} <> +tail:
+      b_or_mid(sh(ys, x), String.eq(x, old),
+        sh(List.append(&2, Cli.Seen, tail, ys), x), sh_up(tail, ys, x))
+    case Cli.SeenSub{n} <> tail: sh_up(tail, ys, x)
+    case Cli.SeenArgAlias{n} <> tail: sh_up(tail, ys, x)
+    case Cli.SeenSubAlias{n} <> tail: sh_up(tail, ys, x)
+
+def qam_w(+t: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +al: List<&2, Cli.Seen>, +X: String, +id: String,
+    sal: {sh(List.append(&2, Cli.Seen, al, S), id) == sh(S, id) : Bool},
+    e: {Bool.or(Bool.not(has(t, id)), Bool.not(Bool.or(String.eq(id, X),
+      sh(List.append(&2, Cli.Seen, al, S), id)))) == True{} : Bool}) ->
+    {Bool.or(Bool.not(has(t, id)), Bool.not(sh(S, id))) == True{} : Bool}:
+  %sal : {Bool.or(Bool.not(has(t, id)), Bool.not(_)) == True{} : Bool}
+  b_weak(has(t, id), String.eq(id, X),
+    sh(List.append(&2, Cli.Seen, al, S), id), e)
+
+def qam_c(c: Bool, +X: String, +s: String, +l: String,
+    +t: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>, +al: List<&2, Cli.Seen>,
+    +id: String, +ec: {String.eq(X, id) == c : Bool},
+    ns: {sh(S, X) == False{} : Bool},
+    +ih: {Bool.and(am1(t, id), Bool.or(Bool.not(has(t, id)),
+      Bool.not(sh(Cli.SeenArg{X, s, l} <> List.append(&2, Cli.Seen, al, S),
+        id)))) == True{} : Bool},
+    sal: {sh(List.append(&2, Cli.Seen, al, S), id) == sh(S, id) : Bool}) ->
+    {Bool.and(Bool.and(Bool.or(Bool.not(c), Bool.not(has(t, id))),
+      am1(t, id)), Bool.or(Bool.not(Bool.or(c, has(t, id))),
+      Bool.not(sh(S, id)))) == True{} : Bool}:
+  match c:
+    case True{}:
+      and_true(Bool.and(Bool.not(has(t, id)), am1(t, id)),
+        Bool.not(sh(S, id)),
+        and_true(Bool.not(has(t, id)), am1(t, id),
+          b_not_f(has(t, id), b_nand2(has(t, id),
+            sh(Cli.SeenArg{X, s, l} <> List.append(&2, Cli.Seen, al, S), id),
+            and_right(am1(t, id), Bool.or(Bool.not(has(t, id)),
+              Bool.not(sh(Cli.SeenArg{X, s, l} <> List.append(&2, Cli.Seen,
+                al, S), id))), ih),
+            b_or_l(String.eq(id, X), sh(List.append(&2, Cli.Seen, al, S), id),
+              eq_flip(X, id, ec)))),
+          and_left(am1(t, id), Bool.or(Bool.not(has(t, id)),
+            Bool.not(sh(Cli.SeenArg{X, s, l} <> List.append(&2, Cli.Seen, al,
+              S), id))), ih)),
+        b_not_f(sh(S, id), sh_tr(S, X, id, ec, ns)))
+    case False{}:
+      and_true(am1(t, id), Bool.or(Bool.not(has(t, id)), Bool.not(sh(S, id))),
+        and_left(am1(t, id), Bool.or(Bool.not(has(t, id)),
+          Bool.not(sh(Cli.SeenArg{X, s, l} <> List.append(&2, Cli.Seen, al,
+            S), id))), ih),
+        qam_w(t, S, al, X, id, sal, and_right(am1(t, id),
+          Bool.or(Bool.not(has(t, id)), Bool.not(sh(Cli.SeenArg{X, s, l}
+            <> List.append(&2, Cli.Seen, al, S), id))), ih)))
+
+def qam_arg(parsed: Cli.Usage, +usage: String, -help: String,
+    +attrs: List<&2, Cli.Item>, +t: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    +a: {argq(parsed, attrs, S) == True{} : Bool},
+    ih: {Bool.and(am1(t, id), Bool.or(Bool.not(has(t, id)),
+      Bool.not(sh(List.append(&2, Cli.Seen, Cli.arg_entries(parsed, attrs),
+        S), id)))) == True{} : Bool}) ->
+    {Bool.and(Bool.and(Bool.or(Bool.not(String.eq(Cli.info_id(
+      Cli.arg_info_parsed(parsed, usage, attrs)), id)), Bool.not(has(t, id))),
+      am1(t, id)), Bool.or(Bool.not(Bool.or(String.eq(Cli.info_id(
+        Cli.arg_info_parsed(parsed, usage, attrs)), id), has(t, id))),
+      Bool.not(sh(S, id)))) == True{} : Bool}:
+  match parsed:
+    case Cli.Invalid{col}:
+      Empty.absurd({Bool.and(Bool.and(Bool.or(Bool.not(String.eq("", id)),
+        Bool.not(has(t, id))), am1(t, id)), Bool.or(Bool.not(Bool.or(
+        String.eq("", id), has(t, id))), Bool.not(sh(S, id)))) == True{}
+        : Bool}, false_true_absurd(a))
+    case Cli.Parsed{+derived, +s, +l, k}:
+      qam_c(String.eq(Cli.use_id(Cli.find_id(attrs), derived), id),
+        Cli.use_id(Cli.find_id(attrs), derived), s, l, t, S,
+        Cli.arg_alias_entries(Cli.find_aliases(attrs)), id, {==},
+        nt_f(sh(S, Cli.use_id(Cli.find_id(attrs), derived)),
+          and_left(Bool.not(sh(S, Cli.use_id(Cli.find_id(attrs), derived))),
+            Bool.or(Bool.not(Cli.has_global(attrs)), Bool.not(Cli.kind_pos(k))),
+            a)), ih, sh_alias(Cli.find_aliases(attrs), S, id))
+
+def qam_sub(+t: List<&2, Cli.Item>, +al: List<&2, String>, +n: String,
+    +S: List<&2, Cli.Seen>, +id: String,
+    ih: {Bool.and(am1(t, id), Bool.or(Bool.not(has(t, id)),
+      Bool.not(sh(List.append(&2, Cli.Seen, Cli.sub_alias_entries(al),
+        Cli.SeenSub{n} <> S), id)))) == True{} : Bool}) ->
+    {Bool.and(am1(t, id), Bool.or(Bool.not(has(t, id)), Bool.not(sh(S, id))))
+      == True{} : Bool}:
+  %sh_sub(al, n, S, id) : {Bool.and(am1(t, id), Bool.or(Bool.not(has(t, id)),
+    Bool.not(_))) == True{} : Bool}
+  ih
+
+def qam(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +id: String,
+    +q: {qt(I, S, H) == True{} : Bool}) ->
+    {Bool.and(am1(I, id), Bool.or(Bool.not(has(I, id)), Bool.not(sh(S, id))))
+      == True{} : Bool}:
+  match I:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      qam_arg(Cli.parse_usage(usage), usage, help, attrs, tail, S, id,
+        and_left(argq(Cli.parse_usage(usage), attrs, S),
+          qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+            Cli.parse_usage(usage), attrs), S), H), q),
+        qam(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+          Cli.parse_usage(usage), attrs), S), H, id,
+          and_right(argq(Cli.parse_usage(usage), attrs, S),
+            qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+              Cli.parse_usage(usage), attrs), S), H), q)))
+    case Cli.Sub{+name, about, +children} <> +tail:
+      qam_sub(tail, Cli.find_aliases(children), name, S, id,
+        qam(tail, List.append(&2, Cli.Seen,
+          Cli.sub_alias_entries(Cli.find_aliases(children)),
+          Cli.SeenSub{name} <> S), H, id,
+          and_right(qt(children, H, List.append(&2, Cli.Seen,
+            Cli.global_entries(Cli.lint_items(children)), H)),
+            qt(tail, List.append(&2, Cli.Seen,
+              Cli.sub_alias_entries(Cli.find_aliases(children)),
+              Cli.SeenSub{name} <> S), H),
+            and_right(Bool.not(Cli.sub_collision(S, name)),
+              Bool.and(qt(children, H, List.append(&2, Cli.Seen,
+                Cli.global_entries(Cli.lint_items(children)), H)),
+                qt(tail, List.append(&2, Cli.Seen,
+                  Cli.sub_alias_entries(Cli.find_aliases(children)),
+                  Cli.SeenSub{name} <> S), H)), q))))
+    case Cli.Version{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Alias{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Hidden{} <> tail: qam(tail, S, H, id, q)
+    case Cli.Example{x0, x1} <> tail: qam(tail, S, H, id, q)
+    case Cli.After{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.SubOptional{} <> tail: qam(tail, S, H, id, q)
+    case Cli.External{} <> tail: qam(tail, S, H, id, q)
+    case Cli.Exclusive{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.NeedOne{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Id{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Required{} <> tail: qam(tail, S, H, id, q)
+    case Cli.AttrDefault{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.AttrEnv{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Global{} <> tail: qam(tail, S, H, id, q)
+    case Cli.Heading{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.As{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.OneOf{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Delim{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Hyphen{} <> tail: qam(tail, S, H, id, q)
+    case Cli.Rest{} <> tail: qam(tail, S, H, id, q)
+    case Cli.Bare{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Conflicts{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Requires{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Group{x0} <> tail: qam(tail, S, H, id, q)
+    case Cli.Builtin{} <> tail: qam(tail, S, H, id, q)
+
+def b3(e: Bool, h: Bool, s: Bool, sg: Bool,
+    l1: {Bool.or(Bool.not(e), s) == True{} : Bool},
+    ih: {Bool.or(Bool.not(h), sg) == True{} : Bool},
+    up: {Bool.or(Bool.not(sg), s) == True{} : Bool}) ->
+    {Bool.or(Bool.not(Bool.or(e, h)), s) == True{} : Bool}:
+  match e:
+    case True{}: l1
+    case False{}:
+      match h:
+        case True{}: b_imp(sg, s, up, ih)
+        case False{}: {==}
+
+def ent_c(c: Bool, +X: String, -s: String, -l: String,
+    -r: List<&2, Cli.Seen>, +id: String,
+    ec: {String.eq(X, id) == c : Bool}) ->
+    {Bool.or(Bool.not(c), sh(Cli.SeenArg{X, s, l} <> r, id)) == True{}
+      : Bool}:
+  match c:
+    case True{}: b_or_l(String.eq(id, X), sh(r, id), eq_flip(X, id, ec))
+    case False{}: {==}
+
+def ent_sh(parsed: Cli.Usage, +usage: String, +attrs: List<&2, Cli.Item>,
+    -S: List<&2, Cli.Seen>, +id: String, -rest: List<&2, Cli.Seen>,
+    a: {argq(parsed, attrs, S) == True{} : Bool}) ->
+    {Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info_parsed(parsed, usage,
+      attrs)), id)), sh(List.append(&2, Cli.Seen, Cli.arg_entries(parsed,
+      attrs), rest), id)) == True{} : Bool}:
+  match parsed:
+    case Cli.Invalid{col}:
+      Empty.absurd({Bool.or(Bool.not(String.eq("", id)), sh(rest, id))
+        == True{} : Bool}, false_true_absurd(a))
+    case Cli.Parsed{+derived, +s, +l, k}:
+      ent_c(String.eq(Cli.use_id(Cli.find_id(attrs), derived), id),
+        Cli.use_id(Cli.find_id(attrs), derived), s, l,
+        List.append(&2, Cli.Seen, Cli.arg_alias_entries(Cli.find_aliases(
+          attrs)), rest), id, {==})
+
+def gc_pick(g: Bool, +usage: String, -help: String,
+    +attrs: List<&2, Cli.Item>, +gt: List<&2, Cli.Item>,
+    +get: List<&2, Cli.Seen>, +id: String,
+    l1: {Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)),
+      id)), sh(List.append(&2, Cli.Seen, Cli.arg_entries(
+      Cli.parse_usage(usage), attrs), get), id)) == True{} : Bool},
+    ih: {Bool.or(Bool.not(has(gt, id)), sh(get, id)) == True{} : Bool},
+    up: {Bool.or(Bool.not(sh(get, id)), sh(List.append(&2, Cli.Seen,
+      Cli.arg_entries(Cli.parse_usage(usage), attrs), get), id)) == True{}
+      : Bool}) ->
+    {Bool.or(Bool.not(has(Bool.pick(List<&2, Cli.Item>, g,
+      Cli.Arg{usage, help, attrs} <> gt, gt), id)),
+      sh(List.append(&2, Cli.Seen, Bool.pick(List<&2, Cli.Seen>, g,
+        Cli.arg_entries(Cli.parse_usage(usage), attrs), Nil{}), get), id))
+      == True{} : Bool}:
+  match g:
+    case True{}:
+      b3(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id), has(gt, id),
+        sh(List.append(&2, Cli.Seen, Cli.arg_entries(Cli.parse_usage(usage),
+          attrs), get), id), sh(get, id), l1, ih, up)
+    case False{}: ih
+
+def gcov(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +id: String,
+    +q: {qt(I, S, H) == True{} : Bool}) ->
+    {Bool.or(Bool.not(has(Cli.global_items(I), id)),
+      sh(Cli.global_entries(Cli.lint_items(I)), id)) == True{} : Bool}:
+  match I:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      gc_pick(Cli.has_global(attrs), usage, help, attrs,
+        Cli.global_items(tail), Cli.global_entries(Cli.lint_items(tail)), id,
+        ent_sh(Cli.parse_usage(usage), usage, attrs, S, id,
+          Cli.global_entries(Cli.lint_items(tail)),
+          and_left(argq(Cli.parse_usage(usage), attrs, S),
+            qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+              Cli.parse_usage(usage), attrs), S), H), q)),
+        gcov(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+          Cli.parse_usage(usage), attrs), S), H, id,
+          and_right(argq(Cli.parse_usage(usage), attrs, S),
+            qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+              Cli.parse_usage(usage), attrs), S), H), q)),
+        sh_up(Cli.arg_entries(Cli.parse_usage(usage), attrs),
+          Cli.global_entries(Cli.lint_items(tail)), id))
+    case Cli.Sub{+name, about, +children} <> +tail:
+      gcov(tail, List.append(&2, Cli.Seen,
+        Cli.sub_alias_entries(Cli.find_aliases(children)),
+        Cli.SeenSub{name} <> S), H, id,
+        and_right(qt(children, H, List.append(&2, Cli.Seen,
+          Cli.global_entries(Cli.lint_items(children)), H)),
+          qt(tail, List.append(&2, Cli.Seen,
+            Cli.sub_alias_entries(Cli.find_aliases(children)),
+            Cli.SeenSub{name} <> S), H),
+          and_right(Bool.not(Cli.sub_collision(S, name)),
+            Bool.and(qt(children, H, List.append(&2, Cli.Seen,
+              Cli.global_entries(Cli.lint_items(children)), H)),
+              qt(tail, List.append(&2, Cli.Seen,
+                Cli.sub_alias_entries(Cli.find_aliases(children)),
+                Cli.SeenSub{name} <> S), H)), q)))
+    case Cli.Version{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Alias{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Hidden{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Example{x0, x1} <> tail: gcov(tail, S, H, id, q)
+    case Cli.After{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.SubOptional{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.External{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Exclusive{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.NeedOne{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Id{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Required{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.AttrDefault{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.AttrEnv{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Global{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Heading{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.As{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.OneOf{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Delim{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Hyphen{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Rest{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Bare{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Conflicts{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Requires{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Group{x0} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Builtin{} <> tail: gcov(tail, S, H, id, q)
+
+def gn_parsed(parsed: Cli.Usage, -usage: String, +attrs: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, a: {argq(parsed, attrs, S) == True{} : Bool}) ->
+    {Bool.or(Bool.not(Cli.has_global(attrs)), Bool.not(Cli.kind_pos(
+      Cli.info_kind(Cli.arg_info_parsed(parsed, usage, attrs))))) == True{}
+      : Bool}:
+  match parsed:
+    case Cli.Invalid{col}:
+      Empty.absurd({Bool.or(Bool.not(Cli.has_global(attrs)),
+        Bool.not(Cli.kind_pos(Cli.FlagKind{}))) == True{} : Bool},
+        false_true_absurd(a))
+    case Cli.Parsed{derived, s, l, +k}:
+      and_right(Bool.not(sh(S, Cli.use_id(Cli.find_id(attrs), derived))),
+        Bool.or(Bool.not(Cli.has_global(attrs)), Bool.not(Cli.kind_pos(k))), a)
+
+def gn_pick(g: Bool, +usage: String, -help: String, +attrs: List<&2, Cli.Item>,
+    +gt: List<&2, Cli.Item>,
+    l1: {Bool.or(Bool.not(g), Bool.not(Cli.kind_pos(Cli.info_kind(
+      Cli.arg_info(usage, attrs))))) == True{} : Bool},
+    ih: {nonpos(gt) == True{} : Bool}) ->
+    {nonpos(Bool.pick(List<&2, Cli.Item>, g, Cli.Arg{usage, help, attrs} <> gt,
+      gt)) == True{} : Bool}:
+  match g:
+    case True{}:
+      and_true(Bool.not(Cli.kind_pos(Cli.info_kind(Cli.arg_info(usage,
+        attrs)))), nonpos(gt), l1, ih)
+    case False{}: ih
+
+def gnonpos(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +q: {qt(I, S, H) == True{} : Bool}) ->
+    {nonpos(Cli.global_items(I)) == True{} : Bool}:
+  match I:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      gn_pick(Cli.has_global(attrs), usage, help, attrs,
+        Cli.global_items(tail),
+        gn_parsed(Cli.parse_usage(usage), usage, attrs, S,
+          and_left(argq(Cli.parse_usage(usage), attrs, S),
+            qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+              Cli.parse_usage(usage), attrs), S), H), q)),
+        gnonpos(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+          Cli.parse_usage(usage), attrs), S), H,
+          and_right(argq(Cli.parse_usage(usage), attrs, S),
+            qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+              Cli.parse_usage(usage), attrs), S), H), q)))
+    case Cli.Sub{+name, about, +children} <> +tail:
+      gnonpos(tail, List.append(&2, Cli.Seen,
+        Cli.sub_alias_entries(Cli.find_aliases(children)),
+        Cli.SeenSub{name} <> S), H,
+        and_right(qt(children, H, List.append(&2, Cli.Seen,
+          Cli.global_entries(Cli.lint_items(children)), H)),
+          qt(tail, List.append(&2, Cli.Seen,
+            Cli.sub_alias_entries(Cli.find_aliases(children)),
+            Cli.SeenSub{name} <> S), H),
+          and_right(Bool.not(Cli.sub_collision(S, name)),
+            Bool.and(qt(children, H, List.append(&2, Cli.Seen,
+              Cli.global_entries(Cli.lint_items(children)), H)),
+              qt(tail, List.append(&2, Cli.Seen,
+                Cli.sub_alias_entries(Cli.find_aliases(children)),
+                Cli.SeenSub{name} <> S), H)), q)))
+    case Cli.Version{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Alias{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Hidden{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Example{x0, x1} <> tail: gnonpos(tail, S, H, q)
+    case Cli.After{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.SubOptional{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.External{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Exclusive{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.NeedOne{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Id{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Required{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.AttrDefault{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.AttrEnv{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Global{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Heading{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.As{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.OneOf{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Delim{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Hyphen{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Rest{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Bare{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Conflicts{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Requires{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Group{x0} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Builtin{} <> tail: gnonpos(tail, S, H, q)
+
+def sfn(o: Maybe<&2, Cli.SubFound>, +d: String) -> String:
+  match o:
+    case None{}: d
+    case Some{Cli.SubFound{a, b}}: a
+
+def sfc(o: Maybe<&2, Cli.SubFound>, +d: List<&2, Cli.Item>) ->
+    List<&2, Cli.Item>:
+  match o:
+    case None{}: d
+    case Some{Cli.SubFound{a, b}}: b
+
+def sf_none_some(-h: Cli.SubFound,
+    e: {None{} == Some{h} : Maybe<&2, Cli.SubFound>}) -> Empty:
+  false_true_absurd(Equal.cong(Maybe<&2, Cli.SubFound>, Bool,
+    m => Maybe.is_some(&2, Cli.SubFound, m), None{}, Some{h}, e))
+
+def fsg_some(L: List<&2, Cli.Item>, -q: String, -h: Cli.SubFound) ->
+    {Cli.find_sub_go(L, q, Some{h}) == Some{h} : Maybe<&2, Cli.SubFound>}:
+  match L:
+    case Nil{}: {==}
+    case x <> t: {==}
+
+def st_refl(+m: String) -> {Cli.same_text(m, m) == True{} : Bool}:
+  Equal.trans(Bool, Cli.same_text(m, m), String.eq(m, m), True{},
+    Laws.p18_text(m, m), string_eq_refl(m))
+
+# The sub find_sub_go finds for a query: its own name finds it (from the
+# start), seen has no sub of that name, and its children's tree holds.
+def Canon(I: List<&2, Cli.Item>, n: String, ch: List<&2, Cli.Item>,
+    S: List<&2, Cli.Seen>, H: List<&2, Cli.Seen>) -> Type:
+  {Cli.find_sub_go(I, n, None{}) == Some{Cli.SubFound{n, ch}}
+    : Maybe<&2, Cli.SubFound>} &
+    ({Cli.sub_collision(S, n) == False{} : Bool} &
+      {qt(ch, H, List.append(&2, Cli.Seen,
+        Cli.global_entries(Cli.lint_items(ch)), H)) == True{} : Bool})
+
+def hit_self(+m: String, -cm: List<&2, Cli.Item>, +t: List<&2, Cli.Item>) ->
+    {Cli.find_sub_go(t, m, Cli.sub_hit(Cli.same_text(m, m), m, cm, m))
+      == Some{Cli.SubFound{m, cm}} : Maybe<&2, Cli.SubFound>}:
+  %Equal.sym(Bool, Cli.same_text(m, m), True{}, st_refl(m)) :
+    {Cli.find_sub_go(t, m, Cli.sub_hit(_, m, cm, m))
+      == Some{Cli.SubFound{m, cm}} : Maybe<&2, Cli.SubFound>}
+  fsg_some(t, m, Cli.SubFound{m, cm})
+
+def canon_hit(+m: String, -a: String, +cm: List<&2, Cli.Item>,
+    +t: List<&2, Cli.Item>, -x: String, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, -n: String, -ch: List<&2, Cli.Item>,
+    +q: {qt(Cli.Sub{m, a, cm} <> t, S, H) == True{} : Bool},
+    ef: {Cli.find_sub_go(t, x, Some{Cli.SubFound{m, cm}})
+      == Some{Cli.SubFound{n, ch}} : Maybe<&2, Cli.SubFound>}) ->
+    Canon(Cli.Sub{m, a, cm} <> t, n, ch, S, H):
+  +e0 = Equal.trans(Maybe<&2, Cli.SubFound>, Some{Cli.SubFound{m, cm}},
+    Cli.find_sub_go(t, x, Some{Cli.SubFound{m, cm}}),
+    Some{Cli.SubFound{n, ch}},
+    Equal.sym(Maybe<&2, Cli.SubFound>,
+      Cli.find_sub_go(t, x, Some{Cli.SubFound{m, cm}}),
+      Some{Cli.SubFound{m, cm}}, fsg_some(t, x, Cli.SubFound{m, cm})), ef)
+  %Equal.cong(Maybe<&2, Cli.SubFound>, String, o => sfn(o, m),
+    Some{Cli.SubFound{m, cm}}, Some{Cli.SubFound{n, ch}}, e0) :
+    Canon(Cli.Sub{m, a, cm} <> t, _, ch, S, H)
+  %Equal.cong(Maybe<&2, Cli.SubFound>, List<&2, Cli.Item>, o => sfc(o, cm),
+    Some{Cli.SubFound{m, cm}}, Some{Cli.SubFound{n, ch}}, e0) :
+    Canon(Cli.Sub{m, a, cm} <> t, m, _, S, H)
+  (hit_self(m, cm, t),
+    (nt_f(Cli.sub_collision(S, m), and_left(Bool.not(Cli.sub_collision(S, m)),
+      Bool.and(qt(cm, H, List.append(&2, Cli.Seen,
+        Cli.global_entries(Cli.lint_items(cm)), H)),
+        qt(t, List.append(&2, Cli.Seen,
+          Cli.sub_alias_entries(Cli.find_aliases(cm)),
+          Cli.SeenSub{m} <> S), H)), q)),
+      and_left(qt(cm, H, List.append(&2, Cli.Seen,
+        Cli.global_entries(Cli.lint_items(cm)), H)),
+        qt(t, List.append(&2, Cli.Seen,
+          Cli.sub_alias_entries(Cli.find_aliases(cm)),
+          Cli.SeenSub{m} <> S), H),
+        and_right(Bool.not(Cli.sub_collision(S, m)),
+          Bool.and(qt(cm, H, List.append(&2, Cli.Seen,
+            Cli.global_entries(Cli.lint_items(cm)), H)),
+            qt(t, List.append(&2, Cli.Seen,
+              Cli.sub_alias_entries(Cli.find_aliases(cm)),
+              Cli.SeenSub{m} <> S), H)), q))))
+
+def sc_sae(al: List<&2, String>, +R: List<&2, Cli.Seen>, +n: String,
+    e: {Cli.sub_collision(List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(al), R), n) == False{} : Bool}) ->
+    {Cli.sub_collision(R, n) == False{} : Bool}:
+  match al:
+    case Nil{}: e
+    case +a <> t:
+      sc_sae(t, R, n, b_orf_r(Cli.same_text(n, a), Cli.sub_collision(
+        List.append(&2, Cli.Seen, Cli.sub_alias_entries(t), R), n), e))
+
+def text_flip_f(+a: String, +b: String,
+    e: {Cli.same_text(a, b) == False{} : Bool}) ->
+    {Cli.same_text(b, a) == False{} : Bool}:
+  Equal.trans(Bool, Cli.same_text(b, a), String.eq(b, a), False{},
+    Laws.p18_text(b, a), eq_flip_f(a, b, text_false(a, b, e)))
+
+# No alias of cm collides with n: cm aliases n nowhere.
+def sc_alias(cm: List<&2, Cli.Item>, +R: List<&2, Cli.Seen>, +n: String,
+    +e: {Cli.sub_collision(List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(Cli.find_aliases(cm)), R), n) == False{}
+      : Bool}) -> {Cli.has_alias(cm, n, False{}) == False{} : Bool}:
+  match cm:
+    case Nil{}: {==}
+    case Cli.Alias{+a} <> +tail:
+      %Equal.sym(Bool, Cli.same_text(a, n), False{}, text_flip_f(n, a,
+        b_orf_l(Cli.same_text(n, a), Cli.sub_collision(List.append(&2,
+          Cli.Seen, Cli.sub_alias_entries(Cli.find_aliases(tail)), R), n), e))) :
+        {Cli.has_alias(tail, n, _) == False{} : Bool}
+      sc_alias(tail, R, n, b_orf_r(Cli.same_text(n, a), Cli.sub_collision(
+        List.append(&2, Cli.Seen, Cli.sub_alias_entries(Cli.find_aliases(
+          tail)), R), n), e))
+    case Cli.Arg{x0, x1, x2} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Sub{x0, x1, x2} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Version{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Hidden{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Example{x0, x1} <> tail: sc_alias(tail, R, n, e)
+    case Cli.After{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.SubOptional{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.External{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Exclusive{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.NeedOne{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Id{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Required{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.AttrDefault{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.AttrEnv{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Global{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Heading{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.As{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.OneOf{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Delim{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Hyphen{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Rest{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Bare{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Conflicts{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Requires{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Group{x0} <> tail: sc_alias(tail, R, n, e)
+    case Cli.Builtin{} <> tail: sc_alias(tail, R, n, e)
+
+def miss_first(+m: String, +cm: List<&2, Cli.Item>, +t: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +n: String, -ch: List<&2, Cli.Item>,
+    +e2: {Cli.sub_collision(List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(Cli.find_aliases(cm)), Cli.SeenSub{m} <> S), n)
+      == False{} : Bool},
+    e1: {Cli.find_sub_go(t, n, None{}) == Some{Cli.SubFound{n, ch}}
+      : Maybe<&2, Cli.SubFound>}) ->
+    {Cli.find_sub_go(t, n, Cli.sub_hit(Cli.same_text(n, m), m, cm, n))
+      == Some{Cli.SubFound{n, ch}} : Maybe<&2, Cli.SubFound>}:
+  %Equal.sym(Bool, Cli.same_text(n, m), False{}, b_orf_l(Cli.same_text(n, m),
+    Cli.sub_collision(S, n), sc_sae(Cli.find_aliases(cm), Cli.SeenSub{m} <> S,
+      n, e2))) :
+    {Cli.find_sub_go(t, n, Cli.sub_hit(_, m, cm, n))
+      == Some{Cli.SubFound{n, ch}} : Maybe<&2, Cli.SubFound>}
+  %Equal.sym(Bool, Cli.has_alias(cm, n, False{}), False{},
+    sc_alias(cm, Cli.SeenSub{m} <> S, n, e2)) :
+    {Cli.find_sub_go(t, n, Cli.alias_hit(_, m, cm))
+      == Some{Cli.SubFound{n, ch}} : Maybe<&2, Cli.SubFound>}
+  e1
+
+def canon_miss(+m: String, -a: String, +cm: List<&2, Cli.Item>,
+    +t: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>, -H: List<&2, Cli.Seen>,
+    +n: String, -ch: List<&2, Cli.Item>,
+    ih: Canon(t, n, ch, List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(Cli.find_aliases(cm)), Cli.SeenSub{m} <> S), H)) ->
+    Canon(Cli.Sub{m, a, cm} <> t, n, ch, S, H):
+  match ih:
+    case (e1, (+e2, e3)):
+      (miss_first(m, cm, t, S, n, ch, e2, e1),
+        (b_orf_r(Cli.same_text(n, m), Cli.sub_collision(S, n),
+          sc_sae(Cli.find_aliases(cm), Cli.SeenSub{m} <> S, n, e2)), e3))
+
+def canon_alias(b: Bool, +m: String, -a: String, +cm: List<&2, Cli.Item>,
+    +t: List<&2, Cli.Item>, -x: String, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +n: String, -ch: List<&2, Cli.Item>,
+    +q: {qt(Cli.Sub{m, a, cm} <> t, S, H) == True{} : Bool},
+    ef: {Cli.find_sub_go(t, x, Cli.alias_hit(b, m, cm))
+      == Some{Cli.SubFound{n, ch}} : Maybe<&2, Cli.SubFound>},
+    ih: {Cli.find_sub_go(t, x, None{}) == Some{Cli.SubFound{n, ch}}
+      : Maybe<&2, Cli.SubFound>} -> Canon(t, n, ch, List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(Cli.find_aliases(cm)), Cli.SeenSub{m} <> S), H)) ->
+    Canon(Cli.Sub{m, a, cm} <> t, n, ch, S, H):
+  match b:
+    case True{}: canon_hit(m, a, cm, t, x, S, H, n, ch, q, ef)
+    case False{}: canon_miss(m, a, cm, t, S, H, n, ch, ih(ef))
+
+def canon_sub(b: Bool, +m: String, -a: String, +cm: List<&2, Cli.Item>,
+    +t: List<&2, Cli.Item>, +x: String, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +n: String, -ch: List<&2, Cli.Item>,
+    +q: {qt(Cli.Sub{m, a, cm} <> t, S, H) == True{} : Bool},
+    ef: {Cli.find_sub_go(t, x, Cli.sub_hit(b, m, cm, x))
+      == Some{Cli.SubFound{n, ch}} : Maybe<&2, Cli.SubFound>},
+    ih: {Cli.find_sub_go(t, x, None{}) == Some{Cli.SubFound{n, ch}}
+      : Maybe<&2, Cli.SubFound>} -> Canon(t, n, ch, List.append(&2, Cli.Seen,
+      Cli.sub_alias_entries(Cli.find_aliases(cm)), Cli.SeenSub{m} <> S), H)) ->
+    Canon(Cli.Sub{m, a, cm} <> t, n, ch, S, H):
+  match b:
+    case True{}: canon_hit(m, a, cm, t, x, S, H, n, ch, q, ef)
+    case False{}:
+      canon_alias(Cli.has_alias(cm, x, False{}), m, a, cm, t, x, S, H, n, ch,
+        q, ef, ih)
+
+def sc_arg_alias(xs: List<&2, String>, +S: List<&2, Cli.Seen>, +n: String) ->
+    {Cli.sub_collision(List.append(&2, Cli.Seen, Cli.arg_alias_entries(xs), S),
+      n) == Cli.sub_collision(S, n) : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case a <> t: sc_arg_alias(t, S, n)
+
+def sc_args(parsed: Cli.Usage, +attrs: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +n: String) ->
+    {Cli.sub_collision(List.append(&2, Cli.Seen, Cli.arg_entries(parsed,
+      attrs), S), n) == Cli.sub_collision(S, n) : Bool}:
+  match parsed:
+    case Cli.Invalid{col}: {==}
+    case Cli.Parsed{d, s, l, k}: sc_arg_alias(Cli.find_aliases(attrs), S, n)
+
+def sc_arg_tr(parsed: Cli.Usage, +attrs: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +n: String,
+    e: {Cli.sub_collision(List.append(&2, Cli.Seen, Cli.arg_entries(parsed,
+      attrs), S), n) == False{} : Bool}) ->
+    {Cli.sub_collision(S, n) == False{} : Bool}:
+  %sc_args(parsed, attrs, S, n) : {_ == False{} : Bool}
+  e
+
+# The sub a query finds in a linted scope (canon).
+
+def canon_arg(parsed: Cli.Usage, +attrs: List<&2, Cli.Item>,
+    -t: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>, -H: List<&2, Cli.Seen>,
+    +n: String, -ch: List<&2, Cli.Item>,
+    ih: Canon(t, n, ch, List.append(&2, Cli.Seen,
+      Cli.arg_entries(parsed, attrs), S), H)) -> Canon(t, n, ch, S, H):
+  match ih:
+    case (e1, (e2, e3)):
+      (e1, (sc_arg_tr(parsed, attrs, S, n, e2), e3))
+
+def canon(I: List<&2, Cli.Item>, +x: String, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +n: String, -ch: List<&2, Cli.Item>,
+    +q: {qt(I, S, H) == True{} : Bool},
+    ef: {Cli.find_sub_go(I, x, None{}) == Some{Cli.SubFound{n, ch}}
+      : Maybe<&2, Cli.SubFound>}) -> Canon(I, n, ch, S, H):
+  match I:
+    case Nil{}:
+      Empty.absurd(Canon(Nil{}, n, ch, S, H),
+        sf_none_some(Cli.SubFound{n, ch}, ef))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      canon_arg(Cli.parse_usage(usage), attrs, tail, S, H, n, ch,
+        canon(tail, x, List.append(&2, Cli.Seen, Cli.arg_entries(
+          Cli.parse_usage(usage), attrs), S), H, n, ch,
+          and_right(argq(Cli.parse_usage(usage), attrs, S),
+            qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+              Cli.parse_usage(usage), attrs), S), H), q), ef))
+    case Cli.Sub{+name, about, +children} <> +tail:
+      canon_sub(Cli.same_text(x, name), name, about, children, tail, x, S, H,
+        n, ch, q, ef,
+        et => canon(tail, x, List.append(&2, Cli.Seen,
+          Cli.sub_alias_entries(Cli.find_aliases(children)),
+          Cli.SeenSub{name} <> S), H, n, ch,
+          and_right(qt(children, H, List.append(&2, Cli.Seen,
+            Cli.global_entries(Cli.lint_items(children)), H)),
+            qt(tail, List.append(&2, Cli.Seen,
+              Cli.sub_alias_entries(Cli.find_aliases(children)),
+              Cli.SeenSub{name} <> S), H),
+            and_right(Bool.not(Cli.sub_collision(S, name)),
+              Bool.and(qt(children, H, List.append(&2, Cli.Seen,
+                Cli.global_entries(Cli.lint_items(children)), H)),
+                qt(tail, List.append(&2, Cli.Seen,
+                  Cli.sub_alias_entries(Cli.find_aliases(children)),
+                  Cli.SeenSub{name} <> S), H)), q)), et))
+    case Cli.Version{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Alias{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Hidden{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Example{x0, x1} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.After{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.SubOptional{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.External{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Exclusive{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.NeedOne{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Id{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Required{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.AttrDefault{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.AttrEnv{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Global{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Heading{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.As{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.OneOf{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Delim{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Hyphen{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Rest{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Bare{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Conflicts{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Requires{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Group{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.Builtin{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+
+# P21 hits: the arg a scope's option lookup finds is the one arg_ref finds
+# for its id, so every arg of that id accepts the hit it makes.
+
+def ofound_arg(m: Maybe<&2, Cli.OptFound>, +d: Cli.ArgInfo) -> Cli.ArgInfo:
+  match m:
+    case None{}: d
+    case Some{Cli.OptFound{a, p}}: a
+
+def of_none_some(-h: Cli.OptFound,
+    e: {None{} == Some{h} : Maybe<&2, Cli.OptFound>}) -> Empty:
+  false_true_absurd(Equal.cong(Maybe<&2, Cli.OptFound>, Bool,
+    m => Maybe.is_some(&2, Cli.OptFound, m), None{}, Some{h}, e))
+
+def om_pick(b: Bool, -info: Cli.ArgInfo, -neg: Bool, -x: Cli.ArgInfo,
+    -pol: Bool,
+    e: {Bool.pick(Maybe<&2, Cli.OptFound>, b, Some{Cli.OptFound{info, neg}},
+      None{}) == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>}) ->
+    {info == x : Cli.ArgInfo}:
+  match b:
+    case True{}:
+      Equal.cong(Maybe<&2, Cli.OptFound>, Cli.ArgInfo, m => ofound_arg(m, x),
+        Some{Cli.OptFound{info, neg}}, Some{Cli.OptFound{x, pol}}, e)
+    case False{}:
+      Empty.absurd({info == x : Cli.ArgInfo},
+        of_none_some(Cli.OptFound{x, pol}, e))
+
+# The arg option_matches answers with is the one it was given.
+def om_info(+q: String, info: Cli.ArgInfo, -x: Cli.ArgInfo, -pol: Bool,
+    e: {Cli.option_matches(q, info) == Some{Cli.OptFound{x, pol}}
+      : Maybe<&2, Cli.OptFound>}) -> {info == x : Cli.ArgInfo}:
+  match info:
+    case Cli.ArgInfo{id, usage, +short, +long, +kind, +attrs}:
+      om_pick(Bool.or(
+        Bool.or(Bool.and(Bool.not(String.is_empty(short)),
+          String.eq(q, short)),
+          Bool.or(Bool.and(Bool.not(String.is_empty(long)),
+            String.eq(q, long)),
+            List.contains(~String, ~String.eq, Cli.find_aliases(attrs), q))),
+        Bool.and(Cli.kind_negatable(kind),
+          Bool.and(Bool.not(String.is_empty(long)),
+            String.eq(q, Cli.negated_long(long))))),
+        Cli.ArgInfo{id, usage, short, long, kind, attrs},
+        Bool.not(Bool.and(Cli.kind_negatable(kind),
+          Bool.and(Bool.not(String.is_empty(long)),
+            String.eq(q, Cli.negated_long(long))))), x, pol, e)
+
+def fo_none(c: Bool, -info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +id: String, -x: Cli.ArgInfo,
+    hn: {Bool.or(Bool.not(c), Bool.not(has(tail, id))) == True{} : Bool},
+    ih: {Laws.arg_ref(tail, id) == Some{x} : Maybe<&2, Cli.ArgInfo>}) ->
+    {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info}, Laws.arg_ref(tail, id))
+      == Some{x} : Maybe<&2, Cli.ArgInfo>}:
+  match c:
+    case True{}:
+      Empty.absurd({Some{info} == Some{x} : Maybe<&2, Cli.ArgInfo>},
+        true_false_absurd(Equal.trans(Bool, True{}, has(tail, id), False{},
+          Equal.sym(Bool, has(tail, id), True{}, ref_found(tail, id, x, ih)),
+          nt_f(has(tail, id), hn))))
+    case False{}: ih
+
+def fo_pick(m: Maybe<&2, Cli.OptFound>, +info: Cli.ArgInfo,
+    +tail: List<&2, Cli.Item>, +q: String, -x: Cli.ArgInfo, -pol: Bool,
+    +id: String,
+    em: {Cli.option_matches(q, info) == m : Maybe<&2, Cli.OptFound>},
+    ef: {Bool.pick(Maybe<&2, Cli.OptFound>,
+      Maybe.is_some(&2, Cli.OptFound, m), m, Cli.find_option(tail, q))
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    hn: {Bool.or(Bool.not(String.eq(Cli.info_id(info), id)),
+      Bool.not(has(tail, id))) == True{} : Bool},
+    eid: {String.eq(Cli.info_id(x), id) == True{} : Bool},
+    ih: {Cli.find_option(tail, q) == Some{Cli.OptFound{x, pol}}
+      : Maybe<&2, Cli.OptFound>} ->
+      {Laws.arg_ref(tail, id) == Some{x} : Maybe<&2, Cli.ArgInfo>}) ->
+    {Bool.pick(Maybe<&2, Cli.ArgInfo>, String.eq(Cli.info_id(info), id),
+      Some{info}, Laws.arg_ref(tail, id)) == Some{x}
+      : Maybe<&2, Cli.ArgInfo>}:
+  match m:
+    case Some{f}:
+      %Equal.sym(Cli.ArgInfo, info, x, om_info(q, info, x, pol,
+        Equal.trans(Maybe<&2, Cli.OptFound>, Cli.option_matches(q, info),
+          Some{f}, Some{Cli.OptFound{x, pol}}, em, ef))) :
+        {Bool.pick(Maybe<&2, Cli.ArgInfo>, String.eq(Cli.info_id(_), id),
+          Some{_}, Laws.arg_ref(tail, id)) == Some{x}
+          : Maybe<&2, Cli.ArgInfo>}
+      %Equal.sym(Bool, String.eq(Cli.info_id(x), id), True{}, eid) :
+        {Bool.pick(Maybe<&2, Cli.ArgInfo>, _, Some{x},
+          Laws.arg_ref(tail, id)) == Some{x} : Maybe<&2, Cli.ArgInfo>}
+      {==}
+    case None{}:
+      fo_none(String.eq(Cli.info_id(info), id), info, tail, id, x, hn, ih(ef))
+
+# The arg of id find_option finds is the one arg_ref finds, when at most one
+# arg has id.
+def fo_ref(L: List<&2, Cli.Item>, +q: String, -x: Cli.ArgInfo, -pol: Bool,
+    +id: String,
+    ef: {Cli.find_option(L, q) == Some{Cli.OptFound{x, pol}}
+      : Maybe<&2, Cli.OptFound>},
+    +am: {am1(L, id) == True{} : Bool},
+    +eid: {String.eq(Cli.info_id(x), id) == True{} : Bool}) ->
+    {Laws.arg_ref(L, id) == Some{x} : Maybe<&2, Cli.ArgInfo>}:
+  match L:
+    case Nil{}:
+      Empty.absurd({Laws.arg_ref(Nil{}, id) == Some{x}
+        : Maybe<&2, Cli.ArgInfo>}, of_none_some(Cli.OptFound{x, pol}, ef))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      fo_pick(Cli.option_matches(q, Cli.arg_info(usage, attrs)),
+        Cli.arg_info(usage, attrs), tail, q, x, pol, id, {==}, ef,
+        and_left(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage,
+          attrs)), id)), Bool.not(has(tail, id))), am1(tail, id), am), eid,
+        et => fo_ref(tail, q, x, pol, id, et,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(
+            Cli.arg_info(usage, attrs)), id)), Bool.not(has(tail, id))),
+            am1(tail, id), am), eid))
+    case Cli.Sub{x0, x1, x2} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Version{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Alias{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Hidden{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Example{x0, x1} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.After{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.SubOptional{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.External{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Exclusive{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.NeedOne{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Id{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Required{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.AttrDefault{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.AttrEnv{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Global{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Heading{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.As{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.OneOf{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Delim{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Hyphen{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Rest{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Bare{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Conflicts{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Requires{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Group{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.Builtin{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+
+def ok_conv(+e: Cli.ScanEvent, +id: String, -a: Cli.ArgInfo,
+    -b: Cli.ArgInfo, eab: {a == b : Cli.ArgInfo},
+    ok: {ev_ok(e, Cli.info_kind(a), Cli.info_attrs(a), id) == True{} : Bool})
+    -> {ev_ok(e, Cli.info_kind(b), Cli.info_attrs(b), id) == True{} : Bool}:
+  %eab : {ev_ok(e, Cli.info_kind(_), Cli.info_attrs(_), id) == True{} : Bool}
+  ok
+
+def acc_one_pick(c: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +e: Cli.ScanEvent, +id: String, -r: Cli.ArgInfo,
+    am: {Bool.and(Bool.or(Bool.not(c), Bool.not(has(tail, id))),
+      am1(tail, id)) == True{} : Bool},
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
+      Laws.arg_ref(tail, id)) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    ok: {ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id) == True{} : Bool},
+    ih: {am1(tail, id) == True{} : Bool} ->
+      {Laws.arg_ref(tail, id) == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      {acc(tail, e, id) == True{} : Bool}) ->
+    {Bool.and(Bool.or(Bool.not(c), ev_ok(e, Cli.info_kind(info),
+      Cli.info_attrs(info), id)), acc(tail, e, id)) == True{} : Bool}:
+  match c:
+    case True{}:
+      and_true(ev_ok(e, Cli.info_kind(info), Cli.info_attrs(info), id),
+        acc(tail, e, id),
+        ok_conv(e, id, r, info, Equal.sym(Cli.ArgInfo, info, r,
+          some_inj(info, r, er)), ok),
+        acc_none(tail, e, id, nt_f(has(tail, id),
+          and_left(Bool.not(has(tail, id)), am1(tail, id), am))))
+    case False{}: ih(am, er)
+
+# The one arg of id, which arg_ref finds, accepting e: all of L accepts e.
+def acc_one(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    -r: Cli.ArgInfo, +am: {am1(L, id) == True{} : Bool},
+    er: {Laws.arg_ref(L, id) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    +ok: {ev_ok(e, Cli.info_kind(r), Cli.info_attrs(r), id) == True{}
+      : Bool}) -> {acc(L, e, id) == True{} : Bool}:
+  match L:
+    case Nil{}:
+      Empty.absurd({acc(Nil{}, e, id) == True{} : Bool},
+        arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      acc_one_pick(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), tail, e, id, r, am, er, ok,
+        ea => et => acc_one(tail, e, id, r, ea, et, ok))
+    case Cli.Sub{x0, x1, x2} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Version{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Alias{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Hidden{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Example{x0, x1} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.After{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.SubOptional{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.External{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Exclusive{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.NeedOne{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Id{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Required{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.AttrDefault{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.AttrEnv{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Global{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Heading{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.As{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.OneOf{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Delim{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Hyphen{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Rest{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Bare{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Conflicts{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Requires{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Group{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.Builtin{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+
+# What a scope's ghost lists hold: the items' lint tree, the seen ids
+# covering the inherited globals, which hold one arg of id at most and no
+# positional.
+def B0(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String) -> Bool:
+  Bool.and(qt(I, S, List.append(&2, Cli.Seen,
+    Cli.global_entries(Cli.lint_items(I)), S)),
+    Bool.and(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+      Bool.and(am1(G, id), nonpos(G))))
+
+def b0_qt(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    b: {B0(I, G, S, id) == True{} : Bool}) ->
+    {qt(I, S, List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(I)), S)) == True{} : Bool}:
+  and_left(qt(I, S, List.append(&2, Cli.Seen,
+    Cli.global_entries(Cli.lint_items(I)), S)),
+    Bool.and(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+      Bool.and(am1(G, id), nonpos(G))), b)
+
+def b0_rest(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    b: {B0(I, G, S, id) == True{} : Bool}) ->
+    {Bool.and(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+      Bool.and(am1(G, id), nonpos(G))) == True{} : Bool}:
+  and_right(qt(I, S, List.append(&2, Cli.Seen,
+    Cli.global_entries(Cli.lint_items(I)), S)),
+    Bool.and(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+      Bool.and(am1(G, id), nonpos(G))), b)
+
+def b0_cov(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    b: {B0(I, G, S, id) == True{} : Bool}) ->
+    {Bool.or(Bool.not(has(G, id)), sh(S, id)) == True{} : Bool}:
+  and_left(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+    Bool.and(am1(G, id), nonpos(G)), b0_rest(I, G, S, id, b))
+
+def b0_am(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    b: {B0(I, G, S, id) == True{} : Bool}) ->
+    {am1(G, id) == True{} : Bool}:
+  and_left(am1(G, id), nonpos(G),
+    and_right(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+      Bool.and(am1(G, id), nonpos(G)), b0_rest(I, G, S, id, b)))
+
+def b0_np(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    b: {B0(I, G, S, id) == True{} : Bool}) ->
+    {nonpos(G) == True{} : Bool}:
+  and_right(am1(G, id), nonpos(G),
+    and_right(Bool.or(Bool.not(has(G, id)), sh(S, id)),
+      Bool.and(am1(G, id), nonpos(G)), b0_rest(I, G, S, id, b)))
+
+# qam on the items' tree: at most one arg of id, and none when seen has one.
+def b0_qam(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String,
+    b: {B0(I, G, S, id) == True{} : Bool}) ->
+    {Bool.and(am1(I, id), Bool.or(Bool.not(has(I, id)), Bool.not(sh(S, id))))
+      == True{} : Bool}:
+  qam(I, S, List.append(&2, Cli.Seen,
+    Cli.global_entries(Cli.lint_items(I)), S), id, b0_qt(I, G, S, id, b))
+
+def hit_some(m: Maybe<&2, Cli.OptFound>, +I: List<&2, Cli.Item>,
+    +G: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>, +q: String,
+    -x: Cli.ArgInfo, -pol: Bool, +e: Cli.ScanEvent, +id: String,
+    em: {Cli.find_option(I, q) == m : Maybe<&2, Cli.OptFound>},
+    ef: {Maybe.or(&2, Cli.OptFound, m, Cli.find_option(G, q))
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    +ec: {String.eq(Cli.info_id(x), id) == True{} : Bool},
+    +amI: {am1(I, id) == True{} : Bool},
+    +dis: {Bool.or(Bool.not(has(I, id)), Bool.not(sh(S, id))) == True{}
+      : Bool},
+    +amG: {am1(G, id) == True{} : Bool},
+    +cov: {Bool.or(Bool.not(has(G, id)), sh(S, id)) == True{} : Bool},
+    +ok: {ev_ok(e, Cli.info_kind(x), Cli.info_attrs(x), id) == True{}
+      : Bool}) ->
+    ({acc(G, e, id) == True{} : Bool} & {acc(I, e, id) == True{} : Bool}):
+  match m:
+    case Some{f}:
+      +rI = fo_ref(I, q, x, pol, id, Equal.trans(Maybe<&2, Cli.OptFound>,
+        Cli.find_option(I, q), Some{f}, Some{Cli.OptFound{x, pol}}, em, ef),
+        amI, ec)
+      (acc_none(G, e, id, b_ornot(has(G, id), sh(S, id), cov,
+        b_nand(has(I, id), sh(S, id), dis, ref_found(I, id, x, rI)))),
+        acc_one(I, e, id, x, amI, rI, ok))
+    case None{}:
+      +rG = fo_ref(G, q, x, pol, id, ef, amG, ec)
+      (acc_one(G, e, id, x, amG, rG, ok),
+        acc_none(I, e, id, b_nand2(has(I, id), sh(S, id), dis,
+          b_imp(has(G, id), sh(S, id), cov, ref_found(G, id, x, rG)))))
+
+def hit_c(c: Bool, +I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +q: String, -x: Cli.ArgInfo, -pol: Bool,
+    +e: Cli.ScanEvent, +id: String,
+    ec: {String.eq(Cli.info_id(x), id) == c : Bool},
+    ef: {Maybe.or(&2, Cli.OptFound, Cli.find_option(I, q),
+      Cli.find_option(G, q)) == Some{Cli.OptFound{x, pol}}
+      : Maybe<&2, Cli.OptFound>},
+    +b: {B0(I, G, S, id) == True{} : Bool},
+    ok: {ev_ok(e, Cli.info_kind(x), Cli.info_attrs(x), id) == True{} : Bool},
+    +eo: {off(e, id) == Bool.not(c) : Bool}) ->
+    ({acc(G, e, id) == True{} : Bool} & {acc(I, e, id) == True{} : Bool}):
+  match c:
+    case True{}:
+      +qa = b0_qam(I, G, S, id, b)
+      hit_some(Cli.find_option(I, q), I, G, S, q, x, pol, e, id, {==}, ef, ec,
+        and_left(am1(I, id), Bool.or(Bool.not(has(I, id)),
+          Bool.not(sh(S, id))), qa),
+        and_right(am1(I, id), Bool.or(Bool.not(has(I, id)),
+          Bool.not(sh(S, id))), qa),
+        b0_am(I, G, S, id, b), b0_cov(I, G, S, id, b), ok)
+    case False{}: (acc_off(G, e, id, eo), acc_off(I, e, id, eo))
+
+# A hit for an arg the scope's lookup finds, which that arg accepts and
+# which is off id unless that arg's id is id, every arg of the scope's
+# ghost lists accepts.
+def scope_hit(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +p: List<&2, String>, +q: String,
+    x: Cli.ArgInfo, -pol: Bool, +e: Cli.ScanEvent, +id: String,
+    +b: {B0(I, G, S, id) == True{} : Bool},
+    ef: {Cli.find_option_scope(Cli.Scope{p,
+      Cli.spec_node(I, Cli.spec_items(G))}, q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    ok: {ev_ok(e, Cli.info_kind(x), Cli.info_attrs(x), id) == True{} : Bool},
+    eo: {off(e, id) == Bool.not(String.eq(Cli.info_id(x), id)) : Bool}) ->
+    ({acc(G, e, id) == True{} : Bool} & {acc(I, e, id) == True{} : Bool}):
+  hit_c(String.eq(Cli.info_id(x), id), I, G, S, q, x, pol, e, id, {==},
+    Equal.trans(Maybe<&2, Cli.OptFound>,
+      Maybe.or(&2, Cli.OptFound, Cli.find_option(I, q),
+        Cli.find_option(G, q)),
+      Cli.find_option_scope(Cli.Scope{p,
+        Cli.spec_node(I, Cli.spec_items(G))}, q),
+      Some{Cli.OptFound{x, pol}},
+      Equal.sym(Maybe<&2, Cli.OptFound>,
+        Cli.find_option_scope(Cli.Scope{p,
+          Cli.spec_node(I, Cli.spec_items(G))}, q),
+        Maybe.or(&2, Cli.OptFound, Cli.find_option(I, q),
+          Cli.find_option(G, q)), Laws.p19_option(I, G, p, q)), ef),
+    b, ok, eo)
+
+# P21 scan: each mode the scan reaches keeps its scope at a path of the
+# command's tree, with the ghost lists of that scope's own args (I) and the
+# globals it inherits (G), the ids lint saw above it (S), and every event
+# accepted by every arg of I and G with the law's id.
+
+# The own items (hi) and inherited globals (hg) at a path, as scope_args
+# walks them.
+def hi(p: List<&2, String>, I: List<&2, Cli.Item>) -> List<&2, Cli.Item>:
+  match p:
+    case Nil{}: I
+    case n <> t: hi(t, Cli.sub_items(Cli.find_sub(I, n)))
+
+def hg(p: List<&2, String>, +I: List<&2, Cli.Item>,
+    G: List<&2, Cli.Item>) -> List<&2, Cli.Item>:
+  match p:
+    case Nil{}: G
+    case n <> t:
+      hg(t, Cli.sub_items(Cli.find_sub(I, n)),
+        List.append(&2, Cli.Item, Cli.global_items(I), G))
+
+def hi_snoc(p: List<&2, String>, -n: String, -I: List<&2, Cli.Item>) ->
+    {hi(List.append(&2, String, p, [n]), I)
+      == Cli.sub_items(Cli.find_sub(hi(p, I), n)) : List<&2, Cli.Item>}:
+  match p:
+    case Nil{}: {==}
+    case m <> t: hi_snoc(t, n, Cli.sub_items(Cli.find_sub(I, m)))
+
+def hg_snoc(p: List<&2, String>, -n: String, -I: List<&2, Cli.Item>,
+    -G: List<&2, Cli.Item>) ->
+    {hg(List.append(&2, String, p, [n]), I, G)
+      == List.append(&2, Cli.Item, Cli.global_items(hi(p, I)), hg(p, I, G))
+      : List<&2, Cli.Item>}:
+  match p:
+    case Nil{}: {==}
+    case m <> t:
+      hg_snoc(t, n, Cli.sub_items(Cli.find_sub(I, m)),
+        List.append(&2, Cli.Item, Cli.global_items(I), G))
+
+def sa_hg(p: List<&2, String>, -I: List<&2, Cli.Item>,
+    -G: List<&2, Cli.Item>) ->
+    {Cli.scope_args(p, I, G) == List.append(&2, Cli.Item, hg(p, I, G),
+      hi(p, I)) : List<&2, Cli.Item>}:
+  match p:
+    case Nil{}: {==}
+    case n <> t:
+      sa_hg(t, Cli.sub_items(Cli.find_sub(I, n)),
+        List.append(&2, Cli.Item, Cli.global_items(I), G))
+
+# What a scope and its events keep, at some path p of items0.
+def ScInv(scope: Cli.Scope, events: List<&2, Cli.ScanEvent>,
+    items0: List<&2, Cli.Item>, id: String) -> Type:
+  &p: List<&2, String> -> &I: List<&2, Cli.Item> ->
+  &G: List<&2, Cli.Item> -> &S: List<&2, Cli.Seen> ->
+  ({scope == Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))} : Cli.Scope} &
+   ({hi(p, items0) == I : List<&2, Cli.Item>} &
+    ({hg(p, items0, Nil{}) == G : List<&2, Cli.Item>} &
+     ({B0(I, G, S, id) == True{} : Bool} &
+      ({ev_all(events, G, id) == True{} : Bool} &
+       {ev_all(events, I, id) == True{} : Bool})))))
+
+def SInv(st: Cli.ScanState, items0: List<&2, Cli.Item>, id: String) -> Type:
+  match st:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      ScInv(scope, events, items0, id)
+
+def TInv(t: Cli.Tail, items0: List<&2, Cli.Item>, id: String) -> Type:
+  match t:
+    case Cli.Faulted{st}: SInv(st, items0, id)
+    case Cli.Walk{st}: SInv(st, items0, id)
+    case Cli.Stopped{st}: SInv(st, items0, id)
+
+# The option a Fetch waits on is one its scope finds, and takes a value.
+def FInv(st: Cli.ScanState, info: Cli.ArgInfo) -> Type:
+  &q: String -> &pol: Bool ->
+  ({Cli.find_option_scope(Cli.scan_state_scope(st), q)
+      == Some{Cli.OptFound{info, pol}} : Maybe<&2, Cli.OptFound>} &
+   {Cli.kind_valued(Cli.info_kind(info)) == True{} : Bool})
+
+def MInv(m: Cli.Mode, items0: List<&2, Cli.Item>, id: String) -> Type:
+  match m:
+    case Cli.Open{st}: SInv(st, items0, id)
+    case Cli.Fetch{st, info}: SInv(st, items0, id) & FInv(st, info)
+    case Cli.Operands{st, ended}: SInv(st, items0, id)
+    case Cli.Capture{st, name}: SInv(st, items0, id)
+    case Cli.Closed{t}: TInv(t, items0, id)
+
+# An event off id keeps the invariant.
+def push_off(state: Cli.ScanState, +e: Cli.ScanEvent,
+    -items0: List<&2, Cli.Item>, +id: String,
+    +eo: {off(e, id) == True{} : Bool}, inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_event(state, e), items0, id):
+  match state:
+    case Cli.ScanState{scope, +events, resting, count, external, issue}:
+      match inv:
+        case (p, (+I, (+G, (S, (es, (ei, (eg, (b, (eG, eI))))))))):
+          (p, (I, (G, (S, (es, (ei, (eg, (b,
+            (and_true(acc(G, e, id), ev_all(events, G, id),
+              acc_off(G, e, id, eo), eG),
+             and_true(acc(I, e, id), ev_all(events, I, id),
+              acc_off(I, e, id, eo), eI))))))))))
+
+def err_inv(state: Cli.ScanState, -fault: Cli.ScanFault,
+    -items0: List<&2, Cli.Item>, -id: String, inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_error(state, fault), items0, id):
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}: inv
+
+def ext_inv(state: Cli.ScanState, -name: String, -args: List<&2, String>,
+    -items0: List<&2, Cli.Item>, -id: String, inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_external(state, name, args), items0, id):
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}: inv
+
+def settle_case(resting: Bool, issue: Maybe<&2, Cli.ScanFault>,
+    -scope: Cli.Scope, -events: List<&2, Cli.ScanEvent>, -count: Nat,
+    -external: Maybe<&2, Cli.ExternalArgs>, -items0: List<&2, Cli.Item>,
+    -id: String, inv: ScInv(scope, events, items0, id)) ->
+    MInv(Cli.scan_settle_case(resting, issue, scope, events, count,
+      external), items0, id):
+  match resting:
+    case True{}:
+      match issue:
+        case None{}: inv
+        case Some{f}: inv
+    case False{}:
+      match issue:
+        case None{}: inv
+        case Some{f}: inv
+
+def settle_inv(state: Cli.ScanState, -items0: List<&2, Cli.Item>,
+    -id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_settle(state), items0, id):
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      settle_case(resting, issue, scope, events, count, external, items0, id,
+        inv)
+
+def push_acc(-scope: Cli.Scope, +events: List<&2, Cli.ScanEvent>,
+    -items0: List<&2, Cli.Item>, p: List<&2, String>, +I: List<&2, Cli.Item>,
+    +G: List<&2, Cli.Item>, S: List<&2, Cli.Seen>, +e: Cli.ScanEvent,
+    +id: String,
+    h: ({acc(G, e, id) == True{} : Bool} & {acc(I, e, id) == True{} : Bool}),
+    es: {scope == Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))}
+      : Cli.Scope},
+    ei: {hi(p, items0) == I : List<&2, Cli.Item>},
+    eg: {hg(p, items0, Nil{}) == G : List<&2, Cli.Item>},
+    b: {B0(I, G, S, id) == True{} : Bool},
+    eG: {ev_all(events, G, id) == True{} : Bool},
+    eI: {ev_all(events, I, id) == True{} : Bool}) ->
+    ScInv(scope, e <> events, items0, id):
+  match h:
+    case (aG, aI):
+      (p, (I, (G, (S, (es, (ei, (eg, (b,
+        (and_true(acc(G, e, id), ev_all(events, G, id), aG, eG),
+         and_true(acc(I, e, id), ev_all(events, I, id), aI, eI))))))))))
+
+# A hit for an arg the scope finds, which that arg accepts and which is off
+# id unless that arg's id is id, keeps the invariant.
+def push_hit(state: Cli.ScanState, +q: String, x: Cli.ArgInfo, -pol: Bool,
+    +e: Cli.ScanEvent, -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    ok: {ev_ok(e, Cli.info_kind(x), Cli.info_attrs(x), id) == True{} : Bool},
+    eo: {off(e, id) == Bool.not(String.eq(Cli.info_id(x), id)) : Bool},
+    inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_event(state, e), items0, id):
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      match inv:
+        case (+p, (+I, (+G, (+S, (+es, (ei, (eg, (+b, (eG, eI))))))))):
+          push_acc(scope, events, items0, p, I, G, S, e, id,
+            scope_hit(I, G, S, p, q, x, pol, e, id, b,
+              (%es : {Cli.find_option_scope(_, q)
+                == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>}
+              ef), ok, eo),
+            es, ei, eg, b, eG, eI)
+
+def vr_hit(x: Cli.ArgInfo, state: Cli.ScanState, +q: String, -pol: Bool,
+    +v: String, -items0: List<&2, Cli.Item>, +id: String,
+    eb: {Cli.value_bad(Cli.info_attrs(x), v) == None{} : Maybe<&2, Cli.Bad>},
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_value_result(None{}, state, x, v), items0, id):
+  match x:
+    case Cli.ArgInfo{+k, u, s, l, +kind, +a}:
+      push_hit(state, q, Cli.ArgInfo{k, u, s, l, kind, a}, pol,
+        Cli.ValueHit{k, v}, items0, id, ef,
+        b_or_r(Bool.not(String.eq(k, id)), Bool.and(Cli.kind_valued(kind),
+          no_bad(Cli.value_bad(a, v))), and_true(Cli.kind_valued(kind),
+          no_bad(Cli.value_bad(a, v)), kv, nb_of(Cli.value_bad(a, v), eb))),
+        {==}, inv)
+
+def vr_inv(found: Maybe<&2, Cli.Bad>, state: Cli.ScanState, x: Cli.ArgInfo,
+    +q: String, -pol: Bool, +v: String, -items0: List<&2, Cli.Item>,
+    +id: String,
+    eb: {Cli.value_bad(Cli.info_attrs(x), v) == found : Maybe<&2, Cli.Bad>},
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_value_result(found, state, x, v), items0, id):
+  match found:
+    case None{}: vr_hit(x, state, q, pol, v, items0, id, eb, ef, kv, inv)
+    case Some{bd}:
+      match bd:
+        case Cli.Bad{bad, why}:
+          err_inv(state, Cli.E04{Cli.arg_display(x), bad, why}, items0, id, inv)
+
+# A value for an arg the scope finds, which takes a value, keeps the
+# invariant.
+def value_inv(state: Cli.ScanState, +q: String, +x: Cli.ArgInfo, -pol: Bool,
+    +v: String, -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_value(state, x, v), items0, id):
+  vr_inv(Cli.value_bad(Cli.info_attrs(x), v), state, x, q, pol, v, items0,
+    id, {==}, ef, kv, inv)
+
+def so_inv(attached: Maybe<&2, String>, +state: Cli.ScanState,
+    +x: Cli.ArgInfo, -pol: Bool, +e: Cli.ScanEvent, +q: String,
+    -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    ok: {ev_ok(e, Cli.info_kind(x), Cli.info_attrs(x), id) == True{} : Bool},
+    eo: {off(e, id) == Bool.not(String.eq(Cli.info_id(x), id)) : Bool},
+    eh: {Cli.scan_event(state, e) == Cli.scan_simple_hit(state, x, pol)
+      : Cli.ScanState},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_simple_option(attached, state, x, pol), items0, id):
+  match attached:
+    case Some{+v}:
+      settle_inv(Cli.scan_error(state, Cli.E05{Cli.arg_display(x), v}),
+        items0, id, err_inv(state, Cli.E05{Cli.arg_display(x), v}, items0, id,
+          inv))
+    case None{}:
+      %eh : MInv(Cli.scan_settle(_), items0, id)
+      settle_inv(Cli.scan_event(state, e), items0, id,
+        push_hit(state, q, x, pol, e, items0, id, ef, ok, eo, inv))
+
+def opt_inv(attached: Maybe<&2, String>, +state: Cli.ScanState,
+    +x: Cli.ArgInfo, +q: String, +pol: Bool, -items0: List<&2, Cli.Item>,
+    +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_option(attached, state, x), items0, id):
+  match attached:
+    case Some{+v}:
+      settle_inv(Cli.scan_value(state, x, v), items0, id,
+        value_inv(state, q, x, pol, v, items0, id, ef, kv, inv))
+    case None{}: (inv, (q, (pol, (ef, kv))))
+
+def bare_inv(attached: Maybe<&2, String>, +state: Cli.ScanState,
+    +x: Cli.ArgInfo, +q: String, -pol: Bool, -items0: List<&2, Cli.Item>,
+    +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_bare_option(attached, state, x), items0, id):
+  match attached:
+    case Some{+v}:
+      settle_inv(Cli.scan_value(state, x, v), items0, id,
+        value_inv(state, q, x, pol, v, items0, id, ef, kv, inv))
+    case None{}:
+      settle_inv(Cli.scan_value(state, x, Cli.info_bare_value(x)), items0, id,
+        value_inv(state, q, x, pol, Cli.info_bare_value(x), items0, id, ef,
+          kv, inv))
+
+def kind_inv(kind: Cli.UsageKind, +k: String, +u: String, +s: String,
+    +l: String, +a: List<&2, Cli.Item>, +pol: Bool,
+    attached: Maybe<&2, String>, +state: Cli.ScanState, +q: String,
+    -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{Cli.ArgInfo{k, u, s, l, kind, a}, pol}}
+      : Maybe<&2, Cli.OptFound>},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_found_kind(kind, attached, state,
+      Cli.ArgInfo{k, u, s, l, kind, a}, pol), items0, id):
+  match kind:
+    case Cli.FlagKind{}:
+      so_inv(attached, state, Cli.ArgInfo{k, u, s, l, Cli.FlagKind{}, a}, pol,
+        Cli.FlagHit{k, pol}, q, items0, id, ef,
+        or_true_right(Bool.not(String.eq(k, id))), {==}, {==}, inv)
+    case Cli.CountKind{}:
+      so_inv(attached, state, Cli.ArgInfo{k, u, s, l, Cli.CountKind{}, a},
+        pol, Cli.CountHit{k}, q, items0, id, ef,
+        or_true_right(Bool.not(String.eq(k, id))), {==}, {==}, inv)
+    case Cli.NegatableKind{}:
+      so_inv(attached, state,
+        Cli.ArgInfo{k, u, s, l, Cli.NegatableKind{}, a}, pol,
+        Cli.FlagHit{k, pol}, q, items0, id, ef,
+        or_true_right(Bool.not(String.eq(k, id))), {==}, {==}, inv)
+    case Cli.OptionKind{+many}:
+      opt_inv(attached, state, Cli.ArgInfo{k, u, s, l, Cli.OptionKind{many},
+        a}, q, pol, items0, id, ef, {==}, inv)
+    case Cli.BareOptionKind{}:
+      bare_inv(attached, state, Cli.ArgInfo{k, u, s, l,
+        Cli.BareOptionKind{}, a}, q, pol, items0, id, ef, {==}, inv)
+    case Cli.PosKind{required, many}: settle_inv(state, items0, id, inv)
+
+def found_inv(f: Cli.OptFound, attached: Maybe<&2, String>,
+    +state: Cli.ScanState, +q: String, -items0: List<&2, Cli.Item>,
+    +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q) == Some{f}
+      : Maybe<&2, Cli.OptFound>},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_found(f, attached, state), items0, id):
+  match f:
+    case Cli.OptFound{x, pol}:
+      match x:
+        case Cli.ArgInfo{k, u, s, l, kind, a}:
+          kind_inv(kind, k, u, s, l, a, pol, attached, state, q, items0, id,
+            ef, inv)
+
+def bh_inv(attached: Maybe<&2, String>, +state: Cli.ScanState,
+    +event: Cli.ScanEvent, +name: String, -items0: List<&2, Cli.Item>,
+    +id: String, eo: {off(event, id) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_hit(attached, state, event, name), items0, id):
+  match attached:
+    case Some{+v}:
+      settle_inv(Cli.scan_error(state, Cli.E05{name, v}), items0, id,
+        err_inv(state, Cli.E05{name, v}, items0, id, inv))
+    case None{}: push_off(state, event, items0, id, eo, inv)
+
+def bv_inv(enabled: Bool, attached: Maybe<&2, String>, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_version(enabled, attached, state), items0, id):
+  match enabled:
+    case True{}:
+      bh_inv(attached, state, Cli.VersionHit{}, "--version", items0, id, {==},
+        inv)
+    case False{}:
+      settle_inv(Cli.scan_error(state, Cli.E01{"--version"}), items0, id,
+        err_inv(state, Cli.E01{"--version"}, items0, id, inv))
+
+def bo_inv(version: Bool, +name: String, attached: Maybe<&2, String>,
+    +state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_other(version, name, attached, state), items0, id):
+  match version:
+    case True{}:
+      bv_inv(Cli.scope_version(Cli.scan_state_scope(state)), attached, state,
+        items0, id, inv)
+    case False{}:
+      settle_inv(Cli.scan_error(state, Cli.E01{name}), items0, id,
+        err_inv(state, Cli.E01{name}, items0, id, inv))
+
+def blc_inv(help: Bool, +name: String, attached: Maybe<&2, String>,
+    state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_long_case(help, name, attached, state), items0, id):
+  match help:
+    case True{}:
+      bh_inv(attached, state, Cli.HelpHit{True{}}, "--help", items0, id, {==},
+        inv)
+    case False{}:
+      bo_inv(String.eq(name, "--version"), name, attached, state, items0, id,
+        inv)
+
+def lf_inv(found: Maybe<&2, Cli.OptFound>, +name: String,
+    attached: Maybe<&2, String>, +state: Cli.ScanState, +q: String,
+    -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q) == found
+      : Maybe<&2, Cli.OptFound>},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_long_found(found, name, attached, state), items0, id):
+  match found:
+    case Some{f}: found_inv(f, attached, state, q, items0, id, ef, inv)
+    case None{}:
+      blc_inv(String.eq(name, "--help"), name, attached, state, items0, id,
+        inv)
+
+def long_inv(+token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_long(token, state), items0, id):
+  lf_inv(Cli.find_option_scope(Cli.scan_state_scope(state),
+    Cli.before_equal(token)), Cli.before_equal(token),
+    Cli.after_equal(token), state, Cli.before_equal(token), items0, id, {==},
+    inv)
+
+def ok_inv(state: Cli.ScanState, token: String, -items0: List<&2, Cli.Item>,
+    +id: String, inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_operand_ok(state, token), items0, id):
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      push_off(Cli.ScanState{scope, events, resting, count, external, issue},
+        Cli.Operand{token}, items0, id, {==}, inv)
+
+def opc_inv(allowed: Bool, state: Cli.ScanState, token: String,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_operand_case(allowed, state, token), items0, id):
+  match allowed:
+    case True{}: ok_inv(state, token, items0, id, inv)
+    case False{}: err_inv(state, Cli.E09{token}, items0, id, inv)
+
+def operand_inv(state: Cli.ScanState, token: String,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_operand(state, token), items0, id):
+  match state:
+    case Cli.ScanState{+scope, events, resting, +count, external, issue}:
+      opc_inv(Cli.scope_can_take(scope, count),
+        Cli.ScanState{scope, events, resting, count, external, issue}, token,
+        items0, id, inv)
+
+# What scan_short_go does with a found arg of each kind, for a head h.
+def SomeEqs(h: Char) -> Type:
+  (@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
+    @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
+    {Cli.scan_short_go(t, Cli.scan_event(st, Cli.FlagHit{k, p}),
+      Cli.find_short_for_head(t, Cli.scan_event(st, Cli.FlagHit{k, p})))
+      == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
+        Cli.ArgInfo{k, u, s, l, Cli.FlagKind{}, a}, p}}) : Cli.Mode}) &
+  ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
+    @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
+    {Cli.scan_short_go(t, Cli.scan_event(st, Cli.CountHit{k}),
+      Cli.find_short_for_head(t, Cli.scan_event(st, Cli.CountHit{k})))
+      == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
+        Cli.ArgInfo{k, u, s, l, Cli.CountKind{}, a}, p}}) : Cli.Mode}) &
+  ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
+    @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
+    {Cli.scan_short_go(t, Cli.scan_event(st, Cli.FlagHit{k, p}),
+      Cli.find_short_for_head(t, Cli.scan_event(st, Cli.FlagHit{k, p})))
+      == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
+        Cli.ArgInfo{k, u, s, l, Cli.NegatableKind{}, a}, p}}) : Cli.Mode}) &
+  ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
+    @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
+    @m: Bool ->
+    {Cli.scan_short_value(t, st, Cli.ArgInfo{k, u, s, l, Cli.OptionKind{m},
+      a}) == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
+        Cli.ArgInfo{k, u, s, l, Cli.OptionKind{m}, a}, p}}) : Cli.Mode}) &
+  ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
+    @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
+    {Cli.scan_short_bare_value(t, st, Cli.ArgInfo{k, u, s, l,
+      Cli.BareOptionKind{}, a}) == Cli.scan_short_go(SCon{h, t}, st,
+      Some{Cli.OptFound{Cli.ArgInfo{k, u, s, l, Cli.BareOptionKind{}, a}, p}})
+      : Cli.Mode}) &
+   (@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
+    @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
+    @r: Bool -> @m: Bool ->
+    {Cli.scan_settle(st) == Cli.scan_short_go(SCon{h, t}, st,
+      Some{Cli.OptFound{Cli.ArgInfo{k, u, s, l, Cli.PosKind{r, m}, a}, p}})
+      : Cli.Mode})))))
+
+# A head that is neither h nor V: an unknown one is E01.
+def ShortOther(h: Char) -> Type:
+  (@t: String -> @st: Cli.ScanState ->
+    {Cli.scan_settle(Cli.scan_error(st, Cli.E01{String.append("-",
+      Char.show(h))})) == Cli.scan_short_go(SCon{h, t}, st, None{})
+      : Cli.Mode}) & SomeEqs(h)
+
+def ShortView(h: Char) -> Type:
+  {Chr{104} == h : Char} | ({Chr{86} == h : Char} | ShortOther(h))
+
+def some_eqs_104() -> SomeEqs(Chr{104}):
+  (t => st => k => u => s => l => a => p => {==},
+   (t => st => k => u => s => l => a => p => {==},
+    (t => st => k => u => s => l => a => p => {==},
+     (t => st => k => u => s => l => a => p => m => {==},
+      (t => st => k => u => s => l => a => p => {==},
+       t => st => k => u => s => l => a => p => r => m => {==})))))
+
+def some_eqs_86() -> SomeEqs(Chr{86}):
+  (t => st => k => u => s => l => a => p => {==},
+   (t => st => k => u => s => l => a => p => {==},
+    (t => st => k => u => s => l => a => p => {==},
+     (t => st => k => u => s => l => a => p => m => {==},
+      (t => st => k => u => s => l => a => p => {==},
+       t => st => k => u => s => l => a => p => r => m => {==})))))
+
+# Arms: python3 tools/charsplit.py '(t => st => {==}, (F, (F, (F, (O, (F, P))))))' 104 86
+# where F, O and P are SomeEqs' closures proved by {==}.
+def short_view(h: Char) -> ShortView(h):
+  match h:
+    case Chr{U32{WCon{True{}, _}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inl{{==}}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, _}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inl{{==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, WCon{False{}, _}}}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}:
+      Inr{Inr{(t => st => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => {==}, (t => st => k => u => s => l => a => p => m => {==}, (t => st => k => u => s => l => a => p => {==}, t => st => k => u => s => l => a => p => r => m => {==}))))))}}
+
+def ShortIH(t: String, items0: List<&2, Cli.Item>, id: String) -> Type:
+  @st: Cli.ScanState -> SInv(st, items0, id) ->
+    MInv(Cli.scan_short_go(t, st, Cli.find_short_for_head(t, st)), items0, id)
+
+def ssv_inv(value: String, +state: Cli.ScanState, +x: Cli.ArgInfo,
+    +q: String, +pol: Bool, -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_value_attached(value, state, x), items0, id):
+  match value:
+    case SNil{}: (inv, (q, (pol, (ef, kv))))
+    case SCon{+c, +r}:
+      settle_inv(Cli.scan_value(state, x, SCon{c, r}), items0, id,
+        value_inv(state, q, x, pol, SCon{c, r}, items0, id, ef, kv, inv))
+
+def sbv_inv(chars: String, +state: Cli.ScanState, +x: Cli.ArgInfo,
+    +q: String, -pol: Bool, -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{x, pol}} : Maybe<&2, Cli.OptFound>},
+    kv: {Cli.kind_valued(Cli.info_kind(x)) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_bare_value(chars, state, x), items0, id):
+  match chars:
+    case SNil{}:
+      settle_inv(Cli.scan_value(state, x, Cli.info_bare_value(x)), items0, id,
+        value_inv(state, q, x, pol, Cli.info_bare_value(x), items0, id, ef,
+          kv, inv))
+    case SCon{+c, +r}:
+      settle_inv(Cli.scan_value(state, x, Cli.short_attached(SCon{c, r})),
+        items0, id, value_inv(state, q, x, pol,
+          Cli.short_attached(SCon{c, r}), items0, id, ef, kv, inv))
+
+def sg_kind(kind: Cli.UsageKind, +k: String, +u: String, +s: String,
+    +l: String, +a: List<&2, Cli.Item>, +pol: Bool, -h: Char, +t: String,
+    +state: Cli.ScanState, +q: String, -items0: List<&2, Cli.Item>,
+    +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Some{Cli.OptFound{Cli.ArgInfo{k, u, s, l, kind, a}, pol}}
+      : Maybe<&2, Cli.OptFound>},
+    inv: SInv(state, items0, id), eqs: SomeEqs(h),
+    ih: ShortIH(t, items0, id)) ->
+    MInv(Cli.scan_short_go(SCon{h, t}, state,
+      Some{Cli.OptFound{Cli.ArgInfo{k, u, s, l, kind, a}, pol}}), items0, id):
+  match kind:
+    case Cli.FlagKind{}:
+      match eqs:
+        case (fl, rest):
+          %fl(t, state, k, u, s, l, a, pol) : MInv(_, items0, id)
+          ih(Cli.scan_event(state, Cli.FlagHit{k, pol}),
+            push_hit(state, q, Cli.ArgInfo{k, u, s, l, Cli.FlagKind{}, a}, pol,
+              Cli.FlagHit{k, pol}, items0, id, ef,
+              or_true_right(Bool.not(String.eq(k, id))), {==}, inv))
+    case Cli.CountKind{}:
+      match eqs:
+        case (fl, (co, rest)):
+          %co(t, state, k, u, s, l, a, pol) : MInv(_, items0, id)
+          ih(Cli.scan_event(state, Cli.CountHit{k}),
+            push_hit(state, q, Cli.ArgInfo{k, u, s, l, Cli.CountKind{}, a},
+              pol, Cli.CountHit{k}, items0, id, ef,
+              or_true_right(Bool.not(String.eq(k, id))), {==}, inv))
+    case Cli.NegatableKind{}:
+      match eqs:
+        case (fl, (co, (ng, rest))):
+          %ng(t, state, k, u, s, l, a, pol) : MInv(_, items0, id)
+          ih(Cli.scan_event(state, Cli.FlagHit{k, pol}),
+            push_hit(state, q,
+              Cli.ArgInfo{k, u, s, l, Cli.NegatableKind{}, a}, pol,
+              Cli.FlagHit{k, pol}, items0, id, ef,
+              or_true_right(Bool.not(String.eq(k, id))), {==}, inv))
+    case Cli.OptionKind{+many}:
+      match eqs:
+        case (fl, (co, (ng, (op, rest)))):
+          %op(t, state, k, u, s, l, a, pol, many) : MInv(_, items0, id)
+          ssv_inv(Cli.short_attached(t), state,
+            Cli.ArgInfo{k, u, s, l, Cli.OptionKind{many}, a}, q, pol, items0,
+            id, ef, {==}, inv)
+    case Cli.BareOptionKind{}:
+      match eqs:
+        case (fl, (co, (ng, (op, (ba, po))))):
+          %ba(t, state, k, u, s, l, a, pol) : MInv(_, items0, id)
+          sbv_inv(t, state, Cli.ArgInfo{k, u, s, l, Cli.BareOptionKind{}, a},
+            q, pol, items0, id, ef, {==}, inv)
+    case Cli.PosKind{+required, +many}:
+      match eqs:
+        case (fl, (co, (ng, (op, (ba, po))))):
+          %po(t, state, k, u, s, l, a, pol, required, many) :
+            MInv(_, items0, id)
+          settle_inv(state, items0, id, inv)
+
+def sg_found(found: Maybe<&2, Cli.OptFound>, -h: Char, +t: String,
+    +state: Cli.ScanState, +q: String, -items0: List<&2, Cli.Item>,
+    +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q) == found
+      : Maybe<&2, Cli.OptFound>},
+    inv: SInv(state, items0, id),
+    nc: SInv(state, items0, id) ->
+      MInv(Cli.scan_short_go(SCon{h, t}, state, None{}), items0, id),
+    eqs: SomeEqs(h), ih: ShortIH(t, items0, id)) ->
+    MInv(Cli.scan_short_go(SCon{h, t}, state, found), items0, id):
+  match found:
+    case None{}: nc(inv)
+    case Some{f}:
+      match f:
+        case Cli.OptFound{x, pol}:
+          match x:
+            case Cli.ArgInfo{k, u, s, l, kind, a}:
+              sg_kind(kind, k, u, s, l, a, pol, h, t, state, q, items0, id, ef,
+                inv, eqs, ih)
+
+def eqs_at(-c: Char, -h: Char, e: {c == h : Char}, x: SomeEqs(c)) ->
+    SomeEqs(h):
+  %e : SomeEqs(_)
+  x
+
+def help_none(-h: Char, t: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, e: {Chr{104} == h : Char},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_go(SCon{h, t}, state, None{}), items0, id):
+  %e : MInv(Cli.scan_short_go(SCon{_, t}, state, None{}), items0, id)
+  push_off(state, Cli.HelpHit{False{}}, items0, id, {==}, inv)
+
+def sv_inv(enabled: Bool, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_version(enabled, state), items0, id):
+  match enabled:
+    case True{}: push_off(state, Cli.VersionHit{}, items0, id, {==}, inv)
+    case False{}:
+      settle_inv(Cli.scan_error(state, Cli.E01{"-V"}), items0, id,
+        err_inv(state, Cli.E01{"-V"}, items0, id, inv))
+
+def version_none(-h: Char, t: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, e: {Chr{86} == h : Char},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_go(SCon{h, t}, state, None{}), items0, id):
+  %e : MInv(Cli.scan_short_go(SCon{_, t}, state, None{}), items0, id)
+  sv_inv(Cli.scope_version(Cli.scan_state_scope(state)), state, items0, id,
+    inv)
+
+def other_none(+h: Char, +t: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String,
+    ne: @t: String -> @st: Cli.ScanState ->
+      {Cli.scan_settle(Cli.scan_error(st, Cli.E01{String.append("-",
+        Char.show(h))})) == Cli.scan_short_go(SCon{h, t}, st, None{})
+        : Cli.Mode},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_go(SCon{h, t}, state, None{}), items0, id):
+  %ne(t, state) : MInv(_, items0, id)
+  settle_inv(Cli.scan_error(state, Cli.E01{String.append("-",
+    Char.show(h))}), items0, id, err_inv(state, Cli.E01{String.append("-",
+    Char.show(h))}, items0, id, inv))
+
+def sg_cons(+h: Char, +t: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, v: ShortView(h),
+    inv: SInv(state, items0, id), ih: ShortIH(t, items0, id)) ->
+    MInv(Cli.scan_short_go(SCon{h, t}, state,
+      Cli.find_short_for_head(SCon{h, t}, state)), items0, id):
+  match v:
+    case Inl{+e}:
+      sg_found(Cli.find_short_for_head(SCon{h, t}, state), h, t, state,
+        String.append("-", Char.show(h)), items0, id, {==}, inv,
+        iv => help_none(h, t, state, items0, id, e, iv),
+        eqs_at(Chr{104}, h, e, some_eqs_104()), ih)
+    case Inr{Inl{+e}}:
+      sg_found(Cli.find_short_for_head(SCon{h, t}, state), h, t, state,
+        String.append("-", Char.show(h)), items0, id, {==}, inv,
+        iv => version_none(h, t, state, items0, id, e, iv),
+        eqs_at(Chr{86}, h, e, some_eqs_86()), ih)
+    case Inr{Inr{(ne, eqs)}}:
+      sg_found(Cli.find_short_for_head(SCon{h, t}, state), h, t, state,
+        String.append("-", Char.show(h)), items0, id, {==}, inv,
+        iv => other_none(h, t, state, items0, id, ne, iv), eqs, ih)
+
+def sg_inv(chars: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_short_go(chars, state,
+      Cli.find_short_for_head(chars, state)), items0, id):
+  match chars:
+    case SNil{}: settle_inv(state, items0, id, inv)
+    case SCon{+h, +t}:
+      sg_cons(h, t, state, items0, id, short_view(h), inv,
+        st => iv => sg_inv(t, st, items0, id, iv))
+
+def dc_inv(operand: Bool, +token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_dash_case(operand, token, state), items0, id):
+  match operand:
+    case True{}:
+      settle_inv(Cli.scan_operand(state, token), items0, id,
+        operand_inv(state, token, items0, id, inv))
+    case False{}: sg_inv(String.drop(token, 1n), state, items0, id, inv)
+
+def dash_inv(+token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_dash_token(token, state), items0, id):
+  dc_inv(Cli.scan_hyphen_candidate(state, token), token, state, items0, id,
+    inv)
+
+# ---- Descending into a subcommand ----
+
+def b_trans_imp(a: Bool, b: Bool, c: Bool,
+    e1: {Bool.or(Bool.not(a), b) == True{} : Bool},
+    e2: {Bool.or(Bool.not(b), c) == True{} : Bool}) ->
+    {Bool.or(Bool.not(a), c) == True{} : Bool}:
+  match a:
+    case True{}: b_imp(b, c, e2, e1)
+    case False{}: {==}
+
+def b_or_mono(c: Bool, a: Bool, -b: Bool,
+    e: {Bool.or(Bool.not(a), b) == True{} : Bool}) ->
+    {Bool.or(Bool.not(Bool.or(c, a)), Bool.or(c, b)) == True{} : Bool}:
+  match c:
+    case True{}: {==}
+    case False{}: e
+
+def sh_l(xs: List<&2, Cli.Seen>, +ys: List<&2, Cli.Seen>, +x: String) ->
+    {Bool.or(Bool.not(sh(xs, x)), sh(List.append(&2, Cli.Seen, xs, ys), x))
+      == True{} : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case Cli.SeenArg{+old, s, l} <> +tail:
+      b_or_mono(String.eq(x, old), sh(tail, x),
+        sh(List.append(&2, Cli.Seen, tail, ys), x), sh_l(tail, ys, x))
+    case Cli.SeenSub{n} <> tail: sh_l(tail, ys, x)
+    case Cli.SeenArgAlias{n} <> tail: sh_l(tail, ys, x)
+    case Cli.SeenSubAlias{n} <> tail: sh_l(tail, ys, x)
+
+# A global of I and an inherited global of id are never both there.
+def gdis_c(+hgI: Bool, hI: Bool, hG: Bool, sS: Bool,
+    m: {hI == False{} : Bool} -> {hgI == False{} : Bool},
+    dis: {Bool.or(Bool.not(hI), Bool.not(sS)) == True{} : Bool},
+    cov: {Bool.or(Bool.not(hG), sS) == True{} : Bool}) ->
+    {Bool.or(Bool.not(hgI), Bool.not(hG)) == True{} : Bool}:
+  match hG:
+    case True{}:
+      b_or_l(Bool.not(hgI), Bool.not(True{}),
+        b_not_f(hgI, m(b_nand2(hI, sS, dis, cov))))
+    case False{}: or_true_right(Bool.not(hgI))
+
+# B0 at a subcommand ch of I, which lint checked against what it saw.
+def desc_b(+I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>,
+    +S: List<&2, Cli.Seen>, +id: String, +ch: List<&2, Cli.Item>,
+    +b: {B0(I, G, S, id) == True{} : Bool},
+    q3: {qt(ch, List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(I)), S), List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(ch)), List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(I)), S))) == True{} : Bool}) ->
+    {B0(ch, List.append(&2, Cli.Item, Cli.global_items(I), G),
+      List.append(&2, Cli.Seen, Cli.global_entries(Cli.lint_items(I)), S), id)
+      == True{} : Bool}:
+  +H = List.append(&2, Cli.Seen, Cli.global_entries(Cli.lint_items(I)), S)
+  +gI = Cli.global_items(I)
+  +qI = b0_qt(I, G, S, id, b)
+  +qa = b0_qam(I, G, S, id, b)
+  +cov = b0_cov(I, G, S, id, b)
+  and_true(qt(ch, H, List.append(&2, Cli.Seen,
+    Cli.global_entries(Cli.lint_items(ch)), H)),
+    Bool.and(Bool.or(Bool.not(has(List.append(&2, Cli.Item, gI, G), id)),
+      sh(H, id)), Bool.and(am1(List.append(&2, Cli.Item, gI, G), id),
+      nonpos(List.append(&2, Cli.Item, gI, G)))), q3,
+    and_true(Bool.or(Bool.not(has(List.append(&2, Cli.Item, gI, G), id)),
+      sh(H, id)), Bool.and(am1(List.append(&2, Cli.Item, gI, G), id),
+      nonpos(List.append(&2, Cli.Item, gI, G))),
+      (%Equal.sym(Bool, has(List.append(&2, Cli.Item, gI, G), id),
+        Bool.or(has(gI, id), has(G, id)), has_app(gI, G, id)) :
+        {Bool.or(Bool.not(_), sh(H, id)) == True{} : Bool}
+      b3(has(gI, id), has(G, id), sh(H, id), sh(S, id),
+        b_trans_imp(has(gI, id),
+          sh(Cli.global_entries(Cli.lint_items(I)), id), sh(H, id),
+          gcov(I, S, H, id, qI),
+          sh_l(Cli.global_entries(Cli.lint_items(I)), S, id)),
+        cov, sh_up(Cli.global_entries(Cli.lint_items(I)), S, id))),
+      and_true(am1(List.append(&2, Cli.Item, gI, G), id),
+        nonpos(List.append(&2, Cli.Item, gI, G)),
+        am1_app(gI, G, id, am1_glob(I, id, and_left(am1(I, id),
+          Bool.or(Bool.not(has(I, id)), Bool.not(sh(S, id))), qa)),
+          b0_am(I, G, S, id, b),
+          gdis_c(has(gI, id), has(I, id), has(G, id), sh(S, id),
+            e => has_glob(I, id, e), and_right(am1(I, id),
+              Bool.or(Bool.not(has(I, id)), Bool.not(sh(S, id))), qa), cov)),
+        nonpos_app(gI, G, gnonpos(I, S, H, qI), b0_np(I, G, S, id, b)))))
+
+def ev_none(events: List<&2, Cli.ScanEvent>, +L: List<&2, Cli.Item>,
+    +id: String, +en: {has(L, id) == False{} : Bool}) ->
+    {ev_all(events, L, id) == True{} : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +t:
+      and_true(acc(L, e, id), ev_all(t, L, id), acc_none(L, e, id, en),
+        ev_none(t, L, id, en))
+
+# An event an arg of the scope's globals G hits is kept; G has no arg of id,
+# so an event that names id is dropped.
+def ko_id(c: Bool, +k: String, +G: List<&2, Cli.Item>,
+    +ch: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    ec: {String.eq(k, id) == c : Bool},
+    eo: {off(e, id) == Bool.not(c) : Bool},
+    hn: {has(G, id) == False{} : Bool}) ->
+    {Bool.or(Bool.not(Cli.event_inherited(Some{k}, Cli.spec_items(G))),
+      acc(ch, e, id)) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(String, k, id, eq_reflect(k, id, ec)) :
+        {Bool.or(Bool.not(Cli.event_inherited(Some{_}, Cli.spec_items(G))),
+          acc(ch, e, id)) == True{} : Bool}
+      %Equal.sym(Maybe<&2, Cli.ArgInfo>,
+        Cli.find_spec_info(Cli.spec_items(G), id, None{}), None{},
+        Equal.trans(Maybe<&2, Cli.ArgInfo>,
+          Cli.find_spec_info(Cli.spec_items(G), id, None{}),
+          Cli.find_arg_info(G, id), None{}, Laws.p19_arg(G, id),
+          Equal.trans(Maybe<&2, Cli.ArgInfo>, Cli.find_arg_info(G, id),
+            Laws.arg_ref(G, id), None{}, Laws.p18_arg(G, id),
+            ref_none(G, id, hn)))) :
+        {Bool.or(Bool.not(Maybe.is_some(&2, Cli.ArgInfo, _)),
+          acc(ch, e, id)) == True{} : Bool}
+      {==}
+    case False{}:
+      b_or_r(Bool.not(Cli.event_inherited(Some{k}, Cli.spec_items(G))),
+        acc(ch, e, id), acc_off(ch, e, id, eo))
+
+def ko_hit(e: Cli.ScanEvent, +G: List<&2, Cli.Item>, +ch: List<&2, Cli.Item>,
+    +id: String, hn: {has(G, id) == False{} : Bool}) ->
+    {Bool.or(Bool.not(Cli.event_inherited(Cli.event_id(e), Cli.spec_items(G))),
+      acc(ch, e, id)) == True{} : Bool}:
+  match e:
+    case Cli.FlagHit{+k, +b}:
+      ko_id(String.eq(k, id), k, G, ch, Cli.FlagHit{k, b}, id, {==}, {==}, hn)
+    case Cli.CountHit{+k}:
+      ko_id(String.eq(k, id), k, G, ch, Cli.CountHit{k}, id, {==}, {==}, hn)
+    case Cli.ValueHit{+k, +v}:
+      ko_id(String.eq(k, id), k, G, ch, Cli.ValueHit{k, v}, id, {==}, {==},
+        hn)
+    case Cli.Operand{t}: acc_off(ch, Cli.Operand{t}, id, {==})
+    case Cli.Enter{n}: acc_off(ch, Cli.Enter{n}, id, {==})
+    case Cli.HelpHit{l}: acc_off(ch, Cli.HelpHit{l}, id, {==})
+    case Cli.VersionHit{}: acc_off(ch, Cli.VersionHit{}, id, {==})
+
+def kacc_off(events: List<&2, Cli.ScanEvent>, +G: List<&2, Cli.Item>,
+    +ch: List<&2, Cli.Item>, +id: String,
+    +hn: {has(G, id) == False{} : Bool}) ->
+    {kacc(events, Cli.spec_items(G), ch, id) == True{} : Bool}:
+  match events:
+    case Nil{}: {==}
+    case +e <> +t:
+      and_true(Bool.or(Bool.not(Cli.event_inherited(Cli.event_id(e),
+        Cli.spec_items(G))), acc(ch, e, id)),
+        kacc(t, Cli.spec_items(G), ch, id), ko_hit(e, G, ch, id, hn),
+        kacc_off(t, G, ch, id, hn))
+
+def dI_c(c: Bool, +events: List<&2, Cli.ScanEvent>, +G2: List<&2, Cli.Item>,
+    +S2: List<&2, Cli.Seen>, +ch: List<&2, Cli.Item>, +id: String,
+    +name: String, ec: {has(G2, id) == c : Bool},
+    cov2: {Bool.or(Bool.not(has(G2, id)), sh(S2, id)) == True{} : Bool},
+    dis2: {Bool.or(Bool.not(has(ch, id)), Bool.not(sh(S2, id))) == True{}
+      : Bool}) ->
+    {ev_all(Cli.Enter{name} <> Cli.events_inherited(events, Cli.spec_items(G2)),
+      ch, id) == True{} : Bool}:
+  match c:
+    case True{}:
+      ev_none(Cli.Enter{name} <> Cli.events_inherited(events,
+        Cli.spec_items(G2)), ch, id, b_nand2(has(ch, id), sh(S2, id), dis2,
+        b_imp(has(G2, id), sh(S2, id), cov2, ec)))
+    case False{}:
+      and_true(acc(ch, Cli.Enter{name}, id),
+        ev_all(Cli.events_inherited(events, Cli.spec_items(G2)), ch, id),
+        acc_off(ch, Cli.Enter{name}, id, {==}),
+        ev_kept(events, Cli.spec_items(G2), ch, id,
+          kacc_off(events, G2, ch, id, ec)))
+
+def desc_eG(+events: List<&2, Cli.ScanEvent>, +I: List<&2, Cli.Item>,
+    +G: List<&2, Cli.Item>, +id: String, +name: String,
+    eG: {ev_all(events, G, id) == True{} : Bool},
+    eI: {ev_all(events, I, id) == True{} : Bool}) ->
+    {ev_all(Cli.Enter{name} <> Cli.events_inherited(events,
+      Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(I), G))),
+      List.append(&2, Cli.Item, Cli.global_items(I), G), id) == True{}
+      : Bool}:
+  +G2 = List.append(&2, Cli.Item, Cli.global_items(I), G)
+  and_true(acc(G2, Cli.Enter{name}, id),
+    ev_all(Cli.events_inherited(events, Cli.spec_items(G2)), G2, id),
+    acc_off(G2, Cli.Enter{name}, id, {==}),
+    ev_kept(events, Cli.spec_items(G2), G2, id,
+      kacc_all(events, Cli.spec_items(G2), G2, id,
+        ev_app(events, Cli.global_items(I), G, id,
+          ev_glob(events, I, id, eI), eG))))
+
+def desc_ei(p: List<&2, String>, -name: String, -items0: List<&2, Cli.Item>,
+    -I: List<&2, Cli.Item>, -ch: List<&2, Cli.Item>,
+    ei: {hi(p, items0) == I : List<&2, Cli.Item>},
+    c1: {Cli.find_sub_go(I, name, None{}) == Some{Cli.SubFound{name, ch}}
+      : Maybe<&2, Cli.SubFound>}) ->
+    {hi(List.append(&2, String, p, [name]), items0) == ch
+      : List<&2, Cli.Item>}:
+  %Equal.sym(List<&2, Cli.Item>, hi(List.append(&2, String, p, [name]),
+    items0), Cli.sub_items(Cli.find_sub(hi(p, items0), name)),
+    hi_snoc(p, name, items0)) : {_ == ch : List<&2, Cli.Item>}
+  %Equal.sym(List<&2, Cli.Item>, hi(p, items0), I, ei) :
+    {Cli.sub_items(Cli.find_sub(_, name)) == ch : List<&2, Cli.Item>}
+  %Equal.sym(Maybe<&2, Cli.SubFound>, Cli.find_sub_go(I, name, None{}),
+    Some{Cli.SubFound{name, ch}}, c1) :
+    {Cli.sub_items(_) == ch : List<&2, Cli.Item>}
+  {==}
+
+def desc_eg(p: List<&2, String>, -name: String, -items0: List<&2, Cli.Item>,
+    -I: List<&2, Cli.Item>, -G: List<&2, Cli.Item>,
+    ei: {hi(p, items0) == I : List<&2, Cli.Item>},
+    eg: {hg(p, items0, Nil{}) == G : List<&2, Cli.Item>}) ->
+    {hg(List.append(&2, String, p, [name]), items0, Nil{})
+      == List.append(&2, Cli.Item, Cli.global_items(I), G)
+      : List<&2, Cli.Item>}:
+  %Equal.sym(List<&2, Cli.Item>, hg(List.append(&2, String, p, [name]),
+    items0, Nil{}), List.append(&2, Cli.Item, Cli.global_items(hi(p, items0)),
+    hg(p, items0, Nil{})), hg_snoc(p, name, items0, Nil{})) :
+    {_ == List.append(&2, Cli.Item, Cli.global_items(I), G)
+      : List<&2, Cli.Item>}
+  %Equal.sym(List<&2, Cli.Item>, hi(p, items0), I, ei) :
+    {List.append(&2, Cli.Item, Cli.global_items(_), hg(p, items0, Nil{}))
+      == List.append(&2, Cli.Item, Cli.global_items(I), G)
+      : List<&2, Cli.Item>}
+  %Equal.sym(List<&2, Cli.Item>, hg(p, items0, Nil{}), G, eg) :
+    {List.append(&2, Cli.Item, Cli.global_items(I), _)
+      == List.append(&2, Cli.Item, Cli.global_items(I), G)
+      : List<&2, Cli.Item>}
+  {==}
+
+def desc_tuple(+p: List<&2, String>, +I: List<&2, Cli.Item>,
+    +G: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>, +name: String,
+    +ch: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>,
+    -items0: List<&2, Cli.Item>, +id: String,
+    c: Canon(I, name, ch, S, List.append(&2, Cli.Seen,
+      Cli.global_entries(Cli.lint_items(I)), S)),
+    +ei: {hi(p, items0) == I : List<&2, Cli.Item>},
+    eg: {hg(p, items0, Nil{}) == G : List<&2, Cli.Item>},
+    +b: {B0(I, G, S, id) == True{} : Bool},
+    +eG: {ev_all(events, G, id) == True{} : Bool},
+    +eI: {ev_all(events, I, id) == True{} : Bool}) ->
+    ScInv(Cli.Scope{List.append(&2, String, p, [name]), Cli.spec_node(ch,
+      Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(I), G)))},
+      Cli.Enter{name} <> Cli.events_inherited(events,
+        Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(I), G))),
+      items0, id):
+  match c:
+    case (c1, (c2, c3)):
+      +G2 = List.append(&2, Cli.Item, Cli.global_items(I), G)
+      +H = List.append(&2, Cli.Seen, Cli.global_entries(Cli.lint_items(I)), S)
+      +b2 = desc_b(I, G, S, id, ch, b, c3)
+      (List.append(&2, String, p, [name]), (ch, (G2, (H, ({==},
+        (desc_ei(p, name, items0, I, ch, ei, c1),
+         (desc_eg(p, name, items0, I, G, ei, eg),
+          (b2, (desc_eG(events, I, G, id, name, eG, eI),
+           dI_c(has(G2, id), events, G2, H, ch, id, name, {==},
+             b0_cov(ch, G2, H, id, b2),
+             and_right(am1(ch, id), Bool.or(Bool.not(has(ch, id)),
+               Bool.not(sh(H, id))), b0_qam(ch, G2, H, id, b2))))))))))))
+
+def key_found(m: Maybe<&2, Cli.SubKey>) -> Maybe<&2, Cli.SubFound>:
+  match m:
+    case None{}: None{}
+    case Some{k}:
+      match k:
+        case Cli.SubKey{n, a, c}: Some{Cli.SubFound{n, c}}
+
+def skf(m: Maybe<&2, Cli.SubFound>, -name: String, -al: List<&2, String>,
+    -ch: List<&2, Cli.Item>,
+    e: {Laws.sub_key_of(m) == Some{Cli.SubKey{name, al, ch}}
+      : Maybe<&2, Cli.SubKey>}) ->
+    {m == Some{Cli.SubFound{name, ch}} : Maybe<&2, Cli.SubFound>}:
+  match m:
+    case None{}:
+      Empty.absurd({None{} == Some{Cli.SubFound{name, ch}}
+        : Maybe<&2, Cli.SubFound>}, false_true_absurd(Equal.cong(
+        Maybe<&2, Cli.SubKey>, Bool, x => Maybe.is_some(&2, Cli.SubKey, x),
+        None{}, Some{Cli.SubKey{name, al, ch}}, e)))
+    case Some{sf}:
+      match sf:
+        case Cli.SubFound{n, c}:
+          Equal.cong(Maybe<&2, Cli.SubKey>, Maybe<&2, Cli.SubFound>,
+            x => key_found(x), Some{Cli.SubKey{n, Cli.find_aliases(c), c}},
+            Some{Cli.SubKey{name, al, ch}}, e)
+
+# Entering a subcommand the scope finds keeps the invariant.
+def descend_inv(state: Cli.ScanState, sub: Cli.SubKey, +q: String,
+    -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.scope_find_sub(Cli.scan_state_scope(state), q) == Some{sub}
+      : Maybe<&2, Cli.SubKey>},
+    inv: SInv(state, items0, id)) ->
+    SInv(Cli.scan_descend(state, sub), items0, id):
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      match sub:
+        case Cli.SubKey{+name, al, +ch}:
+          match inv:
+            case (+p, (+I, (+G, (+S, (+es, (ei, (eg, (+b, (eG, eI))))))))):
+              %Equal.sym(Cli.Scope, scope, Cli.Scope{p, Cli.spec_node(I,
+                Cli.spec_items(G))}, es) :
+                SInv(Cli.scan_descend(Cli.ScanState{_, events, resting,
+                count, external, issue}, Cli.SubKey{name, al, ch}), items0, id)
+              %Equal.sym(List<&2, Cli.SpecItem>,
+                Cli.spec_inherit(Cli.spec_node(I, Cli.spec_items(G))),
+                Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(I),
+                  G)), Laws.p19_inherit(I, G)) :
+                ScInv(Cli.Scope{List.append(&2, String, p, [name]),
+                  Cli.spec_node(ch, _)}, Cli.Enter{name} <>
+                  Cli.events_inherited(events, _), items0, id)
+              desc_tuple(p, I, G, S, name, ch, events, items0, id,
+                canon(I, q, S, List.append(&2, Cli.Seen,
+                  Cli.global_entries(Cli.lint_items(I)), S), name, ch,
+                  b0_qt(I, G, S, id, b),
+                  skf(Cli.find_sub(I, q), name, al, ch,
+                    Equal.trans(Maybe<&2, Cli.SubKey>,
+                      Laws.sub_key_of(Cli.find_sub(I, q)),
+                      Cli.scope_find_sub(Cli.Scope{p, Cli.spec_node(I,
+                        Cli.spec_items(G))}, q),
+                      Some{Cli.SubKey{name, al, ch}},
+                      Equal.sym(Maybe<&2, Cli.SubKey>,
+                        Cli.scope_find_sub(Cli.Scope{p, Cli.spec_node(I,
+                          Cli.spec_items(G))}, q),
+                        Laws.sub_key_of(Cli.find_sub(I, q)),
+                        Laws.p19_sub(I, Cli.spec_items(G), p, q)),
+                      (%es : {Cli.scope_find_sub(_, q)
+                        == Some{Cli.SubKey{name, al, ch}}
+                        : Maybe<&2, Cli.SubKey>}
+                      ef)))),
+                ei, eg, b, eG, eI)
+
+# ---- Words, tails, fetches, and the whole scan ----
+
+def su_inv(allow: Bool, +state: Cli.ScanState, +token: String,
+    -items0: List<&2, Cli.Item>, -id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_sub_unknown(allow, state, token), items0, id):
+  match allow:
+    case True{}: inv
+    case False{}: err_inv(state, Cli.E02{token}, items0, id, inv)
+
+def sf_inv(found: Maybe<&2, Cli.SubKey>, +state: Cli.ScanState,
+    +token: String, -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.scope_find_sub(Cli.scan_state_scope(state), token) == found
+      : Maybe<&2, Cli.SubKey>},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_sub_found(found, state, token), items0, id):
+  match found:
+    case Some{+sub}:
+      settle_inv(Cli.scan_descend(state, sub), items0, id,
+        descend_inv(state, sub, token, items0, id, ef, inv))
+    case None{}:
+      su_inv(Cli.scope_external(Cli.scan_state_scope(state)), state, token,
+        items0, id, inv)
+
+def nsc_inv(help: Bool, +token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_non_option_sub_case(help, token, state), items0, id):
+  match help:
+    case True{}: inv
+    case False{}:
+      sf_inv(Cli.scope_find_sub(Cli.scan_state_scope(state), token), state,
+        token, items0, id, {==}, inv)
+
+def nc_inv(has_sub: Bool, +token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_non_option_case(has_sub, token, state), items0, id):
+  match has_sub:
+    case True{}:
+      nsc_inv(String.eq(token, "help"), token, state, items0, id, inv)
+    case False{}:
+      settle_inv(Cli.scan_operand(state, token), items0, id,
+        operand_inv(state, token, items0, id, inv))
+
+def tc_inv(kind: Cli.TokenClass, +token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_token_case(kind, token, state), items0, id):
+  match kind:
+    case Cli.LongToken{}: long_inv(token, state, items0, id, inv)
+    case Cli.DashToken{}: dash_inv(token, state, items0, id, inv)
+    case Cli.WordToken{}:
+      nc_inv(Cli.scope_has_sub(Cli.scan_state_scope(state)), token, state,
+        items0, id, inv)
+
+def open_inv(dash: Bool, +state: Cli.ScanState, +token: String,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_open(dash, state, token), items0, id):
+  match dash:
+    case True{}: inv
+    case False{}:
+      tc_inv(Cli.token_class(token), token, state, items0, id, inv)
+
+def fc_inv(help: Maybe<&2, Bool>, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    TInv(Cli.scan_faulted_case(help, state), items0, id):
+  match help:
+    case Some{l}: push_off(state, Cli.HelpHit{l}, items0, id, {==}, inv)
+    case None{}: inv
+
+def faulted_inv(+state: Cli.ScanState, +token: String,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    TInv(Cli.scan_faulted(state, token), items0, id):
+  fc_inv(Cli.help_flag(token), state, items0, id, inv)
+
+def hm_inv(help: Maybe<&2, Bool>, +token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    TInv(Cli.help_missing_case(help, token, state), items0, id):
+  match help:
+    case Some{l}: push_off(state, Cli.HelpHit{l}, items0, id, {==}, inv)
+    case None{}:
+      err_inv(state, Cli.unknown_fault(String.starts_with(token, "-"), token),
+        items0, id, inv)
+
+def hw_inv(found: Maybe<&2, Cli.SubKey>, +state: Cli.ScanState,
+    +token: String, -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.scope_find_sub(Cli.scan_state_scope(state), token) == found
+      : Maybe<&2, Cli.SubKey>},
+    inv: SInv(state, items0, id)) ->
+    TInv(Cli.help_walk(found, state, token), items0, id):
+  match found:
+    case Some{sub}: descend_inv(state, sub, token, items0, id, ef, inv)
+    case None{}: hm_inv(Cli.help_flag(token), token, state, items0, id, inv)
+
+def tail_inv(tail: Cli.Tail, +token: String, -items0: List<&2, Cli.Item>,
+    +id: String, inv: TInv(tail, items0, id)) ->
+    TInv(Cli.scan_tail(tail, token), items0, id):
+  match tail:
+    case Cli.Faulted{state}: faulted_inv(state, token, items0, id, inv)
+    case Cli.Walk{+state}:
+      hw_inv(Cli.scope_find_sub(Cli.scan_state_scope(state), token), state,
+        token, items0, id, {==}, inv)
+    case Cli.Stopped{state}: inv
+
+def fr_inv(allowed: Bool, +state: Cli.ScanState, +info: Cli.ArgInfo,
+    +token: String, -items0: List<&2, Cli.Item>, +id: String,
+    inv: SInv(state, items0, id), fi: FInv(state, info)) ->
+    MInv(Cli.scan_fetch_result(allowed, state, info, token), items0, id):
+  match allowed:
+    case True{}:
+      match fi:
+        case (+q, (pol, (ef, kv))):
+          settle_inv(Cli.scan_value(state, info, token), items0, id,
+            value_inv(state, q, info, pol, token, items0, id, ef, kv, inv))
+    case False{}:
+      faulted_inv(Cli.scan_error(state, Cli.E03{Cli.arg_display(info)}), token,
+        items0, id, err_inv(state, Cli.E03{Cli.arg_display(info)}, items0, id,
+          inv))
+
+def fetch_inv(+state: Cli.ScanState, +info: Cli.ArgInfo, +token: String,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id),
+    fi: FInv(state, info)) ->
+    MInv(Cli.scan_fetch(state, info, token), items0, id):
+  fr_inv(Cli.fetch_allowed(Cli.scan_state_scope(state), info, token), state,
+    info, token, items0, id, inv, fi)
+
+# Every mode the scan reaches keeps the invariant.
+def go_inv(tokens: List<&2, String>, mode: Cli.Mode,
+    -items0: List<&2, Cli.Item>, +id: String, inv: MInv(mode, items0, id)) ->
+    MInv(Cli.scan_go(tokens, mode), items0, id):
+  match tokens:
+    case Nil{}:
+      match mode:
+        case Cli.Capture{state, name}:
+          ext_inv(state, name, Nil{}, items0, id, inv)
+        case Cli.Open{state}: inv
+        case Cli.Fetch{state, info}: inv
+        case Cli.Operands{state, ended}: inv
+        case Cli.Closed{tail}: inv
+    case +token <> +rest:
+      match mode:
+        case Cli.Capture{state, name}:
+          ext_inv(state, name, token <> rest, items0, id, inv)
+        case Cli.Open{+state}:
+          go_inv(rest, Cli.scan_open(String.eq(token, "--"), state, token),
+            items0, id, open_inv(String.eq(token, "--"), state, token, items0,
+              id, inv))
+        case Cli.Fetch{+state, +info}:
+          match inv:
+            case (si, fi):
+              go_inv(rest, Cli.scan_fetch(state, info, token), items0, id,
+                fetch_inv(state, info, token, items0, id, si, fi))
+        case Cli.Operands{+state, ended}:
+          go_inv(rest, Cli.Operands{Cli.scan_operand(state, token), ended},
+            items0, id, operand_inv(state, token, items0, id, inv))
+        case Cli.Closed{+tail}:
+          go_inv(rest, Cli.Closed{Cli.scan_tail(tail, token)}, items0, id,
+            tail_inv(tail, token, items0, id, inv))
+
+def tclose_inv(tail: Cli.Tail, -items0: List<&2, Cli.Item>, +id: String,
+    inv: TInv(tail, items0, id)) ->
+    SInv(Cli.scan_tail_close(tail), items0, id):
+  match tail:
+    case Cli.Faulted{state}: inv
+    case Cli.Walk{state}:
+      push_off(state, Cli.HelpHit{True{}}, items0, id, {==}, inv)
+    case Cli.Stopped{state}: inv
+
+def close_inv(mode: Cli.Mode, -items0: List<&2, Cli.Item>, +id: String,
+    inv: MInv(mode, items0, id)) -> SInv(Cli.scan_close(mode), items0, id):
+  match mode:
+    case Cli.Open{state}: inv
+    case Cli.Fetch{state, info}:
+      match inv:
+        case (si, fi):
+          err_inv(state, Cli.E03{Cli.arg_display(info)}, items0, id, si)
+    case Cli.Operands{state, ended}: inv
+    case Cli.Capture{state, name}: ext_inv(state, name, [], items0, id, inv)
+    case Cli.Closed{tail}: tclose_inv(tail, items0, id, inv)
+
+def seen_app_nil(xs: List<&2, Cli.Seen>) ->
+    {List.append(&2, Cli.Seen, xs, Nil{}) == xs : List<&2, Cli.Seen>}:
+  match xs:
+    case Nil{}: {==}
+    case h <> t:
+      %Equal.sym(List<&2, Cli.Seen>, List.append(&2, Cli.Seen, t, Nil{}), t,
+        seen_app_nil(t)) : {h <> _ == h <> t : List<&2, Cli.Seen>}
+      {==}
+
+# The scan starts at the root with no events.
+def start_inv(+items0: List<&2, Cli.Item>, -n: String, -a: String,
+    +id: String,
+    q: {qt(items0, Nil{}, Cli.global_entries(Cli.lint_items(items0)))
+      == True{} : Bool}) ->
+    SInv(Cli.scan_start(Cli.Cmd{n, a, items0}), items0, id):
+  +H = Cli.global_entries(Cli.lint_items(items0))
+  (Nil{}, (items0, (Nil{}, (Nil{}, ({==}, ({==}, ({==},
+    (and_true(qt(items0, Nil{}, List.append(&2, Cli.Seen, H, Nil{})), True{},
+      (%Equal.sym(List<&2, Cli.Seen>, List.append(&2, Cli.Seen, H, Nil{}), H,
+        seen_app_nil(H)) : {qt(items0, Nil{}, _) == True{} : Bool}
+      q), {==}),
+    ({==}, {==})))))))))
+
+# What a whole scan of argv keeps.
+def scan_inv(+items0: List<&2, Cli.Item>, +n: String, +a: String,
+    +argv: List<&2, String>, +id: String,
+    q: {qt(items0, Nil{}, Cli.global_entries(Cli.lint_items(items0)))
+      == True{} : Bool}) ->
+    SInv(Cli.scan_close(Cli.scan_go(argv, Cli.Open{Cli.scan_start(
+      Cli.Cmd{n, a, items0})})), items0, id):
+  close_inv(Cli.scan_go(argv, Cli.Open{Cli.scan_start(Cli.Cmd{n, a, items0})}),
+    items0, id, go_inv(argv, Cli.Open{Cli.scan_start(Cli.Cmd{n, a, items0})},
+      items0, id, start_inv(items0, n, a, id, q)))
+
+# P21 parse: what resolve_scope builds keeps, for the arg the verdict judges,
+# a field that arg's kind and attrs accept, and an accepted parse keeps it.
+
+# No field of fields has key id.
+def nokey(fields: List<&2, Cli.Field>, +id: String) -> Bool:
+  match fields:
+    case Nil{}: True{}
+    case Cli.Field{key, values, source} <> tail:
+      Bool.and(Bool.not(String.eq(key, id)), nokey(tail, id))
+
+def nokey_app(xs: List<&2, Cli.Field>, +ys: List<&2, Cli.Field>, +id: String,
+    +nx: {nokey(xs, id) == True{} : Bool},
+    ny: {nokey(ys, id) == True{} : Bool}) ->
+    {nokey(List.append(&2, Cli.Field, xs, ys), id) == True{} : Bool}:
+  match xs:
+    case Nil{}: ny
+    case Cli.Field{+key, values, source} <> +tail:
+      and_true(Bool.not(String.eq(key, id)),
+        nokey(List.append(&2, Cli.Field, tail, ys), id),
+        and_left(Bool.not(String.eq(key, id)), nokey(tail, id), nx),
+        nokey_app(tail, ys, id, and_right(Bool.not(String.eq(key, id)),
+          nokey(tail, id), nx), ny))
+
+def key_off(+key: String, +tail: List<&2, Cli.Field>, +id: String,
+    e: {Bool.and(Bool.not(String.eq(key, id)), nokey(tail, id)) == True{}
+      : Bool}) -> {String.eq(key, id) == False{} : Bool}:
+  nt_f(String.eq(key, id), and_left(Bool.not(String.eq(key, id)),
+    nokey(tail, id), e))
+
+def fr_none(ys: List<&2, Cli.Field>, +id: String,
+    +e: {nokey(ys, id) == True{} : Bool}) ->
+    {Laws.field_ref(ys, id) == Cli.Field{id, [], Cli.Absent{}} : Cli.Field}:
+  match ys:
+    case Nil{}: {==}
+    case Cli.Field{+key, values, source} <> +tail:
+      %Equal.sym(Bool, String.eq(key, id), False{},
+        key_off(key, tail, id, e)) :
+        {Bool.pick(Cli.Field, _, Cli.Field{key, values, source},
+          Laws.field_ref(tail, id)) == Cli.Field{id, [], Cli.Absent{}}
+          : Cli.Field}
+      fr_none(tail, id, and_right(Bool.not(String.eq(key, id)),
+        nokey(tail, id), e))
+
+# field_ref skips a prefix with no field of id.
+def fr_skip(xs: List<&2, Cli.Field>, +ys: List<&2, Cli.Field>, +id: String,
+    +e: {nokey(xs, id) == True{} : Bool}) ->
+    {Laws.field_ref(List.append(&2, Cli.Field, xs, ys), id)
+      == Laws.field_ref(ys, id) : Cli.Field}:
+  match xs:
+    case Nil{}: {==}
+    case Cli.Field{+key, values, source} <> +tail:
+      %Equal.sym(Bool, String.eq(key, id), False{},
+        key_off(key, tail, id, e)) :
+        {Bool.pick(Cli.Field, _, Cli.Field{key, values, source},
+          Laws.field_ref(List.append(&2, Cli.Field, tail, ys), id))
+          == Laws.field_ref(ys, id) : Cli.Field}
+      fr_skip(tail, ys, id, and_right(Bool.not(String.eq(key, id)),
+        nokey(tail, id), e))
+
+# field_ref ignores a suffix with no field of id.
+def fr_skip2(xs: List<&2, Cli.Field>, +ys: List<&2, Cli.Field>, +id: String,
+    e: {nokey(ys, id) == True{} : Bool}) ->
+    {Laws.field_ref(List.append(&2, Cli.Field, xs, ys), id)
+      == Laws.field_ref(xs, id) : Cli.Field}:
+  match xs:
+    case Nil{}: fr_none(ys, id, e)
+    case Cli.Field{+key, +values, +source} <> +tail:
+      Equal.cong(Cli.Field, Cli.Field,
+        x => Bool.pick(Cli.Field, String.eq(key, id),
+          Cli.Field{key, values, source}, x),
+        Laws.field_ref(List.append(&2, Cli.Field, tail, ys), id),
+        Laws.field_ref(tail, id), fr_skip2(tail, ys, id, e))
+
+def fsrc(f: Cli.Field) -> Cli.Src:
+  match f:
+    case Cli.Field{key, values, source}: source
+
+def fs_pick(c: Bool, -s: Cli.Src, -key: String, -values: List<&2, String>,
+    -rs: Cli.Src, -rf: Cli.Field, e: {rs == fsrc(rf) : Cli.Src}) ->
+    {Bool.pick(Cli.Src, c, s, rs) == fsrc(Bool.pick(Cli.Field, c,
+      Cli.Field{key, values, s}, rf)) : Cli.Src}:
+  match c:
+    case True{}: {==}
+    case False{}: e
+
+# field_source reads the source of the field field_ref finds.
+def fs_ref(fields: List<&2, Cli.Field>, +id: String) ->
+    {Cli.field_source(fields, id) == fsrc(Laws.field_ref(fields, id))
+      : Cli.Src}:
+  match fields:
+    case Nil{}: {==}
+    case Cli.Field{+key, values, source} <> +tail:
+      fs_pick(String.eq(key, id), source, key, values,
+        Cli.field_source(tail, id), Laws.field_ref(tail, id),
+        fs_ref(tail, id))
+
+# A field for the judged arg: values fgood accepts when resolution gave
+# them, and none, with no default, when it gave nothing.
+def AbsentOk(vs: List<&2, String>, attrs: List<&2, Cli.Item>) -> Type:
+  match vs:
+    case Nil{}:
+      {Maybe.is_some(&2, String, Cli.find_default(attrs)) == False{} : Bool}
+    case v <> t: Empty
+
+def FRs(src: Cli.Src, kind: Cli.UsageKind, attrs: List<&2, Cli.Item>,
+    vs: List<&2, String>) -> Type:
+  match src:
+    case Cli.Argv{}: {fgood(kind, attrs, vs) == True{} : Bool}
+    case Cli.Env{}: {fgood(kind, attrs, vs) == True{} : Bool}
+    case Cli.Default{}: {fgood(kind, attrs, vs) == True{} : Bool}
+    case Cli.Absent{}: AbsentOk(vs, attrs)
+
+def FR(f: Cli.Field, kind: Cli.UsageKind, attrs: List<&2, Cli.Item>) ->
+    Type:
+  match f:
+    case Cli.Field{key, values, source}: FRs(source, kind, attrs, values)
+
+# A build with no field of id.
+def NK(b: Cli.FieldBuild, id: String) -> Type:
+  match b:
+    case Cli.Built{fields}: {nokey(fields, id) == True{} : Bool}
+    case Cli.BuildFault{fault}: Unit
+
+# A build whose field of id the judged arg accepts.
+def OW(b: Cli.FieldBuild, id: String, kind: Cli.UsageKind,
+    attrs: List<&2, Cli.Item>) -> Type:
+  match b:
+    case Cli.Built{fields}: FR(Laws.field_ref(fields, id), kind, attrs)
+    case Cli.BuildFault{fault}: Unit
+
+def nk_built(+fields: List<&2, Cli.Field>, b2: Cli.FieldBuild, +id: String,
+    n1: {nokey(fields, id) == True{} : Bool}, n2: NK(b2, id)) ->
+    NK(Cli.combine_built(fields, b2), id):
+  match b2:
+    case Cli.Built{more}: nokey_app(fields, more, id, n1, n2)
+    case Cli.BuildFault{fault}: Unit{}
+
+def nk_comb(b1: Cli.FieldBuild, b2: Cli.FieldBuild, +id: String,
+    n1: NK(b1, id), n2: NK(b2, id)) -> NK(Cli.combine_build(b1, b2), id):
+  match b1:
+    case Cli.Built{fields}: nk_built(fields, b2, id, n1, n2)
+    case Cli.BuildFault{fault}: Unit{}
+
+def ow_built(+fields: List<&2, Cli.Field>, b2: Cli.FieldBuild, +id: String,
+    -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    o1: FR(Laws.field_ref(fields, id), kind, attrs), n2: NK(b2, id)) ->
+    OW(Cli.combine_built(fields, b2), id, kind, attrs):
+  match b2:
+    case Cli.Built{more}:
+      %Equal.sym(Cli.Field,
+        Laws.field_ref(List.append(&2, Cli.Field, fields, more), id),
+        Laws.field_ref(fields, id), fr_skip2(fields, more, id, n2)) :
+        FR(_, kind, attrs)
+      o1
+    case Cli.BuildFault{fault}: Unit{}
+
+# The arg's own build, then builds with no field of id.
+def ow_nk(b1: Cli.FieldBuild, b2: Cli.FieldBuild, +id: String,
+    -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    o1: OW(b1, id, kind, attrs), n2: NK(b2, id)) ->
+    OW(Cli.combine_build(b1, b2), id, kind, attrs):
+  match b1:
+    case Cli.Built{fields}: ow_built(fields, b2, id, kind, attrs, o1, n2)
+    case Cli.BuildFault{fault}: Unit{}
+
+def nko_built(+fields: List<&2, Cli.Field>, b2: Cli.FieldBuild, +id: String,
+    -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    n1: {nokey(fields, id) == True{} : Bool}, o2: OW(b2, id, kind, attrs)) ->
+    OW(Cli.combine_built(fields, b2), id, kind, attrs):
+  match b2:
+    case Cli.Built{more}:
+      %Equal.sym(Cli.Field,
+        Laws.field_ref(List.append(&2, Cli.Field, fields, more), id),
+        Laws.field_ref(more, id), fr_skip(fields, more, id, n1)) :
+        FR(_, kind, attrs)
+      o2
+    case Cli.BuildFault{fault}: Unit{}
+
+# Builds with no field of id, then the arg's own build.
+def nk_ow(b1: Cli.FieldBuild, b2: Cli.FieldBuild, +id: String,
+    -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    n1: NK(b1, id), o2: OW(b2, id, kind, attrs)) ->
+    OW(Cli.combine_build(b1, b2), id, kind, attrs):
+  match b1:
+    case Cli.Built{fields}: nko_built(fields, b2, id, kind, attrs, n1, o2)
+    case Cli.BuildFault{fault}: Unit{}
+
+def one_nk(+k: String, -vs: List<&2, String>, -src: Cli.Src, +id: String,
+    ec: {String.eq(k, id) == False{} : Bool}) ->
+    NK(Cli.Built{[Cli.Field{k, vs, src}]}, id):
+  %Equal.sym(Bool, String.eq(k, id), False{}, ec) :
+    {Bool.and(Bool.not(_), True{}) == True{} : Bool}
+  {==}
+
+def one_ow(+id: String, -vs: List<&2, String>, -src: Cli.Src,
+    -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    fr: FRs(src, kind, attrs, vs)) ->
+    OW(Cli.Built{[Cli.Field{id, vs, src}]}, id, kind, attrs):
+  %Equal.sym(Bool, String.eq(id, id), True{}, string_eq_refl(id)) :
+    FR(Bool.pick(Cli.Field, _, Cli.Field{id, vs, src},
+      Cli.Field{id, [], Cli.Absent{}}), kind, attrs)
+  fr
+
+# An arg other than id builds no field of id.
+def rev_nk(found: Maybe<&2, Cli.Bad>, info: Cli.ArgInfo, -name: String,
+    -value: String, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_env_valid(found, info, name, value), id):
+  match found:
+    case Some{Cli.Bad{bad, why}}: Unit{}
+    case None{}:
+      match info:
+        case Cli.ArgInfo{k, u, s, l, kind, attrs}:
+          one_nk(k, Cli.env_values(kind, attrs, value), Cli.Env{}, id, ec)
+
+def rd_nk(found: Maybe<&2, String>, info: Cli.ArgInfo, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_default(found, info), id):
+  match found:
+    case None{}: {==}
+    case Some{value}:
+      match info:
+        case Cli.ArgInfo{k, u, s, l, kind, attrs}:
+          one_nk(k, Cli.env_values(kind, attrs, value), Cli.Default{}, id,
+            ec)
+
+def red_nk(found: Maybe<&2, Cli.EnvValue>, +info: Cli.ArgInfo, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_env_default(found, info), id):
+  match found:
+    case Some{Cli.EnvValue{name, +value}}:
+      rev_nk(Cli.value_issue(Cli.info_kind(info), Cli.info_attrs(info),
+        value), info, name, value, id, ec)
+    case None{}: rd_nk(Cli.info_default(info), info, id, ec)
+
+def rag_nk_seen(seen: Bool, -values: List<&2, String>, -count: Nat,
+    +info: Cli.ArgInfo, h: Cli.Host, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_argv_gather(Cli.Gather{seen, values, count}, info, h),
+      id):
+  match seen:
+    case True{}:
+      match info:
+        case Cli.ArgInfo{k, u, s, l, kind, attrs}:
+          one_nk(k, Cli.apply_delim(Cli.find_delim(attrs), values),
+            Cli.Argv{}, id, ec)
+    case False{}: red_nk(Cli.host_env(Cli.info_env(info), h), info, id, ec)
+
+def rag_nk(g: Cli.Gather, +info: Cli.ArgInfo, h: Cli.Host, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_argv_gather(g, info, h), id):
+  match g:
+    case Cli.Gather{seen, values, count}:
+      rag_nk_seen(seen, values, count, info, h, id, ec)
+
+def rf_nk(+info: Cli.ArgInfo, events: List<&2, Cli.ScanEvent>, h: Cli.Host,
+    +id: String, ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_option(info, events, h), id):
+  rag_nk(Cli.gather_arg(events, info), info, h, id, ec)
+
+def pvr_nk(found: Maybe<&2, Cli.Bad>, info: Cli.ArgInfo,
+    -values: List<&2, String>, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.pos_valid_result(found, info, values), id):
+  match found:
+    case Some{Cli.Bad{bad, why}}: Unit{}
+    case None{}:
+      match info:
+        case Cli.ArgInfo{k, u, s, l, kind, attrs}:
+          one_nk(k, values, Cli.Argv{}, id, ec)
+
+def rp_nk(+info: Cli.ArgInfo, values: List<&2, String>, h: Cli.Host,
+    +id: String, ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
+    NK(Cli.resolve_pos(info, values, h), id):
+  match values:
+    case Nil{}: red_nk(Cli.host_env(Cli.info_env(info), h), info, id, ec)
+    case +v <> +vs:
+      pvr_nk(Cli.first_bad(Cli.apply_delim(Cli.find_delim(
+        Cli.info_attrs(info)), v <> vs), Cli.info_attrs(info)), info,
+        Cli.apply_delim(Cli.find_delim(Cli.info_attrs(info)), v <> vs), id,
+        ec)
+
+# The judged arg's own build: a default with no field is no default, and a
+# value from env, a default or the argv is one fgood accepts.
+def rd_pg(found: Maybe<&2, String>, +id: String, -u: String, -s: String,
+    -l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    okd: DefaultOk(found, kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    e: {Cli.find_default(attrs) == found : Maybe<&2, String>}) ->
+    OW(Cli.resolve_default(found, Cli.ArgInfo{id, u, s, l, kind, attrs}), id,
+      kind, attrs):
+  match found:
+    case None{}:
+      Equal.cong(Maybe<&2, String>, Bool, x => Maybe.is_some(&2, String, x),
+        Cli.find_default(attrs), None{}, e)
+    case Some{+value}:
+      (oka, oki) = okd
+      one_ow(id, Cli.env_values(kind, attrs, value), Cli.Default{}, kind,
+        attrs, env_good(kind, attrs, value, oki, okl))
+
+def rev_pg(found: Maybe<&2, Cli.Bad>, +id: String, -u: String, -s: String,
+    -l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    -name: String, +value: String, okl: DelimOk(Cli.find_delim(attrs), kind),
+    e: {Cli.value_issue(kind, attrs, value) == found : Maybe<&2, Cli.Bad>}) ->
+    OW(Cli.resolve_env_valid(found, Cli.ArgInfo{id, u, s, l, kind, attrs},
+      name, value), id, kind, attrs):
+  match found:
+    case Some{Cli.Bad{bad, why}}: Unit{}
+    case None{}:
+      one_ow(id, Cli.env_values(kind, attrs, value), Cli.Env{}, kind, attrs,
+        env_good(kind, attrs, value, e, okl))
+
+def red_pg(found: Maybe<&2, Cli.EnvValue>, +id: String, -u: String,
+    -s: String, -l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind)) ->
+    OW(Cli.resolve_env_default(found, Cli.ArgInfo{id, u, s, l, kind, attrs}),
+      id, kind, attrs):
+  match found:
+    case Some{Cli.EnvValue{name, +value}}:
+      rev_pg(Cli.value_issue(kind, attrs, value), id, u, s, l, kind, attrs,
+        name, value, okl, {==})
+    case None{}:
+      rd_pg(Cli.find_default(attrs), id, u, s, l, kind, attrs, okd, okl, {==})
+
+def rag_seen(seen: Bool, +values: List<&2, String>, -count: Nat, +id: String,
+    -u: String, -s: String, -l: String, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, h: Cli.Host,
+    ok: {gib(kind, attrs, Cli.Gather{seen, values, count}) == True{} : Bool},
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    np: {Cli.kind_pos(kind) == False{} : Bool}) ->
+    OW(Cli.resolve_argv_gather(Cli.Gather{seen, values, count},
+      Cli.ArgInfo{id, u, s, l, kind, attrs}, h), id, kind, attrs):
+  match seen:
+    case True{}:
+      one_ow(id, Cli.apply_delim(Cli.find_delim(attrs), values), Cli.Argv{},
+        kind, attrs, seen_good(kind, attrs, values, count, ok, okl, np))
+    case False{}:
+      red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l, kind, attrs,
+        okd, okl)
+
+def rag_pg(g: Cli.Gather, +id: String, -u: String, -s: String, -l: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, h: Cli.Host,
+    ok: {gib(kind, attrs, g) == True{} : Bool},
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    np: {Cli.kind_pos(kind) == False{} : Bool}) ->
+    OW(Cli.resolve_argv_gather(g, Cli.ArgInfo{id, u, s, l, kind, attrs}, h),
+      id, kind, attrs):
+  match g:
+    case Cli.Gather{seen, values, count}:
+      rag_seen(seen, values, count, id, u, s, l, kind, attrs, h, ok, okd, okl,
+        np)
+
+# An option of id, which every event accepts, builds a field fgood accepts.
+def opt_pg(+events: List<&2, Cli.ScanEvent>, +id: String, -u: String,
+    -s: String, -l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    h: Cli.Host, ev: {evs_ok(events, kind, attrs, id) == True{} : Bool},
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    np: {Cli.kind_pos(kind) == False{} : Bool}) ->
+    OW(Cli.resolve_option(Cli.ArgInfo{id, u, s, l, kind, attrs}, events, h),
+      id, kind, attrs):
+  rag_pg(Cli.gather_events(events, id, kind, Cli.Gather{False{}, [], 0n}), id,
+    u, s, l, kind, attrs, h, gather_all(events, id, kind, attrs,
+      Cli.Gather{False{}, [], 0n}, gather_init(kind, attrs), ev), okd, okl, np)
+
+def pos_fgood(-req: Bool, +many: Bool, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>,
+    e: {Cli.first_bad(values, attrs) == None{} : Maybe<&2, Cli.Bad>},
+    one: {Bool.or(many, Laws.read_most_one(values)) == True{} : Bool},
+    ne: {Bool.or(many, Bool.not(List.is_empty(&2, String, values))) == True{}
+      : Bool}) ->
+    {fgood(Cli.PosKind{req, many}, attrs, values) == True{} : Bool}:
+  %Equal.sym(Maybe<&2, Cli.Bad>, Cli.first_bad(values, attrs), None{}, e) :
+    {Bool.and(Bool.and(no_bad(_), Bool.or(many, Laws.read_most_one(values))),
+      Bool.or(many, Bool.not(List.is_empty(&2, String, values)))) == True{}
+      : Bool}
+  and_true(Bool.or(many, Laws.read_most_one(values)),
+    Bool.or(many, Bool.not(List.is_empty(&2, String, values))), one, ne)
+
+def pvr_pg(found: Maybe<&2, Cli.Bad>, +id: String, -u: String, -s: String,
+    -l: String, -req: Bool, +many: Bool, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>,
+    e: {Cli.first_bad(values, attrs) == found : Maybe<&2, Cli.Bad>},
+    one: {Bool.or(many, Laws.read_most_one(values)) == True{} : Bool},
+    ne: {Bool.or(many, Bool.not(List.is_empty(&2, String, values))) == True{}
+      : Bool}) ->
+    OW(Cli.pos_valid_result(found, Cli.ArgInfo{id, u, s, l,
+      Cli.PosKind{req, many}, attrs}, values), id, Cli.PosKind{req, many},
+      attrs):
+  match found:
+    case Some{Cli.Bad{bad, why}}: Unit{}
+    case None{}:
+      one_ow(id, values, Cli.Argv{}, Cli.PosKind{req, many}, attrs,
+        pos_fgood(req, many, attrs, values, e, one, ne))
+
+def take_zero(xs: List<&2, String>) ->
+    {List.is_empty(&2, String, List.take(&2, String, xs, 0n)) == True{}
+      : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case h <> t: {==}
+
+# A list positional's values, whichever the argv gives it.
+def pos_vals(values: List<&2, String>, +id: String, -u: String, -s: String,
+    -l: String, req: Bool, +attrs: List<&2, Cli.Item>, h: Cli.Host,
+    okd: DefaultOk(Cli.find_default(attrs), Cli.PosKind{req, True{}}, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), Cli.PosKind{req, True{}})) ->
+    OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.PosKind{req, True{}},
+      attrs}, values, h), id, Cli.PosKind{req, True{}}, attrs):
+  match values:
+    case Nil{}:
+      red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l,
+        Cli.PosKind{req, True{}}, attrs, okd, okl)
+    case +v <> +vs:
+      pvr_pg(Cli.first_bad(Cli.apply_delim(Cli.find_delim(attrs), v <> vs),
+        attrs), id, u, s, l, req, True{}, attrs,
+        Cli.apply_delim(Cli.find_delim(attrs), v <> vs), {==}, {==}, {==})
+
+# A single positional takes one token, which no delim splits.
+def sp_pg(fd: Maybe<&2, Char>, +id: String, -u: String, -s: String,
+    -l: String, -req: Bool, +attrs: List<&2, Cli.Item>, +t: String,
+    +ts: List<&2, String>, okl: DelimOk(fd, Cli.PosKind{req, False{}})) ->
+    OW(Cli.pos_valid_result(Cli.first_bad(Cli.apply_delim(fd,
+      t <> List.take(&2, String, ts, 0n)), attrs), Cli.ArgInfo{id, u, s, l,
+      Cli.PosKind{req, False{}}, attrs}, Cli.apply_delim(fd,
+      t <> List.take(&2, String, ts, 0n))), id, Cli.PosKind{req, False{}},
+      attrs):
+  match fd:
+    case None{}:
+      pvr_pg(Cli.first_bad(t <> List.take(&2, String, ts, 0n), attrs), id, u,
+        s, l, req, False{}, attrs, t <> List.take(&2, String, ts, 0n), {==},
+        take_zero(ts), {==})
+    case Some{c}:
+      Empty.absurd(OW(Cli.pos_valid_result(Cli.first_bad(Cli.apply_delim(
+        Some{c}, t <> List.take(&2, String, ts, 0n)), attrs),
+        Cli.ArgInfo{id, u, s, l, Cli.PosKind{req, False{}}, attrs},
+        Cli.apply_delim(Some{c}, t <> List.take(&2, String, ts, 0n))), id,
+        Cli.PosKind{req, False{}}, attrs), false_true_absurd(okl))
+
+def pos_one(toks: List<&2, String>, +id: String, -u: String, -s: String,
+    -l: String, req: Bool, +attrs: List<&2, Cli.Item>, h: Cli.Host,
+    okd: DefaultOk(Cli.find_default(attrs), Cli.PosKind{req, False{}}, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), Cli.PosKind{req, False{}})) ->
+    OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.PosKind{req, False{}},
+      attrs}, List.take(&2, String, toks, Bool.pick(Nat,
+      List.is_empty(&2, String, toks), 0n, 1n)), h), id,
+      Cli.PosKind{req, False{}}, attrs):
+  match toks:
+    case Nil{}:
+      red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l,
+        Cli.PosKind{req, False{}}, attrs, okd, okl)
+    case t <> ts: sp_pg(Cli.find_delim(attrs), id, u, s, l, req, attrs, t, ts, okl)
+
+def pos_many(many: Bool, +id: String, -u: String, -s: String, -l: String,
+    req: Bool, +attrs: List<&2, Cli.Item>, h: Cli.Host,
+    +toks: List<&2, String>, after: List<&2, Cli.ArgInfo>,
+    okd: DefaultOk(Cli.find_default(attrs), Cli.PosKind{req, many}, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), Cli.PosKind{req, many})) ->
+    OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.PosKind{req, many},
+      attrs}, List.take(&2, String, toks, Cli.position_take_count(
+      Cli.PosKind{req, many}, after, toks)), h), id, Cli.PosKind{req, many},
+      attrs):
+  match many:
+    case True{}:
+      pos_vals(List.take(&2, String, toks, Nat.sub(List.length(&2, String,
+        toks), List.length(&2, Cli.ArgInfo, after))), id, u, s, l, req, attrs,
+        h, okd, okl)
+    case False{}: pos_one(toks, id, u, s, l, req, attrs, h, okd, okl)
+
+# A positional of id builds a field fgood accepts from the tokens it takes.
+def pos_pg(kind: Cli.UsageKind, +id: String, -u: String, -s: String,
+    -l: String, +attrs: List<&2, Cli.Item>, h: Cli.Host,
+    +toks: List<&2, String>, after: List<&2, Cli.ArgInfo>,
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    ep: {Cli.kind_pos(kind) == True{} : Bool}) ->
+    OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, kind, attrs},
+      List.take(&2, String, toks, Cli.position_take_count(kind, after, toks)),
+      h), id, kind, attrs):
+  match kind:
+    case Cli.PosKind{req, many}:
+      pos_many(many, id, u, s, l, req, attrs, h, toks, after, okd, okl)
+    case Cli.FlagKind{}: Empty.absurd(OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.FlagKind{}, attrs}, List.take(&2, String, toks, Cli.position_take_count(Cli.FlagKind{}, after, toks)), h), id, Cli.FlagKind{}, attrs), false_true_absurd(ep))
+    case Cli.CountKind{}: Empty.absurd(OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.CountKind{}, attrs}, List.take(&2, String, toks, Cli.position_take_count(Cli.CountKind{}, after, toks)), h), id, Cli.CountKind{}, attrs), false_true_absurd(ep))
+    case Cli.NegatableKind{}: Empty.absurd(OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.NegatableKind{}, attrs}, List.take(&2, String, toks, Cli.position_take_count(Cli.NegatableKind{}, after, toks)), h), id, Cli.NegatableKind{}, attrs), false_true_absurd(ep))
+    case Cli.OptionKind{x0}: Empty.absurd(OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.OptionKind{x0}, attrs}, List.take(&2, String, toks, Cli.position_take_count(Cli.OptionKind{x0}, after, toks)), h), id, Cli.OptionKind{x0}, attrs), false_true_absurd(ep))
+    case Cli.BareOptionKind{}: Empty.absurd(OW(Cli.resolve_pos(Cli.ArgInfo{id, u, s, l, Cli.BareOptionKind{}, attrs}, List.take(&2, String, toks, Cli.position_take_count(Cli.BareOptionKind{}, after, toks)), h), id, Cli.BareOptionKind{}, attrs), false_true_absurd(ep))
+
+# The arg arg_ref finds has id.
+def ref_key_pick(c: Bool, -info: Cli.ArgInfo, -rest: Maybe<&2, Cli.ArgInfo>,
+    +id: String, -r: Cli.ArgInfo,
+    ec: {String.eq(Cli.info_id(info), id) == c : Bool},
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info}, rest) == Some{r}
+      : Maybe<&2, Cli.ArgInfo>},
+    ih: {rest == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      {String.eq(Cli.info_id(r), id) == True{} : Bool}) ->
+    {String.eq(Cli.info_id(r), id) == True{} : Bool}:
+  match c:
+    case True{}:
+      %some_inj(info, r, er) :
+        {String.eq(Cli.info_id(_), id) == True{} : Bool}
+      ec
+    case False{}: ih(er)
+
+def ref_key(L: List<&2, Cli.Item>, +id: String, -r: Cli.ArgInfo,
+    er: {Laws.arg_ref(L, id) == Some{r} : Maybe<&2, Cli.ArgInfo>}) ->
+    {String.eq(Cli.info_id(r), id) == True{} : Bool}:
+  match L:
+    case Nil{}:
+      Empty.absurd({String.eq(Cli.info_id(r), id) == True{} : Bool},
+        arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      ref_key_pick(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), Laws.arg_ref(tail, id), id, r, {==}, er,
+        et => ref_key(tail, id, r, et))
+    case Cli.Sub{x0, x1, x2} <> tail: ref_key(tail, id, r, er)
+    case Cli.Version{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Alias{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Hidden{} <> tail: ref_key(tail, id, r, er)
+    case Cli.Example{x0, x1} <> tail: ref_key(tail, id, r, er)
+    case Cli.After{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.SubOptional{} <> tail: ref_key(tail, id, r, er)
+    case Cli.External{} <> tail: ref_key(tail, id, r, er)
+    case Cli.Exclusive{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.NeedOne{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Id{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Required{} <> tail: ref_key(tail, id, r, er)
+    case Cli.AttrDefault{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.AttrEnv{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Global{} <> tail: ref_key(tail, id, r, er)
+    case Cli.Heading{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.As{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.OneOf{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Delim{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Hyphen{} <> tail: ref_key(tail, id, r, er)
+    case Cli.Rest{} <> tail: ref_key(tail, id, r, er)
+    case Cli.Bare{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Conflicts{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Requires{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Group{x0} <> tail: ref_key(tail, id, r, er)
+    case Cli.Builtin{} <> tail: ref_key(tail, id, r, er)
+
+def ref_np_pick(c: Bool, info: Cli.ArgInfo, -rest: Maybe<&2, Cli.ArgInfo>,
+    -r: Cli.ArgInfo,
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info}, rest) == Some{r}
+      : Maybe<&2, Cli.ArgInfo>},
+    np: {Bool.not(Cli.kind_pos(Cli.info_kind(info))) == True{} : Bool},
+    ih: {rest == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      {Cli.kind_pos(Cli.info_kind(r)) == False{} : Bool}) ->
+    {Cli.kind_pos(Cli.info_kind(r)) == False{} : Bool}:
+  match c:
+    case True{}:
+      %some_inj(info, r, er) :
+        {Cli.kind_pos(Cli.info_kind(_)) == False{} : Bool}
+      nt_f(Cli.kind_pos(Cli.info_kind(info)), np)
+    case False{}: ih(er)
+
+# An arg arg_ref finds in a list with no positional is not positional.
+def ref_np(L: List<&2, Cli.Item>, +id: String, -r: Cli.ArgInfo,
+    er: {Laws.arg_ref(L, id) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    +np: {nonpos(L) == True{} : Bool}) ->
+    {Cli.kind_pos(Cli.info_kind(r)) == False{} : Bool}:
+  match L:
+    case Nil{}:
+      Empty.absurd({Cli.kind_pos(Cli.info_kind(r)) == False{} : Bool},
+        arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      ref_np_pick(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), Laws.arg_ref(tail, id), r, er,
+        and_left(Bool.not(Cli.kind_pos(Cli.info_kind(Cli.arg_info(usage,
+          attrs)))), nonpos(tail), np),
+        et => ref_np(tail, id, r, et, and_right(Bool.not(Cli.kind_pos(
+          Cli.info_kind(Cli.arg_info(usage, attrs)))), nonpos(tail), np)))
+    case Cli.Sub{x0, x1, x2} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Version{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Alias{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Hidden{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Example{x0, x1} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.After{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.SubOptional{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.External{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Exclusive{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.NeedOne{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Id{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Required{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.AttrDefault{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.AttrEnv{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Global{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Heading{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.As{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.OneOf{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Delim{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Hyphen{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Rest{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Bare{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Conflicts{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Requires{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Group{x0} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.Builtin{} <> tail: ref_np(tail, id, r, er, np)
+
+# The arg of id, when there is one, is positional (PM) or not (NPm).
+def PM(m: Maybe<&2, Cli.ArgInfo>) -> Type:
+  match m:
+    case None{}: Unit
+    case Some{x}: {Cli.kind_pos(Cli.info_kind(x)) == True{} : Bool}
+
+def NPm(m: Maybe<&2, Cli.ArgInfo>) -> Type:
+  match m:
+    case None{}: Unit
+    case Some{x}: {Cli.kind_pos(Cli.info_kind(x)) == False{} : Bool}
+
+def on_kp(kp: Bool, +info: Cli.ArgInfo, +events: List<&2, Cli.ScanEvent>,
+    +h: Cli.Host, later: Cli.FieldBuild, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool},
+    nl: NK(later, id)) ->
+    NK(Cli.resolve_arg(kp, info, events, h, later), id):
+  match kp:
+    case True{}: nl
+    case False{}:
+      nk_comb(Cli.resolve_option(info, events, h), later, id,
+        rf_nk(info, events, h, id, ec), nl)
+
+def on_t(m: Maybe<&2, Cli.ArgInfo>, +info: Cli.ArgInfo,
+    +tail: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>,
+    +h: Cli.Host, +id: String,
+    er: {Some{info} == m : Maybe<&2, Cli.ArgInfo>}, ep: PM(m),
+    ht: {has(tail, id) == False{} : Bool},
+    ih: @m2: Maybe<&2, Cli.ArgInfo> ->
+      {Laws.arg_ref(tail, id) == m2 : Maybe<&2, Cli.ArgInfo>} -> PM(m2) ->
+      NK(Cli.resolve_options(Cli.spec_items(tail), events, h), id)) ->
+    NK(Cli.resolve_arg(Cli.kind_pos(Cli.info_kind(info)), info, events, h,
+      Cli.resolve_options(Cli.spec_items(tail), events, h)), id):
+  match m:
+    case None{}:
+      Empty.absurd(NK(Cli.resolve_arg(Cli.kind_pos(Cli.info_kind(info)), info,
+        events, h, Cli.resolve_options(Cli.spec_items(tail), events, h)), id),
+        some_none_absurd(info, er))
+    case Some{r}:
+      %Equal.sym(Bool, Cli.kind_pos(Cli.info_kind(info)), True{},
+        (%Equal.sym(Cli.ArgInfo, info, r, some_inj(info, r, er)) :
+          {Cli.kind_pos(Cli.info_kind(_)) == True{} : Bool}
+        ep)) :
+        NK(Cli.resolve_arg(_, info, events, h,
+          Cli.resolve_options(Cli.spec_items(tail), events, h)), id)
+      ih(None{}, ref_none(tail, id, ht), Unit{})
+
+def on_c(c: Bool, m: Maybe<&2, Cli.ArgInfo>, +info: Cli.ArgInfo,
+    +tail: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>,
+    +h: Cli.Host, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == c : Bool},
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
+      Laws.arg_ref(tail, id)) == m : Maybe<&2, Cli.ArgInfo>},
+    ep: PM(m),
+    am: {Bool.and(Bool.or(Bool.not(c), Bool.not(has(tail, id))),
+      am1(tail, id)) == True{} : Bool},
+    ih: @m2: Maybe<&2, Cli.ArgInfo> ->
+      {Laws.arg_ref(tail, id) == m2 : Maybe<&2, Cli.ArgInfo>} -> PM(m2) ->
+      NK(Cli.resolve_options(Cli.spec_items(tail), events, h), id)) ->
+    NK(Cli.resolve_arg(Cli.kind_pos(Cli.info_kind(info)), info, events, h,
+      Cli.resolve_options(Cli.spec_items(tail), events, h)), id):
+  match c:
+    case True{}:
+      on_t(m, info, tail, events, h, id, er, ep,
+        nt_f(has(tail, id), and_left(Bool.not(has(tail, id)), am1(tail, id),
+          am)), ih)
+    case False{}:
+      on_kp(Cli.kind_pos(Cli.info_kind(info)), info, events, h,
+        Cli.resolve_options(Cli.spec_items(tail), events, h), id, ec,
+        ih(m, er, ep))
+
+# Options with no non-positional arg of id build no field of id.
+def on(X: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>, +h: Cli.Host,
+    +id: String, m: Maybe<&2, Cli.ArgInfo>,
+    er: {Laws.arg_ref(X, id) == m : Maybe<&2, Cli.ArgInfo>}, ep: PM(m),
+    +am: {am1(X, id) == True{} : Bool}) ->
+    NK(Cli.resolve_options(Cli.spec_items(X), events, h), id):
+  match X:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      on_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id), m,
+        Cli.arg_info(usage, attrs), tail, events, h, id, {==}, er, ep, am,
+        m2 => e2 => p2 => on(tail, events, h, id, m2, e2, p2,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
+            usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id),
+            am)))
+    case Cli.Sub{x0, x1, x2} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Version{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Alias{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Hidden{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Example{x0, x1} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.After{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.SubOptional{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.External{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Exclusive{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.NeedOne{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Id{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Required{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.AttrDefault{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.AttrEnv{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Global{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Heading{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.As{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.OneOf{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Delim{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Hyphen{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Rest{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Bare{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Conflicts{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Requires{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Group{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.Builtin{} <> tail: on(tail, events, h, id, m, er, ep, am)
+
+def oa_kp(kp: Bool, +info: Cli.ArgInfo, +events: List<&2, Cli.ScanEvent>,
+    +h: Cli.Host, later: Cli.FieldBuild, +id: String, -kind: Cli.UsageKind,
+    -attrs: List<&2, Cli.Item>,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool},
+    ol: OW(later, id, kind, attrs)) ->
+    OW(Cli.resolve_arg(kp, info, events, h, later), id, kind, attrs):
+  match kp:
+    case True{}: ol
+    case False{}:
+      nk_ow(Cli.resolve_option(info, events, h), later, id, kind, attrs,
+        rf_nk(info, events, h, id, ec), ol)
+
+def oa_c(c: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +events: List<&2, Cli.ScanEvent>, +h: Cli.Host, +id: String,
+    -r: Cli.ArgInfo, ec: {String.eq(Cli.info_id(info), id) == c : Bool},
+    +er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
+      Laws.arg_ref(tail, id)) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    enp: {Cli.kind_pos(Cli.info_kind(r)) == False{} : Bool},
+    pg: OW(Cli.resolve_option(r, events, h), id, Cli.info_kind(r),
+      Cli.info_attrs(r)),
+    +am: {Bool.and(Bool.or(Bool.not(c), Bool.not(has(tail, id))),
+      am1(tail, id)) == True{} : Bool},
+    ih: OW(Cli.resolve_option(r, events, h), id, Cli.info_kind(r),
+      Cli.info_attrs(r)) ->
+      {Laws.arg_ref(tail, id) == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      OW(Cli.resolve_options(Cli.spec_items(tail), events, h), id,
+        Cli.info_kind(r), Cli.info_attrs(r))) ->
+    OW(Cli.resolve_arg(Cli.kind_pos(Cli.info_kind(info)), info, events, h,
+      Cli.resolve_options(Cli.spec_items(tail), events, h)), id,
+      Cli.info_kind(r), Cli.info_attrs(r)):
+  match c:
+    case True{}:
+      +ei = Equal.sym(Cli.ArgInfo, info, r, some_inj(info, r, er))
+      %Equal.sym(Bool, Cli.kind_pos(Cli.info_kind(info)), False{},
+        (%ei : {Cli.kind_pos(Cli.info_kind(_)) == False{} : Bool}
+        enp)) :
+        OW(Cli.resolve_arg(_, info, events, h,
+          Cli.resolve_options(Cli.spec_items(tail), events, h)), id,
+          Cli.info_kind(r), Cli.info_attrs(r))
+      ow_nk(Cli.resolve_option(info, events, h),
+        Cli.resolve_options(Cli.spec_items(tail), events, h), id,
+        Cli.info_kind(r), Cli.info_attrs(r),
+        (%ei : OW(Cli.resolve_option(_, events, h), id, Cli.info_kind(r),
+          Cli.info_attrs(r))
+        pg),
+        on(tail, events, h, id, None{}, ref_none(tail, id,
+          nt_f(has(tail, id), and_left(Bool.not(has(tail, id)),
+            am1(tail, id), am))), Unit{},
+          and_right(Bool.not(has(tail, id)), am1(tail, id), am)))
+    case False{}:
+      oa_kp(Cli.kind_pos(Cli.info_kind(info)), info, events, h,
+        Cli.resolve_options(Cli.spec_items(tail), events, h), id,
+        Cli.info_kind(r), Cli.info_attrs(r), ec, ih(pg, er))
+
+# Options holding a non-positional arg r of id build r's field.
+def oa(X: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>, +h: Cli.Host,
+    +id: String, -r: Cli.ArgInfo,
+    er: {Laws.arg_ref(X, id) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    +enp: {Cli.kind_pos(Cli.info_kind(r)) == False{} : Bool},
+    pg: OW(Cli.resolve_option(r, events, h), id, Cli.info_kind(r),
+      Cli.info_attrs(r)),
+    +am: {am1(X, id) == True{} : Bool}) ->
+    OW(Cli.resolve_options(Cli.spec_items(X), events, h), id,
+      Cli.info_kind(r), Cli.info_attrs(r)):
+  match X:
+    case Nil{}:
+      Empty.absurd(OW(Cli.Built{[]}, id, Cli.info_kind(r), Cli.info_attrs(r)),
+        arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      oa_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), tail, events, h, id, r, {==}, er, enp, pg,
+        am, p2 => et => oa(tail, events, h, id, r, et, enp, p2,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
+            usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id),
+            am)))
+    case Cli.Sub{x0, x1, x2} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Version{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Alias{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Hidden{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Example{x0, x1} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.After{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.SubOptional{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.External{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Exclusive{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.NeedOne{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Id{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Required{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.AttrDefault{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.AttrEnv{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Global{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Heading{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.As{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.OneOf{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Delim{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Hyphen{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Rest{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Bare{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Conflicts{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Requires{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Group{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.Builtin{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+
+def pn_kp(kp: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.ArgInfo>,
+    +toks: List<&2, String>, +h: Cli.Host, +id: String,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool},
+    ih: @t: List<&2, String> -> NK(Cli.resolve_positions(tail, t, h), id)) ->
+    NK(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>, kp,
+      info <> tail, tail), toks, h), id):
+  match kp:
+    case True{}:
+      +n = Cli.position_take_count(Cli.info_kind(info), tail, toks)
+      nk_comb(Cli.resolve_pos(info, List.take(&2, String, toks, n), h),
+        Cli.resolve_positions(tail, List.drop(&2, String, toks, n), h), id,
+        rp_nk(info, List.take(&2, String, toks, n), h, id, ec),
+        ih(List.drop(&2, String, toks, n)))
+    case False{}: ih(toks)
+
+def pn_t(m: Maybe<&2, Cli.ArgInfo>, +info: Cli.ArgInfo,
+    +tail: List<&2, Cli.Item>, +toks: List<&2, String>, +h: Cli.Host,
+    +id: String, er: {Some{info} == m : Maybe<&2, Cli.ArgInfo>}, np: NPm(m),
+    ht: {has(tail, id) == False{} : Bool},
+    ih: @t: List<&2, String> -> @m2: Maybe<&2, Cli.ArgInfo> ->
+      {Laws.arg_ref(tail, id) == m2 : Maybe<&2, Cli.ArgInfo>} -> NPm(m2) ->
+      NK(Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(tail)), t, h),
+        id)) ->
+    NK(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>,
+      Cli.kind_pos(Cli.info_kind(info)),
+      info <> Cli.spec_slots(Cli.spec_items(tail)),
+      Cli.spec_slots(Cli.spec_items(tail))), toks, h), id):
+  match m:
+    case None{}:
+      Empty.absurd(NK(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>,
+        Cli.kind_pos(Cli.info_kind(info)),
+        info <> Cli.spec_slots(Cli.spec_items(tail)),
+        Cli.spec_slots(Cli.spec_items(tail))), toks, h), id),
+        some_none_absurd(info, er))
+    case Some{r}:
+      %Equal.sym(Bool, Cli.kind_pos(Cli.info_kind(info)), False{},
+        (%Equal.sym(Cli.ArgInfo, info, r, some_inj(info, r, er)) :
+          {Cli.kind_pos(Cli.info_kind(_)) == False{} : Bool}
+        np)) :
+        NK(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>, _,
+          info <> Cli.spec_slots(Cli.spec_items(tail)),
+          Cli.spec_slots(Cli.spec_items(tail))), toks, h), id)
+      ih(toks, None{}, ref_none(tail, id, ht), Unit{})
+
+def pn_c(c: Bool, m: Maybe<&2, Cli.ArgInfo>, +info: Cli.ArgInfo,
+    +tail: List<&2, Cli.Item>, +toks: List<&2, String>, +h: Cli.Host,
+    +id: String, ec: {String.eq(Cli.info_id(info), id) == c : Bool},
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
+      Laws.arg_ref(tail, id)) == m : Maybe<&2, Cli.ArgInfo>},
+    np: NPm(m),
+    am: {Bool.and(Bool.or(Bool.not(c), Bool.not(has(tail, id))),
+      am1(tail, id)) == True{} : Bool},
+    ih: @t: List<&2, String> -> @m2: Maybe<&2, Cli.ArgInfo> ->
+      {Laws.arg_ref(tail, id) == m2 : Maybe<&2, Cli.ArgInfo>} -> NPm(m2) ->
+      NK(Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(tail)), t, h),
+        id)) ->
+    NK(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>,
+      Cli.kind_pos(Cli.info_kind(info)),
+      info <> Cli.spec_slots(Cli.spec_items(tail)),
+      Cli.spec_slots(Cli.spec_items(tail))), toks, h), id):
+  match c:
+    case True{}:
+      pn_t(m, info, tail, toks, h, id, er, np,
+        nt_f(has(tail, id), and_left(Bool.not(has(tail, id)), am1(tail, id),
+          am)), ih)
+    case False{}:
+      pn_kp(Cli.kind_pos(Cli.info_kind(info)), info,
+        Cli.spec_slots(Cli.spec_items(tail)), toks, h, id, ec,
+        t => ih(t, m, er, np))
+
+# Positionals with no positional arg of id build no field of id.
+def pn(I: List<&2, Cli.Item>, +toks: List<&2, String>, +h: Cli.Host,
+    +id: String, m: Maybe<&2, Cli.ArgInfo>,
+    er: {Laws.arg_ref(I, id) == m : Maybe<&2, Cli.ArgInfo>}, np: NPm(m),
+    +am: {am1(I, id) == True{} : Bool}) ->
+    NK(Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(I)), toks, h), id):
+  match I:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      pn_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id), m,
+        Cli.arg_info(usage, attrs), tail, toks, h, id, {==}, er, np, am,
+        t => m2 => e2 => p2 => pn(tail, t, h, id, m2, e2, p2,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
+            usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id),
+            am)))
+    case Cli.Sub{x0, x1, x2} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Version{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Alias{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Hidden{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Example{x0, x1} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.After{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.SubOptional{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.External{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Exclusive{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.NeedOne{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Id{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Required{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.AttrDefault{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.AttrEnv{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Global{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Heading{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.As{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.OneOf{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Delim{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Hyphen{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Rest{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Bare{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Conflicts{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Requires{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Group{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.Builtin{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+
+# What a positional r builds from any tokens it takes before after's.
+def PPG(r: Cli.ArgInfo, h: Cli.Host, id: String) -> Type:
+  @toks: List<&2, String> -> @after: List<&2, Cli.ArgInfo> ->
+    OW(Cli.resolve_pos(r, List.take(&2, String, toks,
+      Cli.position_take_count(Cli.info_kind(r), after, toks)), h), id,
+      Cli.info_kind(r), Cli.info_attrs(r))
+
+def pi_kp(kp: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.ArgInfo>,
+    +toks: List<&2, String>, +h: Cli.Host, +id: String,
+    -kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>,
+    ec: {String.eq(Cli.info_id(info), id) == False{} : Bool},
+    ih: @t: List<&2, String> ->
+      OW(Cli.resolve_positions(tail, t, h), id, kind, attrs)) ->
+    OW(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>, kp,
+      info <> tail, tail), toks, h), id, kind, attrs):
+  match kp:
+    case True{}:
+      +n = Cli.position_take_count(Cli.info_kind(info), tail, toks)
+      nk_ow(Cli.resolve_pos(info, List.take(&2, String, toks, n), h),
+        Cli.resolve_positions(tail, List.drop(&2, String, toks, n), h), id,
+        kind, attrs, rp_nk(info, List.take(&2, String, toks, n), h, id, ec),
+        ih(List.drop(&2, String, toks, n)))
+    case False{}: ih(toks)
+
+def pi_c(c: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +toks: List<&2, String>, +h: Cli.Host, +id: String, -r: Cli.ArgInfo,
+    ec: {String.eq(Cli.info_id(info), id) == c : Bool},
+    +er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
+      Laws.arg_ref(tail, id)) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    ep: {Cli.kind_pos(Cli.info_kind(r)) == True{} : Bool},
+    ppg: PPG(r, h, id),
+    +am: {Bool.and(Bool.or(Bool.not(c), Bool.not(has(tail, id))),
+      am1(tail, id)) == True{} : Bool},
+    ih: PPG(r, h, id) ->
+      {Laws.arg_ref(tail, id) == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      @t: List<&2, String> ->
+      OW(Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(tail)), t, h),
+        id, Cli.info_kind(r), Cli.info_attrs(r))) ->
+    OW(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>,
+      Cli.kind_pos(Cli.info_kind(info)),
+      info <> Cli.spec_slots(Cli.spec_items(tail)),
+      Cli.spec_slots(Cli.spec_items(tail))), toks, h), id, Cli.info_kind(r),
+      Cli.info_attrs(r)):
+  match c:
+    case True{}:
+      +ei = Equal.sym(Cli.ArgInfo, info, r, some_inj(info, r, er))
+      +rest = Cli.spec_slots(Cli.spec_items(tail))
+      +n = Cli.position_take_count(Cli.info_kind(info), rest, toks)
+      %Equal.sym(Bool, Cli.kind_pos(Cli.info_kind(info)), True{},
+        (%ei : {Cli.kind_pos(Cli.info_kind(_)) == True{} : Bool}
+        ep)) :
+        OW(Cli.resolve_positions(Bool.pick(List<&2, Cli.ArgInfo>, _,
+          info <> rest, rest), toks, h), id, Cli.info_kind(r),
+          Cli.info_attrs(r))
+      ow_nk(Cli.resolve_pos(info, List.take(&2, String, toks, n), h),
+        Cli.resolve_positions(rest, List.drop(&2, String, toks, n), h), id,
+        Cli.info_kind(r), Cli.info_attrs(r),
+        (%ei : OW(Cli.resolve_pos(_, List.take(&2, String, toks,
+          Cli.position_take_count(Cli.info_kind(_), rest, toks)), h), id,
+          Cli.info_kind(r), Cli.info_attrs(r))
+        ppg(toks, rest)),
+        pn(tail, List.drop(&2, String, toks, n), h, id, None{},
+          ref_none(tail, id, nt_f(has(tail, id), and_left(
+            Bool.not(has(tail, id)), am1(tail, id), am))), Unit{},
+          and_right(Bool.not(has(tail, id)), am1(tail, id), am)))
+    case False{}:
+      pi_kp(Cli.kind_pos(Cli.info_kind(info)), info,
+        Cli.spec_slots(Cli.spec_items(tail)), toks, h, id, Cli.info_kind(r),
+        Cli.info_attrs(r), ec, ih(ppg, er))
+
+# Positionals holding a positional arg r of id build r's field.
+def pi(I: List<&2, Cli.Item>, +toks: List<&2, String>, +h: Cli.Host,
+    +id: String, -r: Cli.ArgInfo,
+    er: {Laws.arg_ref(I, id) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    +ep: {Cli.kind_pos(Cli.info_kind(r)) == True{} : Bool},
+    ppg: PPG(r, h, id), +am: {am1(I, id) == True{} : Bool}) ->
+    OW(Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(I)), toks, h), id,
+      Cli.info_kind(r), Cli.info_attrs(r)):
+  match I:
+    case Nil{}:
+      Empty.absurd(OW(Cli.Built{[]}, id, Cli.info_kind(r), Cli.info_attrs(r)),
+        arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      pi_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), tail, toks, h, id, r, {==}, er, ep, ppg,
+        am, p2 => et => t => pi(tail, t, h, id, r, et, ep, p2,
+          and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
+            usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id),
+            am)))
+    case Cli.Sub{x0, x1, x2} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Version{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Alias{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Hidden{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Example{x0, x1} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.After{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.SubOptional{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.External{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Exclusive{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.NeedOne{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Id{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Required{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.AttrDefault{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.AttrEnv{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Global{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Heading{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.As{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.OneOf{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Delim{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Hyphen{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Rest{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Bare{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Conflicts{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Requires{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Group{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.Builtin{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+
+def slist_disc(l: List<&2, String>) -> Data:
+  match l:
+    case Nil{}: Empty
+    case h <> t: Unit
+
+def slist_cons_absurd(-h: String, -t: List<&2, String>,
+    e: {h <> t == Nil{} : List<&2, String>}) -> Empty:
+  %e : slist_disc(_)
+  Unit{}
+
+def sapp_nil_left(a: List<&2, String>, -b: List<&2, String>,
+    e: {List.append(&2, String, a, b) == Nil{} : List<&2, String>}) ->
+    {a == Nil{} : List<&2, String>}:
+  match a:
+    case Nil{}: {==}
+    case h <> t:
+      Empty.absurd({h <> t == Nil{} : List<&2, String>},
+        slist_cons_absurd(h, List.append(&2, String, t, b), e))
+
+def sapp_nil_right(a: List<&2, String>, -b: List<&2, String>,
+    e: {List.append(&2, String, a, b) == Nil{} : List<&2, String>}) ->
+    {b == Nil{} : List<&2, String>}:
+  match a:
+    case Nil{}: e
+    case h <> t:
+      Empty.absurd({b == Nil{} : List<&2, String>},
+        slist_cons_absurd(h, List.append(&2, String, t, b), e))
+
+def ma_off(arm: Bool, -d: String,
+    e: {Bool.pick(List<&2, String>, arm, [d], []) == Nil{}
+      : List<&2, String>}) -> {arm == False{} : Bool}:
+  match arm:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, slist_cons_absurd(d, Nil{}, e))
+    case False{}: {==}
+
+def mi_c(c: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +all: List<&2, Cli.SpecItem>, +fields: List<&2, Cli.Field>, +id: String,
+    -r: Cli.ArgInfo,
+    er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
+      Laws.arg_ref(tail, id)) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    em: {List.append(&2, String, Cli.missing_arg(info, fields),
+      Cli.missing_items(Cli.spec_items(tail), all, fields)) == Nil{}
+      : List<&2, String>},
+    ih: {Laws.arg_ref(tail, id) == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
+      {Cli.missing_items(Cli.spec_items(tail), all, fields) == Nil{}
+        : List<&2, String>} ->
+      {Cli.arg_required_missing(r, fields) == False{} : Bool}) ->
+    {Cli.arg_required_missing(r, fields) == False{} : Bool}:
+  match c:
+    case True{}:
+      %some_inj(info, r, er) :
+        {Cli.arg_required_missing(_, fields) == False{} : Bool}
+      ma_off(Cli.arg_required_missing(info, fields), Cli.arg_display(info),
+        sapp_nil_left(Cli.missing_arg(info, fields),
+          Cli.missing_items(Cli.spec_items(tail), all, fields), em))
+    case False{}:
+      ih(er, sapp_nil_right(Cli.missing_arg(info, fields),
+        Cli.missing_items(Cli.spec_items(tail), all, fields), em))
+
+# Nothing missing leaves the arg of id, which arg_ref finds, not missing.
+def mi_go(X: List<&2, Cli.Item>, +all: List<&2, Cli.SpecItem>,
+    +fields: List<&2, Cli.Field>, +id: String, -r: Cli.ArgInfo,
+    er: {Laws.arg_ref(X, id) == Some{r} : Maybe<&2, Cli.ArgInfo>},
+    em: {Cli.missing_items(Cli.spec_items(X), all, fields) == Nil{}
+      : List<&2, String>}) ->
+    {Cli.arg_required_missing(r, fields) == False{} : Bool}:
+  match X:
+    case Nil{}:
+      Empty.absurd({Cli.arg_required_missing(r, fields) == False{} : Bool},
+        arg_none_some(r, er))
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      mi_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), tail, all, fields, id, r, er, em,
+        et => ef => mi_go(tail, all, fields, id, r, et, ef))
+    case Cli.NeedOne{name} <> +tail:
+      mi_go(tail, all, fields, id, r, er, sapp_nil_right(
+        Cli.missing_group(all, fields, name),
+        Cli.missing_items(Cli.spec_items(tail), all, fields), em))
+    case Cli.Sub{x0, x1, x2} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Version{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Alias{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Hidden{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Example{x0, x1} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.After{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.SubOptional{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.External{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Exclusive{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Id{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Required{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.AttrDefault{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.AttrEnv{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Global{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Heading{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.As{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.OneOf{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Delim{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Hyphen{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Rest{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Bare{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Conflicts{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Requires{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Group{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
+    case Cli.Builtin{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+
+def ap_off(m: Bool, hr: Bool, d: Bool, -kp: Bool,
+    ehr: {hr == False{} : Bool}, ed: {d == False{} : Bool},
+    ek: {kp == False{} : Bool}) ->
+    {Bool.and(m, Bool.or(hr, Bool.or(d, kp))) == False{} : Bool}:
+  match m:
+    case True{}: b_or_ff(hr, Bool.or(d, kp), ehr, b_or_ff(d, kp, ed, ek))
+    case False{}: {==}
+
+def vs_nil(kind: Cli.UsageKind, -attrs: List<&2, Cli.Item>) ->
+    {vs_ok(kind, attrs, Nil{}) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: {==}
+    case Cli.CountKind{}: {==}
+    case Cli.NegatableKind{}: {==}
+    case Cli.OptionKind{many}: or_true_right(many)
+    case Cli.BareOptionKind{}: {==}
+    case Cli.PosKind{required, many}: or_true_right(many)
+
+# An absent field, which missing found not required, has no values and its
+# arg no default, so it is no gap.
+def absent_fin(vs: List<&2, String>, want: Cli.Want, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String, fr: AbsentOk(vs, attrs),
+    +arm: {Bool.or(Bool.and(Cli.has_required(attrs), True{}),
+      Bool.and(Cli.kind_required_pos(kind), True{})) == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want, vs)
+      == True{} : Bool}:
+  match vs:
+    case Nil{}:
+      +hr = Cli.has_required(attrs)
+      +kp = Cli.kind_required_pos(kind)
+      final(want, kind, attrs, id, Nil{}, vs_nil(kind, attrs),
+        ap_off(Bool.not(Cli.kind_many(kind)), hr,
+          Maybe.is_some(&2, String, Cli.find_default(attrs)), kp,
+          and_true_false(hr, b_orf_l(Bool.and(hr, True{}),
+            Bool.and(kp, True{}), arm)),
+          fr,
+          and_true_false(kp, b_orf_r(Bool.and(hr, True{}),
+            Bool.and(kp, True{}), arm))))
+    case v <> t:
+      Empty.absurd({Laws.read_at(Cli.want_verdict(want, id, kind, attrs),
+        want, v <> t) == True{} : Bool}, fr)
+
+def fin_good(want: Cli.Want, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    +fr: {fgood(kind, attrs, vs) == True{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want, vs)
+      == True{} : Bool}:
+  final(want, kind, attrs, id, vs, fgood_ok(kind, attrs, vs, fr),
+    fgood_gap(kind, attrs, vs, fr))
+
+def ffs(src: Cli.Src, want: Cli.Want, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String, +vs: List<&2, String>,
+    fr: FRs(src, kind, attrs, vs),
+    arm: {Bool.or(Bool.and(Cli.has_required(attrs),
+      Bool.not(Cli.source_given(src))), Bool.and(Cli.kind_required_pos(kind),
+      Bool.not(Cli.source_present(src)))) == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want, vs)
+      == True{} : Bool}:
+  match src:
+    case Cli.Argv{}: fin_good(want, kind, attrs, id, vs, fr)
+    case Cli.Env{}: fin_good(want, kind, attrs, id, vs, fr)
+    case Cli.Default{}: fin_good(want, kind, attrs, id, vs, fr)
+    case Cli.Absent{}: absent_fin(vs, want, kind, attrs, id, fr, arm)
+
+def ff(f: Cli.Field, want: Cli.Want, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String, fr: FR(f, kind, attrs),
+    arm: {Bool.or(Bool.and(Cli.has_required(attrs),
+      Bool.not(Cli.source_given(fsrc(f)))), Bool.and(Cli.kind_required_pos(kind),
+      Bool.not(Cli.source_present(fsrc(f))))) == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want,
+      Cli.field_values(f)) == True{} : Bool}:
+  match f:
+    case Cli.Field{key, values, source}:
+      ffs(source, want, kind, attrs, id, values, fr, arm)
+
+# The judged arg's field, which its build accepts and missing found not
+# required, reads well once its verdict passes.
+def fin_fields(+fs: List<&2, Cli.Field>, want: Cli.Want, -u: String,
+    -s: String, -l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +id: String, ow: FR(Laws.field_ref(fs, id), kind, attrs),
+    arm: {Cli.arg_required_missing(Cli.ArgInfo{id, u, s, l, kind, attrs}, fs)
+      == False{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want,
+      Cli.field_values(Cli.field_find(fs, id))) == True{} : Bool}:
+  %Equal.sym(Cli.Field, Cli.field_find(fs, id), Laws.field_ref(fs, id),
+    Laws.p18_field(fs, id)) :
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want,
+      Cli.field_values(_)) == True{} : Bool}
+  ff(Laws.field_ref(fs, id), want, kind, attrs, id, ow,
+    (%fs_ref(fs, id) : {Bool.or(Bool.and(Cli.has_required(attrs),
+      Bool.not(Cli.source_given(_))), Bool.and(Cli.kind_required_pos(kind),
+      Bool.not(Cli.source_present(_)))) == False{} : Bool}
+    arm))
+
+# What a parse whose build is b reads at verdict v once nothing is missing.
+def GBH(b: Cli.FieldBuild, scope: Cli.Scope, v: Maybe<&2, String>,
+    id: String, want: Cli.Want) -> Type:
+  match b:
+    case Cli.Built{+fs}:
+      {Cli.scope_missing(scope, fs) == Nil{} : List<&2, String>} ->
+      {Laws.read_at(v, want, Cli.field_values(Cli.field_find(fs, id)))
+        == True{} : Bool}
+    case Cli.BuildFault{fault}: Unit
+
+def gbh_none(b: Cli.FieldBuild, -scope: Cli.Scope, -id: String,
+    -name: String, -p: List<&2, String>, -want: Cli.Want) ->
+    GBH(b, scope, Cli.arg_verdict(None{}, id, name, p, want), id, want):
+  match b:
+    case Cli.Built{fs}: em => {==}
+    case Cli.BuildFault{fault}: Unit{}
+
+def gbh_of(b: Cli.FieldBuild, -scope: Cli.Scope, +id: String,
+    want: Cli.Want, -u: String, -s: String, -l: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    ow: OW(b, id, kind, attrs),
+    mi: @fs: List<&2, Cli.Field> ->
+      {Cli.scope_missing(scope, fs) == Nil{} : List<&2, String>} ->
+      {Cli.arg_required_missing(Cli.ArgInfo{id, u, s, l, kind, attrs}, fs)
+        == False{} : Bool}) ->
+    GBH(b, scope, Cli.want_verdict(want, id, kind, attrs), id, want):
+  match b:
+    case Cli.Built{+fs}:
+      em => fin_fields(fs, want, u, s, l, kind, attrs, id, ow, mi(fs, em))
+    case Cli.BuildFault{fault}: Unit{}
+
+def b_dis(hG: Bool, hI: Bool, sS: Bool,
+    cov: {Bool.or(Bool.not(hG), sS) == True{} : Bool},
+    q: {Bool.or(Bool.not(hI), Bool.not(sS)) == True{} : Bool}) ->
+    {Bool.or(Bool.not(hG), Bool.not(hI)) == True{} : Bool}:
+  match hG:
+    case False{}: {==}
+    case True{}:
+      match hI:
+        case False{}: {==}
+        case True{}:
+          match sS:
+            case True{}:
+              Empty.absurd({False{} == True{} : Bool}, false_true_absurd(q))
+            case False{}:
+              Empty.absurd({False{} == True{} : Bool}, false_true_absurd(cov))
+
+# The scope's own arg r of id builds its field from options or positionals
+# as its kind says, and the other side builds no field of id.
+def ow_pos(kp: Bool, +G: List<&2, Cli.Item>, +I: List<&2, Cli.Item>,
+    +rev: List<&2, Cli.ScanEvent>, +h: Cli.Host, +id: String, +u: String,
+    +s: String, +l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +ek: {Cli.kind_pos(kind) == kp : Bool},
+    er2: {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+      == Some{Cli.ArgInfo{id, u, s, l, kind, attrs}} : Maybe<&2, Cli.ArgInfo>},
+    erI: {Laws.arg_ref(I, id) == Some{Cli.ArgInfo{id, u, s, l, kind, attrs}}
+      : Maybe<&2, Cli.ArgInfo>},
+    ev: {evs_ok(rev, kind, attrs, id) == True{} : Bool},
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    am1GI: {am1(List.append(&2, Cli.Item, G, I), id) == True{} : Bool},
+    am1I: {am1(I, id) == True{} : Bool}) ->
+    OW(Cli.combine_build(Cli.resolve_options(Cli.spec_items(
+      List.append(&2, Cli.Item, G, I)), rev, h), Cli.resolve_positions(
+      Cli.spec_slots(Cli.spec_items(I)), Cli.scan_operands(rev), h)), id,
+      kind, attrs):
+  match kp:
+    case True{}:
+      nk_ow(Cli.resolve_options(Cli.spec_items(List.append(&2, Cli.Item, G,
+        I)), rev, h), Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(I)),
+        Cli.scan_operands(rev), h), id, kind, attrs,
+        on(List.append(&2, Cli.Item, G, I), rev, h, id,
+          Some{Cli.ArgInfo{id, u, s, l, kind, attrs}}, er2, ek, am1GI),
+        pi(I, Cli.scan_operands(rev), h, id,
+          Cli.ArgInfo{id, u, s, l, kind, attrs}, erI, ek,
+          t => a => pos_pg(kind, id, u, s, l, attrs, h, t, a, okd, okl, ek),
+          am1I))
+    case False{}:
+      ow_nk(Cli.resolve_options(Cli.spec_items(List.append(&2, Cli.Item, G,
+        I)), rev, h), Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(I)),
+        Cli.scan_operands(rev), h), id, kind, attrs,
+        oa(List.append(&2, Cli.Item, G, I), rev, h, id,
+          Cli.ArgInfo{id, u, s, l, kind, attrs}, er2, ek,
+          opt_pg(rev, id, u, s, l, kind, attrs, h, ev, okd, okl, ek), am1GI),
+        pn(I, Cli.scan_operands(rev), h, id,
+          Some{Cli.ArgInfo{id, u, s, l, kind, attrs}}, erI, ek, am1I))
+
+# An inherited global of id is an option, and the scope's own items then
+# hold no arg of id.
+def ow_glob(mG: Maybe<&2, Cli.ArgInfo>, +G: List<&2, Cli.Item>,
+    +I: List<&2, Cli.Item>, +rev: List<&2, Cli.ScanEvent>, +h: Cli.Host,
+    +id: String, +u: String, +s: String, +l: String, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>,
+    +eg: {Laws.arg_ref(G, id) == mG : Maybe<&2, Cli.ArgInfo>},
+    +er2: {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+      == Some{Cli.ArgInfo{id, u, s, l, kind, attrs}} : Maybe<&2, Cli.ArgInfo>},
+    ev: {evs_ok(rev, kind, attrs, id) == True{} : Bool},
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    d: {Bool.or(Bool.not(has(G, id)), Bool.not(has(I, id))) == True{}
+      : Bool},
+    np: {nonpos(G) == True{} : Bool},
+    am1GI: {am1(List.append(&2, Cli.Item, G, I), id) == True{} : Bool},
+    am1I: {am1(I, id) == True{} : Bool}) ->
+    OW(Cli.combine_build(Cli.resolve_options(Cli.spec_items(
+      List.append(&2, Cli.Item, G, I)), rev, h), Cli.resolve_positions(
+      Cli.spec_slots(Cli.spec_items(I)), Cli.scan_operands(rev), h)), id,
+      kind, attrs):
+  match mG:
+    case None{}:
+      ow_pos(Cli.kind_pos(kind), G, I, rev, h, id, u, s, l, kind, attrs, {==},
+        er2, Equal.trans(Maybe<&2, Cli.ArgInfo>, Laws.arg_ref(I, id),
+          Laws.arg_ref(List.append(&2, Cli.Item, G, I), id),
+          Some{Cli.ArgInfo{id, u, s, l, kind, attrs}},
+          Equal.sym(Maybe<&2, Cli.ArgInfo>,
+            Laws.arg_ref(List.append(&2, Cli.Item, G, I), id),
+            Laws.arg_ref(I, id),
+            (%eg : {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+              == Maybe.or(&2, Cli.ArgInfo, _, Laws.arg_ref(I, id))
+              : Maybe<&2, Cli.ArgInfo>}
+            ref_app(G, I, id))), er2),
+        ev, okd, okl, am1GI, am1I)
+    case Some{+x}:
+      +erx = some_inj(x, Cli.ArgInfo{id, u, s, l, kind, attrs},
+        Equal.trans(Maybe<&2, Cli.ArgInfo>, Some{x},
+          Laws.arg_ref(List.append(&2, Cli.Item, G, I), id),
+          Some{Cli.ArgInfo{id, u, s, l, kind, attrs}},
+          Equal.sym(Maybe<&2, Cli.ArgInfo>,
+            Laws.arg_ref(List.append(&2, Cli.Item, G, I), id), Some{x},
+            (%eg : {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+              == Maybe.or(&2, Cli.ArgInfo, _, Laws.arg_ref(I, id))
+              : Maybe<&2, Cli.ArgInfo>}
+            ref_app(G, I, id))), er2))
+      +enp: {Cli.kind_pos(kind) == False{} : Bool} = (%erx : {Cli.kind_pos(Cli.info_kind(_)) == False{} : Bool}
+        ref_np(G, id, x, eg, np))
+      ow_nk(Cli.resolve_options(Cli.spec_items(List.append(&2, Cli.Item, G,
+        I)), rev, h), Cli.resolve_positions(Cli.spec_slots(Cli.spec_items(I)),
+        Cli.scan_operands(rev), h), id, kind, attrs,
+        oa(List.append(&2, Cli.Item, G, I), rev, h, id,
+          Cli.ArgInfo{id, u, s, l, kind, attrs}, er2, enp,
+          opt_pg(rev, id, u, s, l, kind, attrs, h, ev, okd, okl, enp), am1GI),
+        pn(I, Cli.scan_operands(rev), h, id, None{}, ref_none(I, id,
+          b_nand(has(G, id), has(I, id), d, ref_found(G, id, x, eg))), Unit{},
+          am1I))
+
+def ow_scope(+G: List<&2, Cli.Item>, +I: List<&2, Cli.Item>,
+    +rev: List<&2, Cli.ScanEvent>, +h: Cli.Host, +id: String, +u: String,
+    +s: String, +l: String, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    er2: {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+      == Some{Cli.ArgInfo{id, u, s, l, kind, attrs}} : Maybe<&2, Cli.ArgInfo>},
+    ev: {evs_ok(rev, kind, attrs, id) == True{} : Bool},
+    okd: DefaultOk(Cli.find_default(attrs), kind, attrs),
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    d: {Bool.or(Bool.not(has(G, id)), Bool.not(has(I, id))) == True{}
+      : Bool},
+    np: {nonpos(G) == True{} : Bool},
+    am1GI: {am1(List.append(&2, Cli.Item, G, I), id) == True{} : Bool},
+    am1I: {am1(I, id) == True{} : Bool}) ->
+    OW(Cli.combine_build(Cli.resolve_options(List.append(&2, Cli.SpecItem,
+      Cli.spec_items(G), Cli.spec_items(I)), rev, h), Cli.resolve_positions(
+      Cli.spec_slots(Cli.spec_items(I)), Cli.scan_operands(rev), h)), id,
+      kind, attrs):
+  %Equal.sym(List<&2, Cli.SpecItem>, List.append(&2, Cli.SpecItem,
+    Cli.spec_items(G), Cli.spec_items(I)),
+    Cli.spec_items(List.append(&2, Cli.Item, G, I)), spec_append(G, I)) :
+    OW(Cli.combine_build(Cli.resolve_options(_, rev, h), Cli.resolve_positions(
+      Cli.spec_slots(Cli.spec_items(I)), Cli.scan_operands(rev), h)), id,
+      kind, attrs)
+  ow_glob(Laws.arg_ref(G, id), G, I, rev, h, id, u, s, l, kind, attrs, {==},
+    er2, ev, okd, okl, d, np, am1GI, am1I)
+
+# The arg of id that the scope finds reads well once nothing is missing.
+def core_r(k: String, +u: String, +s: String, +l: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +p: List<&2, String>,
+    +I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +events: List<&2, Cli.ScanEvent>, +h: Cli.Host, +id: String,
+    want: Cli.Want,
+    +er: {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+      == Some{Cli.ArgInfo{k, u, s, l, kind, attrs}} : Maybe<&2, Cli.ArgInfo>},
+    fc: InfoClean(Cli.ArgInfo{k, u, s, l, kind, attrs}),
+    +b: {B0(I, G, S, id) == True{} : Bool},
+    eG: {ev_all(events, G, id) == True{} : Bool},
+    eI: {ev_all(events, I, id) == True{} : Bool}) ->
+    GBH(Cli.resolve_scope(Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+      List.reverse(&2, Cli.ScanEvent, events), h),
+      Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+      Cli.want_verdict(want, id, kind, attrs), id, want):
+  (okd, rest) = fc
+  (okl, okc) = rest
+  +er2: {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+      == Some{Cli.ArgInfo{id, u, s, l, kind, attrs}} : Maybe<&2, Cli.ArgInfo>}
+    = (%eq_reflect(k, id, ref_key(List.append(&2, Cli.Item, G, I), id,
+      Cli.ArgInfo{k, u, s, l, kind, attrs}, er)) :
+      {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+        == Some{Cli.ArgInfo{_, u, s, l, kind, attrs}} : Maybe<&2, Cli.ArgInfo>}
+    er)
+  +qam = b0_qam(I, G, S, id, b)
+  +am1I = and_left(am1(I, id), Bool.or(Bool.not(has(I, id)),
+    Bool.not(sh(S, id))), qam)
+  +d = b_dis(has(G, id), has(I, id), sh(S, id), b0_cov(I, G, S, id, b),
+    and_right(am1(I, id), Bool.or(Bool.not(has(I, id)), Bool.not(sh(S, id))),
+      qam))
+  gbh_of(Cli.resolve_scope(Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+    List.reverse(&2, Cli.ScanEvent, events), h),
+    Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))}, id, want, u, s, l,
+    kind, attrs,
+    ow_scope(G, I, List.reverse(&2, Cli.ScanEvent, events), h, id, u, s, l,
+      kind, attrs, er2,
+      ev_ref(List.reverse(&2, Cli.ScanEvent, events),
+        List.append(&2, Cli.Item, G, I), id,
+        Cli.ArgInfo{id, u, s, l, kind, attrs},
+        ev_rev(events, List.append(&2, Cli.Item, G, I), id,
+          ev_app(events, G, I, id, eG, eI)), er2),
+      okd, okl, d, b0_np(I, G, S, id, b),
+      am1_app(G, I, id, b0_am(I, G, S, id, b), am1I, d), am1I),
+    fs => em => mi_go(List.append(&2, Cli.Item, G, I),
+      List.append(&2, Cli.SpecItem, Cli.spec_items(G), Cli.spec_items(I)), fs,
+      id, Cli.ArgInfo{id, u, s, l, kind, attrs}, er2,
+      (%spec_append(G, I) : {Cli.missing_items(_, List.append(&2,
+        Cli.SpecItem, Cli.spec_items(G), Cli.spec_items(I)), fs) == Nil{}
+        : List<&2, String>}
+      em)))
+
+def core_m(m: Maybe<&2, Cli.ArgInfo>, +p: List<&2, String>,
+    +I: List<&2, Cli.Item>, +G: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +events: List<&2, Cli.ScanEvent>, +h: Cli.Host, +id: String,
+    -name: String, want: Cli.Want,
+    er: {Laws.arg_ref(List.append(&2, Cli.Item, G, I), id) == m
+      : Maybe<&2, Cli.ArgInfo>},
+    fc: FoundClean(m), b: {B0(I, G, S, id) == True{} : Bool},
+    eG: {ev_all(events, G, id) == True{} : Bool},
+    eI: {ev_all(events, I, id) == True{} : Bool}) ->
+    GBH(Cli.resolve_scope(Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+      List.reverse(&2, Cli.ScanEvent, events), h),
+      Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+      Cli.arg_verdict(m, id, name, p, want), id, want):
+  match m:
+    case None{}:
+      gbh_none(Cli.resolve_scope(Cli.Scope{p, Cli.spec_node(I,
+        Cli.spec_items(G))}, List.reverse(&2, Cli.ScanEvent, events), h),
+        Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))}, id, name, p, want)
+    case Some{Cli.ArgInfo{k, +u, +s, +l, +kind, +attrs}}:
+      core_r(k, u, s, l, kind, attrs, p, I, G, S, events, h, id, want, er, fc,
+        b, eG, eI)
+
+# ---- P21 parse chain: each stage either rejects, which matches nothing, or
+# hands the next one the build's fact.
+
+def sum_rej(empty: Bool, -c: Cli.Cmd, -path: List<&2, String>,
+    -fault: Cli.ScanFault, -id: String, -want: Cli.Want) ->
+    Laws.read_parsed(Cli.matches(c, Bool.pick(Cli.ParseResult, empty,
+      Cli.SummaryRequired{}, Cli.Rejected{path, fault})), id, want):
+  match empty:
+    case True{}: Unit{}
+    case False{}: Unit{}
+
+def pr(fault: Maybe<&2, Cli.ScanFault>, -path: List<&2, String>,
+    -fields: List<&2, Cli.Field>, -external: Maybe<&2, Cli.ExternalArgs>,
+    -c: Cli.Cmd, -id: String, -want: Cli.Want,
+    fact: {Laws.read_at(Cli.verdict(c, path, id, want), want,
+      Cli.field_values(Cli.field_find(fields, id))) == True{} : Bool}) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_requires(fault, path, fields,
+      external)), id, want):
+  match fault:
+    case Some{problem}: Unit{}
+    case None{}: fact
+
+def pc(fault: Maybe<&2, Cli.ScanFault>, +scope: Cli.Scope,
+    +fields: List<&2, Cli.Field>, events: List<&2, Cli.ScanEvent>,
+    external: Maybe<&2, Cli.ExternalArgs>, -c: Cli.Cmd, -id: String,
+    -want: Cli.Want,
+    fact: {Laws.read_at(Cli.verdict(c, Cli.scope_path(scope), id, want), want,
+      Cli.field_values(Cli.field_find(fields, id))) == True{} : Bool}) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_conflicts(fault, scope, fields,
+      events, external)), id, want):
+  match fault:
+    case Some{problem}: Unit{}
+    case None{}:
+      pr(Cli.require_go(Cli.present_order(events, fields),
+        Cli.scope_arg_items(scope), fields, None{}), Cli.scope_path(scope),
+        fields, external, c, id, want, fact)
+
+def pm(missing: List<&2, String>, +scope: Cli.Scope,
+    +fields: List<&2, Cli.Field>, +events: List<&2, Cli.ScanEvent>,
+    empty: Bool, external: Maybe<&2, Cli.ExternalArgs>, -c: Cli.Cmd,
+    -id: String, -want: Cli.Want,
+    em: {Cli.scope_missing(scope, fields) == missing : List<&2, String>},
+    g: {Cli.scope_missing(scope, fields) == Nil{} : List<&2, String>} ->
+      {Laws.read_at(Cli.verdict(c, Cli.scope_path(scope), id, want), want,
+        Cli.field_values(Cli.field_find(fields, id))) == True{} : Bool}) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_missing(missing, scope, fields,
+      events, empty, external)), id, want):
+  match missing:
+    case Nil{}:
+      pc(Cli.conflict_go(Cli.present_order(events, fields), Nil{},
+        Cli.scope_arg_items(scope),
+        Cli.exclusive_groups(Cli.scope_arg_items(scope)), None{}),
+        scope, fields, events, external, c, id, want, g(em))
+    case head <> tail:
+      sum_rej(empty, c, Cli.scope_path(scope), Cli.E06{head <> tail}, id,
+        want)
+
+def pb(build: Cli.FieldBuild, +scope: Cli.Scope,
+    +events: List<&2, Cli.ScanEvent>, empty: Bool,
+    external: Maybe<&2, Cli.ExternalArgs>, -c: Cli.Cmd, -id: String,
+    -want: Cli.Want,
+    g: GBH(build, scope, Cli.verdict(c, Cli.scope_path(scope), id, want), id,
+      want)) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_built(build, scope, events, empty,
+      external)), id, want):
+  match build:
+    case Cli.BuildFault{fault}: Unit{}
+    case Cli.Built{+fields}:
+      pm(Cli.scope_missing(scope, fields), scope, fields, events, empty,
+        external, c, id, want, {==}, g)
+
+def pni(needs: Bool, +scope: Cli.Scope, +events: List<&2, Cli.ScanEvent>,
+    +h: Cli.Host, +empty: Bool, external: Maybe<&2, Cli.ExternalArgs>,
+    -c: Cli.Cmd, -id: String, -want: Cli.Want,
+    g: GBH(Cli.resolve_scope(scope, events, h), scope,
+      Cli.verdict(c, Cli.scope_path(scope), id, want), id, want)) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_no_issue(needs, scope, events, h,
+      empty, external)), id, want):
+  match needs:
+    case True{}: sum_rej(empty, c, Cli.scope_path(scope), Cli.E10{}, id, want)
+    case False{}:
+      pb(Cli.resolve_scope(scope, events, h), scope, events, empty, external,
+        c, id, want, g)
+
+def pis(issue: Maybe<&2, Cli.ScanFault>, +scope: Cli.Scope,
+    events: List<&2, Cli.ScanEvent>, h: Cli.Host, empty: Bool,
+    external: Maybe<&2, Cli.ExternalArgs>, -c: Cli.Cmd, -id: String,
+    -want: Cli.Want,
+    g: GBH(Cli.resolve_scope(scope, events, h), scope,
+      Cli.verdict(c, Cli.scope_path(scope), id, want), id, want)) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_issue(issue, scope, events, h, empty,
+      external)), id, want):
+  match issue:
+    case Some{fault}: Unit{}
+    case None{}:
+      pni(Cli.scope_needs_sub(scope), scope, events, h, empty, external, c,
+        id, want, g)
+
+def pe(found: Maybe<&2, Cli.Early>, +scope: Cli.Scope,
+    events: List<&2, Cli.ScanEvent>, h: Cli.Host, empty: Bool,
+    issue: Maybe<&2, Cli.ScanFault>, external: Maybe<&2, Cli.ExternalArgs>,
+    -c: Cli.Cmd, -id: String, -want: Cli.Want,
+    g: GBH(Cli.resolve_scope(scope, events, h), scope,
+      Cli.verdict(c, Cli.scope_path(scope), id, want), id, want)) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse_early(found, scope, events, h, empty,
+      issue, external)), id, want):
+  match found:
+    case Some{Cli.EarlyHelp{long}}: Unit{}
+    case Some{Cli.EarlyVersion{}}: Unit{}
+    case None{}: pis(issue, scope, events, h, empty, external, c, id, want, g)
+
+# The build fact for the scope a scan ends in, which its invariant names.
+def pfs_g(-scope: Cli.Scope, +events: List<&2, Cli.ScanEvent>, +h: Cli.Host,
+    +name: String, -about: String, +items0: List<&2, Cli.Item>, +id: String,
+    +want: Cli.Want, +p: List<&2, String>, +I: List<&2, Cli.Item>,
+    +G: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    es: {scope == Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))}
+      : Cli.Scope},
+    ei: {hi(p, items0) == I : List<&2, Cli.Item>},
+    eg: {hg(p, items0, Nil{}) == G : List<&2, Cli.Item>},
+    b: {B0(I, G, S, id) == True{} : Bool},
+    eG: {ev_all(events, G, id) == True{} : Bool},
+    eI: {ev_all(events, I, id) == True{} : Bool}, dc: DeepClean(items0)) ->
+    GBH(Cli.resolve_scope(scope, List.reverse(&2, Cli.ScanEvent, events), h),
+      scope, Cli.verdict(Cli.Cmd{name, about, items0}, Cli.scope_path(scope),
+      id, want), id, want):
+  +e1: {Cli.find_arg_info(Cli.scope_args(p, items0, Nil{}), id)
+      == Laws.arg_ref(List.append(&2, Cli.Item, G, I), id)
+      : Maybe<&2, Cli.ArgInfo>} = (%ei : {Cli.find_arg_info(Cli.scope_args(p, items0, Nil{}), id)
+      == Laws.arg_ref(List.append(&2, Cli.Item, G, _), id)
+      : Maybe<&2, Cli.ArgInfo>}
+    (%eg : {Cli.find_arg_info(Cli.scope_args(p, items0, Nil{}), id)
+        == Laws.arg_ref(List.append(&2, Cli.Item, _, hi(p, items0)), id)
+        : Maybe<&2, Cli.ArgInfo>}
+      (%sa_hg(p, items0, Nil{}) :
+          {Cli.find_arg_info(Cli.scope_args(p, items0, Nil{}), id)
+          == Laws.arg_ref(_, id) : Maybe<&2, Cli.ArgInfo>}
+        Laws.p18_arg(Cli.scope_args(p, items0, Nil{}), id))))
+  %Equal.sym(Cli.Scope, scope, Cli.Scope{p, Cli.spec_node(I,
+    Cli.spec_items(G))}, es) :
+    GBH(Cli.resolve_scope(_, List.reverse(&2, Cli.ScanEvent, events), h), _,
+      Cli.verdict(Cli.Cmd{name, about, items0}, Cli.scope_path(_), id, want),
+      id, want)
+  %Equal.sym(Maybe<&2, Cli.ArgInfo>,
+    Cli.find_arg_info(Cli.scope_args(p, items0, Nil{}), id),
+    Laws.arg_ref(List.append(&2, Cli.Item, G, I), id), e1) :
+    GBH(Cli.resolve_scope(Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+      List.reverse(&2, Cli.ScanEvent, events), h),
+      Cli.Scope{p, Cli.spec_node(I, Cli.spec_items(G))},
+      Cli.arg_verdict(_, id, name, p, want), id, want)
+  core_m(Laws.arg_ref(List.append(&2, Cli.Item, G, I), id), p, I, G, S,
+    events, h, id, name, want, {==},
+    (%e1 : FoundClean(_)
+    find_clean(Cli.scope_args(p, items0, Nil{}), None{}, id,
+      deep_scope(p, items0, Nil{}, dc, Unit{}), Unit{})),
+    b, eG, eI)
+
+def pfs(state: Cli.ScanState, +h: Cli.Host, empty: Bool, +name: String,
+    -about: String, +items0: List<&2, Cli.Item>, +id: String,
+    +want: Cli.Want, inv: SInv(state, items0, id), dc: DeepClean(items0)) ->
+    Laws.read_parsed(Cli.matches(Cli.Cmd{name, about, items0},
+      Cli.parse_from_state(state, h, empty)), id, want):
+  match state:
+    case Cli.ScanState{+scope, +events, resting, count, external, issue}:
+      match inv:
+        case (+p, (+I, (+G, (+S, (es, (ei, (eg, (b, (eG, eI))))))))):
+          pe(Cli.find_early(List.reverse(&2, Cli.ScanEvent, events)), scope,
+            List.reverse(&2, Cli.ScanEvent, events), h, empty, issue,
+            external, Cli.Cmd{name, about, items0}, id, want,
+            pfs_g(scope, events, h, name, about, items0, id, want, p, I, G, S,
+              es, ei, eg, b, eG, eI, dc))
+
+# ---- P21: the law.
+
+def q_take(+name: String, -about: String, +items: List<&2, Cli.Item>,
+    parts: AllNil(top_list(name, about, items))) ->
+    {qt(items, Nil{}, Cli.global_entries(Cli.lint_items(items))) == True{}
+      : Bool}:
+  (p1, r1) = parts
+  (p2, r2) = r1
+  (p3, r3) = r2
+  qtree(items, name, Cli.scope_ids(Cli.lint_items(items)), Nil{},
+    Cli.global_entries(Cli.lint_items(items)), False{}, False{},
+    Cli.has_version_item(items), True{}, p3)
+
+def lint_qt(+name: String, +about: String, +items: List<&2, Cli.Item>,
+    e: {Cli.problems(Cli.Cmd{name, about, items}) == Nil{}
+      : List<&2, Cli.Problem>}) ->
+    {qt(items, Nil{}, Cli.global_entries(Cli.lint_items(items))) == True{}
+      : Bool}:
+  q_take(name, about, items, concat_all(top_list(name, about, items), e))
+
+def p21_go(c: Cli.Cmd, h: Cli.Host, +argv: List<&2, String>, +id: String,
+    +want: Cli.Want, +e: {Cli.problems(c) == [] : List<&2, Cli.Problem>}) ->
+    Laws.read_parsed(Cli.matches(c, Cli.parse(c, h, argv)), id, want):
+  match c:
+    case Cli.Cmd{+name, +about, +items}:
+      pfs(Cli.scan_close(Cli.scan_go(argv, Cli.Open{Cli.scan_start(
+        Cli.Cmd{name, about, items})})), h, List.is_empty(&2, String, argv),
+        name, about, items, id, want,
+        scan_inv(items, name, about, argv, id, lint_qt(name, about, items, e)),
+        lint_clean(name, about, items, e))
+
+def Laws.p21(c, h, argv, id, want, e):
+  p21_go(c, h, argv, id, want, e)
+
 def Laws.g_check_sample_values():
   {==}
 
