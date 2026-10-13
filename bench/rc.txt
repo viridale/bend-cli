@@ -70,3 +70,47 @@
 #   runs when its callee applies it. tools/rc.sh now folds these into
 #   FID_CLI_EVAL_0 and FID_CLI_EVAL_LINTED_0, where it listed each numbered
 #   segment as gone or new.
+#
+# Scan each usage once, against main's build (fed3c86), both from
+# bench/main.bend; main.bend's per-def diff is the same.
+# The scanner's Scope holds a Spec, its scope with each usage parsed once,
+# built when the scan enters it. Builds counting executed ops show every
+# kind falling on bench --threads 1 (keeps 11.3M -> 7.16M, takes 46.1M ->
+# 20.8M, seals 93.4M -> 41.1M):
+# FID_CLI_SCAN_OPEN 25 5 258 -> 31 5 393, FID_CLI_SCAN_LONG 49 8 276 ->
+#   61 8 411, FID_CLI_SCAN_SHORT_GO 110 6 203 -> 143 6 257,
+#   FID_CLI_SCAN_TAIL 45 3 78 -> 57 3 114, FID_CLI_SCAN_DASH_TOKEN
+#   22 5 172 -> 28 5 262, FID_CLI_SCAN_NON_OPTION 21 7 172 -> 27 5 262,
+#   FID_CLI_SCAN_NON_OPTION_SUB 22 5 102 -> 28 5 156, FID_CLI_SCAN_FAULTED
+#   21 3 63 -> 27 3 90, FID_CLI_SCAN_SUB_FOUND 10 1 0 -> 13 0 0,
+#   FID_CLI_SCAN_FETCH 11 0 0 -> 14 0 0, FID_CLI_SCAN_SHORT 10 1 2 ->
+#   13 1 2, FID_CLI_SCAN_HYPHEN_CANDIDATE 7 0 0 -> 13 0 0 and
+#   FID_CLI_SCOPE_ANY_OPTION_KNOWN 4 0 0 -> 7 0 0: a ScanState flattens to
+#   24 fields, 15 before, since its Scope holds the Spec's eleven where it
+#   held items and globals. A +scope keeps three more lists, and a state
+#   rebuilt on the heap seals nine more fields, six of them Bools, on which
+#   a seal returns at once. In exchange no token parses a usage, where the
+#   old find_option_scope parsed every usage in scope and in its globals
+#   (find_option's Bool.pick evaluates the rest of the search), and
+#   next_positional_slot and items_digit_short parsed every slot and arg.
+# The new FID_CLI_FIND_KEY 0 2 0, FID_CLI_KEY_FOUND 0 2 10,
+#   FID_CLI_NEXT_SLOT 0 4 18, FID_CLI_FIND_SUB_KEY 1 2 0 and
+#   FID_CLI_SUB_KEY_FOUND 1 2 4 are the per-token lookups, replacing
+#   FID_CLI_FIND_OPTION_SCOPE 6 2 29 -> 0 0 0 and the gone
+#   FID_CLI_NEXT_POSITIONAL_SLOT 1 4 18 and FID_CLI_ITEMS_DIGIT_SHORT 0 4 0.
+#   The other new FID_CLI_SPEC_*, FID_CLI_GLOBAL_SPEC, FID_CLI_NAME_KEYS,
+#   FID_CLI_OPT_KEY, FID_CLI_INFO_NAMES and FID_CLI_RAW_SUBS run once per
+#   scope the scan enters; FID_CLI_FIND_SPEC_INFO and
+#   FID_CLI_SPEC_INFO_FOUND once per conflicts or requires lookup.
+# FID_CLI_PARSE 13 13 21 -> 15 10 21, FID_CLI_PARSE_BUILT 15 4 8 ->
+#   24 4 8 and FID_CLI_RESOLVE_SCOPE 5 0 0 -> 8 0 0: they keep the wider
+#   Scope, once per argv.
+# FID_CLI_EXCLUSIVE_GROUPS 0 2 2 -> 0 4 2, FID_CLI_MISSING_ITEMS 3 3 0 ->
+#   3 4 0 and FID_CLI_GROUP_GIVEN 3 2 0 -> 2 3 0: each matches the item
+#   inside a SpecOther or SpecArg, a take per level; group_given reads attrs
+#   and id from its pattern, where it kept an Arg's attrs.
+# spec_info_found binds info_id(info) and global_spec and spec_group_usages
+#   bind info_attrs(info) before passing them on: as temporaries they made
+#   same_text and has_global take, which added keeps to lint's
+#   arg_collision, sub_collision and global_entries and slowed bench's lint
+#   phase by 15%.

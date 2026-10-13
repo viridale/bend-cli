@@ -455,6 +455,21 @@ law g_lex_negation:
     field("x", ["false"], Cli.Argv{}),
   ]) : Cli.ParseResult}
 
+def alias_option() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--[no-]color", "Use color", [Cli.alias("--colour")]),
+    Cli.arg("-o, --out <FILE>", "Output", [Cli.alias("--output")]),
+  ])
+
+# G-LEX: an alias names its arg, taking a value as the long does and setting
+# a negatable arg as its long does; --no- still negates it.
+law g_lex_alias:
+  {Cli.scan(alias_option(), ["--output=a", "--colour", "--no-color"]) ==
+    root([
+      Cli.ValueHit{"out", "a"}, Cli.FlagHit{"color", True{}},
+      Cli.FlagHit{"color", False{}},
+    ], False{}, None{}) : Cli.ScanTrace}
+
 def color_option() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
     Cli.arg("--color[=<WHEN>]", "Color mode", [Cli.bare("auto")]),
@@ -588,6 +603,30 @@ law g_sub_alias:
   {Cli.parse(sub_tool(), host(), ["a", "beta"]) ==
     Cli.Accepted{["alpha", "beta"], [], None{}} : Cli.ParseResult}
 
+def deep_tool() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("-g, --global", "Root global", [Cli.global()]),
+    Cli.sub("alpha", "Alpha", [
+      Cli.arg("-m, --mid", "Alpha global", [Cli.global()]),
+      Cli.arg("--child", "Alpha only", []),
+      Cli.sub("beta", "Beta", [
+        Cli.arg("--leaf", "Beta only", []),
+      ]),
+    ]),
+  ])
+
+# G-SUB: the globals of every ancestor reach a grandchild, the parent's
+# before the root's in its fields; an ancestor's other args do not.
+law g_sub_deep_globals:
+  {Cli.parse(deep_tool(), host(), ["alpha", "beta", "--leaf", "-g", "-m"]) ==
+    Cli.Accepted{["alpha", "beta"], [
+      field("mid", ["true"], Cli.Argv{}),
+      field("global", ["true"], Cli.Argv{}),
+      field("leaf", ["true"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult} &
+  {Cli.parse(deep_tool(), host(), ["alpha", "beta", "--child"]) ==
+    Cli.Rejected{["alpha", "beta"], Cli.E01{"--child"}} : Cli.ParseResult}
+
 # G-SUB: the help subcommand walks named descendants.
 law g_sub_help:
   {Cli.parse(sub_tool(), host(), ["help"]) ==
@@ -652,6 +691,29 @@ law g_sub_short_shadow:
     Cli.version("1.0"), Cli.arg("-V", "Verbose", []),
   ]), host(), ["--version"]) ==
     Cli.VersionRequested{} : Cli.ParseResult}
+
+def digit_tool() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("-1, --one", "One per line", [Cli.global()]),
+    Cli.sub("move", "Move", [
+      Cli.arg("--by <N>", "Offset", [Cli.as_f32()]),
+      Cli.arg("[X]", "Start", [Cli.as_f32()]),
+    ]),
+  ])
+
+# G-SUB: a digit short inherited from an ancestor is in scope, so a negative
+# number neither fills an as_f32 option (R6) nor an as_f32 slot (R3); an
+# attached value still does.
+law g_sub_digit_global:
+  {Cli.parse(digit_tool(), host(), ["move", "--by", "-5"]) ==
+    Cli.Rejected{["move"], Cli.E03{"--by <N>"}} : Cli.ParseResult} &
+  {Cli.parse(digit_tool(), host(), ["move", "-5"]) ==
+    Cli.Rejected{["move"], Cli.E01{"-5"}} : Cli.ParseResult} &
+  {Cli.parse(digit_tool(), host(), ["move", "-1", "--by=-5"]) ==
+    Cli.Accepted{["move"], [
+      field("one", ["true"], Cli.Argv{}),
+      field("by", ["-5"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult}
 
 def typed(attrs: List<&2, Cli.Item>) -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [

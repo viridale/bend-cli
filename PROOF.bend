@@ -2486,7 +2486,7 @@ def p9_unended(pre: List<&2, String>, post: List<&2, String>,
   match state:
     case Cli.ScanState{scope, events, resting, count, external, issue}:
       match scope:
-        case Cli.Scope{path, items, globals}:
+        case Cli.Scope{path, spec}:
           %clear :
             {Bool.or(Bool.not(Bool.and(Bool.not(_),
               Bool.and(False{}, Maybe.is_none(&2, Cli.ScanFault, issue)))),
@@ -2521,7 +2521,7 @@ def p9_close(pre: List<&2, String>, post: List<&2, String>,
   match state:
     case Cli.ScanState{scope, +events, resting, count, external, +issue}:
       match scope:
-        case Cli.Scope{path, items, globals}:
+        case Cli.Scope{path, spec}:
           %clear :
             {Bool.or(Bool.not(Bool.and(Bool.not(_),
               Bool.and(ended, Maybe.is_none(&2, Cli.ScanFault, issue)))),
@@ -2661,6 +2661,9 @@ def Laws.g_lex_count():
 def Laws.g_lex_negation():
   ({==}, ({==}, {==}))
 
+def Laws.g_lex_alias():
+  {==}
+
 def Laws.g_lex_bare():
   {==}
 
@@ -2682,6 +2685,9 @@ def Laws.g_sub_descent():
 def Laws.g_sub_alias():
   {==}
 
+def Laws.g_sub_deep_globals():
+  ({==}, {==})
+
 def Laws.g_sub_help():
   ({==}, ({==}, ({==}, {==})))
 
@@ -2696,6 +2702,9 @@ def Laws.g_sub_missing():
 
 def Laws.g_sub_short_shadow():
   ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_sub_digit_global():
+  ({==}, ({==}, {==}))
 
 def Laws.g_val_strings():
   ({==}, ({==}, ({==}, {==})))

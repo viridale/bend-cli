@@ -1990,9 +1990,30 @@ type OptFound is Data:
 type SubFound is Data:
   SubFound{name: String, items: List<&2, Item>}
 
+# A subcommand a scope answers to, by name or alias.
+type SubKey is Data:
+  SubKey{name: String, aliases: List<&2, String>, children: List<&2, Item>}
+
+# An option name a scope answers to, with the match it makes.
+type OptKey is Data:
+  OptKey{name: String, found: OptFound}
+
+# An item resolve walks: an Arg with its usage parsed once, or another item.
+type SpecItem is Data:
+  SpecArg{info: ArgInfo}
+  SpecOther{item: Item}
+
+# A scope with each usage parsed once: its option names (own, then global),
+# the items resolve walks (global, then own), its positionals and
+# subcommands, and the globals its subcommands inherit.
+type Spec is Data:
+  Spec{keys: List<&2, OptKey>, args: List<&2, SpecItem>,
+    slots: List<&2, ArgInfo>, variadic: Bool, subs: List<&2, SubKey>,
+    has_sub: Bool, external: Bool, needs_sub: Bool, version: Bool,
+    digit_short: Bool, inherit: List<&2, SpecItem>}
+
 type Scope is Data:
-  Scope{path: List<&2, String>, items: List<&2, Item>,
-    globals: List<&2, Item>}
+  Scope{path: List<&2, String>, spec: Spec}
 
 type ScanState is Data:
   ScanState{scope: Scope, events: List<&2, ScanEvent>,
@@ -2030,6 +2051,27 @@ def arg_display(info: ArgInfo) -> String:
       Bool.pick(String, Bool.and(Bool.not(String.is_empty(short)),
         Bool.not(String.is_empty(long))),
         String.drop(usage, Nat.add(String.length(short), 2n)), usage)
+
+def short_digit(short: String) -> Bool:
+  match short:
+    case SCon{Chr{45}, SCon{head, tail}}: Char.is_digit(head)
+    case _: False{}
+
+def info_attrs(info: ArgInfo) -> List<&2, Item>:
+  match info:
+    case ArgInfo{id, usage, short, long, kind, attrs}: attrs
+
+def info_kind(info: ArgInfo) -> UsageKind:
+  match info:
+    case ArgInfo{id, usage, short, long, kind, attrs}: kind
+
+def info_id(info: ArgInfo) -> String:
+  match info:
+    case ArgInfo{id, usage, short, long, kind, attrs}: id
+
+def scope_path(scope: Scope) -> List<&2, String>:
+  match scope:
+    case Scope{path, spec}: path
 
 def global_items(items: List<&2, Item>) -> List<&2, Item>:
   match items:
@@ -2075,14 +2117,27 @@ def find_option(items: List<&2, Item>, +query: String) ->
         find_option(tail, query))
     case head <> tail: find_option(tail, query)
 
-def find_option_scope(scope: Scope, +query: String) ->
+def key_found(key: OptKey, query: String) -> Maybe<&2, OptFound>:
+  match key:
+    case OptKey{name, found}:
+      Bool.pick(Maybe<&2, OptFound>, same_text(query, name),
+        Some{found}, None{})
+
+# The first key named query; after a hit it only walks the rest.
+def find_key(keys: List<&2, OptKey>, +query: String,
+    found: Maybe<&2, OptFound>) -> Maybe<&2, OptFound>:
+  match keys found:
+    case Nil{} hit: hit
+    case key <> tail Some{hit}: Some{hit}
+    case key <> tail None{}: find_key(tail, query, key_found(key, query))
+
+# A scope's own args answer before its globals, as in find_option.
+def find_option_scope(scope: Scope, query: String) ->
     Maybe<&2, OptFound>:
   match scope:
-    case Scope{path, items, globals}:
-      +found = find_option(items, query)
-      Bool.pick(Maybe<&2, OptFound>,
-        Maybe.is_some(&2, OptFound, found), found,
-        find_option(globals, query))
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      find_key(keys, query, None{})
 
 def find_sub(items: List<&2, Item>, +query: String) ->
     Maybe<&2, SubFound>:
@@ -2131,27 +2186,135 @@ def positional_can_take(items: List<&2, Item>, count: Nat) -> Bool:
   Bool.or(Nat.is_lt(count, List.length(&2, Item, slots)),
     has_variadic_pos(slots))
 
-def next_positional_slot(slots: List<&2, Item>, +count: Nat) ->
+def next_slot(slots: List<&2, ArgInfo>, +count: Nat) ->
     Maybe<&2, ArgInfo>:
   match slots:
     case Nil{}: None{}
-    case Arg{+usage, help, attrs} <> tail:
+    case +info <> tail:
       Bool.pick(Maybe<&2, ArgInfo>,
-        Bool.or(Nat.is_eq(count, 0n),
-          usage_kind(~kind_variadic_pos, parse_usage(usage))),
-        Some{arg_info(usage, attrs)},
-        next_positional_slot(tail, Nat.sub(count, 1n)))
-    case head <> tail: next_positional_slot(tail, count)
+        Bool.or(Nat.is_eq(count, 0n), kind_variadic_pos(info_kind(info))),
+        Some{info}, next_slot(tail, Nat.sub(count, 1n)))
 
 def scope_next_slot(scope: Scope, count: Nat) -> Maybe<&2, ArgInfo>:
   match scope:
-    case Scope{path, items, globals}:
-      next_positional_slot(positional_items(items), count)
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      next_slot(slots, count)
+
+# A command that cannot complete without a subcommand (§8.4).
+def needs_sub(+items: List<&2, Item>) -> Bool:
+  Bool.and(has_sub_item(items),
+    Bool.and(Bool.not(has_sub_optional(items)),
+      Bool.not(has_external(items))))
+
+# name as a key of info; only info's --no- long clears the flag, as in
+# option_matches.
+def opt_key(+name: String, info: ArgInfo) -> OptKey:
+  match info:
+    case ArgInfo{id, usage, short, +long, +kind, attrs}:
+      OptKey{name, OptFound{ArgInfo{id, usage, short, long, kind, attrs},
+        Bool.not(Bool.and(kind_negatable(kind),
+          Bool.and(Bool.not(String.is_empty(long)),
+            String.eq(name, negated_long(long)))))}}
+
+def name_keys(names: List<&2, String>, +info: ArgInfo) ->
+    List<&2, OptKey>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail: opt_key(name, info) <> name_keys(tail, info)
+
+def nonempty_name(+name: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(name), [], [name])
+
+# The names option_matches accepts for info, in its order.
+def info_names(info: ArgInfo) -> List<&2, String>:
+  match info:
+    case ArgInfo{id, usage, short, +long, kind, attrs}:
+      List.append(&2, String, nonempty_name(short),
+        List.append(&2, String, nonempty_name(long),
+          List.append(&2, String, find_aliases(attrs),
+            Bool.pick(List<&2, String>, Bool.and(kind_negatable(kind),
+              Bool.not(String.is_empty(long))),
+              [negated_long(long)], []))))
+
+def spec_keys(items: List<&2, SpecItem>) -> List<&2, OptKey>:
+  match items:
+    case Nil{}: Nil{}
+    case SpecArg{+info} <> tail:
+      List.append(&2, OptKey, name_keys(info_names(info), info),
+        spec_keys(tail))
+    case head <> tail: spec_keys(tail)
+
+# items less their Subs, each Arg's usage parsed once.
+def spec_items(items: List<&2, Item>) -> List<&2, SpecItem>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, attrs} <> tail:
+      SpecArg{arg_info(usage, attrs)} <> spec_items(tail)
+    case Sub{name, about, children} <> tail: spec_items(tail)
+    case head <> tail: SpecOther{head} <> spec_items(tail)
+
+def global_spec(items: List<&2, SpecItem>) -> List<&2, SpecItem>:
+  match items:
+    case Nil{}: Nil{}
+    case SpecArg{+info} <> tail:
+      +rest = global_spec(tail)
+      attrs = info_attrs(info)
+      Bool.pick(List<&2, SpecItem>, has_global(attrs),
+        SpecArg{info} <> rest, rest)
+    case head <> tail: global_spec(tail)
+
+def spec_slots(items: List<&2, SpecItem>) -> List<&2, ArgInfo>:
+  match items:
+    case Nil{}: Nil{}
+    case SpecArg{+info} <> tail:
+      +rest = spec_slots(tail)
+      Bool.pick(List<&2, ArgInfo>, kind_pos(info_kind(info)),
+        info <> rest, rest)
+    case head <> tail: spec_slots(tail)
+
+def slots_variadic(slots: List<&2, ArgInfo>) -> Bool:
+  match slots:
+    case Nil{}: False{}
+    case info <> tail:
+      Bool.or(kind_variadic_pos(info_kind(info)), slots_variadic(tail))
+
+def info_digit_short(info: ArgInfo) -> Bool:
+  match info:
+    case ArgInfo{id, usage, short, long, kind, attrs}: short_digit(short)
+
+def spec_digit_short(items: List<&2, SpecItem>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case SpecArg{info} <> tail:
+      Bool.or(info_digit_short(info), spec_digit_short(tail))
+    case head <> tail: spec_digit_short(tail)
+
+def raw_subs(items: List<&2, Item>) -> List<&2, SubKey>:
+  match items:
+    case Nil{}: Nil{}
+    case Sub{name, about, +children} <> tail:
+      SubKey{name, find_aliases(children), children} <> raw_subs(tail)
+    case head <> tail: raw_subs(tail)
+
+# items as a scope inheriting globals; its subcommands stay unparsed until
+# the scan enters one.
+def spec_node(+items: List<&2, Item>, +globals: List<&2, SpecItem>) ->
+    Spec:
+  +own = spec_items(items)
+  +args = List.append(&2, SpecItem, globals, own)
+  +slots = spec_slots(own)
+  Spec{List.append(&2, OptKey, spec_keys(own), spec_keys(globals)),
+    args, slots, slots_variadic(slots), raw_subs(items),
+    has_sub_item(items), has_external(items), needs_sub(items),
+    has_version_item(items), spec_digit_short(args),
+    List.append(&2, SpecItem, global_spec(own), globals)}
 
 def scan_start(c: Cmd) -> ScanState:
   match c:
     case Cmd{name, about, items}:
-      ScanState{Scope{[], items, []}, [], False{}, 0n, None{}, None{}}
+      ScanState{Scope{[], spec_node(items, [])}, [], False{}, 0n, None{},
+        None{}}
 
 def scan_event(state: ScanState, event: ScanEvent) -> ScanState:
   match state:
@@ -2228,12 +2391,13 @@ def scope_option_known(scope: Scope, token: String) -> Bool:
 
 def scope_builtin_known(scope: Scope, +token: String) -> Bool:
   match scope:
-    case Scope{path, items, globals}:
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
       +name = first_option_name(token)
       Bool.or(String.eq(name, "-h"),
         Bool.or(String.eq(name, "--help"),
           Bool.and(List.is_empty(&2, String, path),
-            Bool.and(has_version_item(items),
+            Bool.and(version,
               Bool.or(String.eq(name, "-V"),
                 String.eq(name, "--version"))))))
 
@@ -2258,8 +2422,9 @@ def scan_operand_case(allowed: Bool, state: ScanState,
 
 def scope_can_take(scope: Scope, count: Nat) -> Bool:
   match scope:
-    case Scope{path, items, globals}:
-      positional_can_take(items, count)
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      Bool.or(Nat.is_lt(count, List.length(&2, ArgInfo, slots)), variadic)
 
 def scan_operand(state: ScanState, token: String) -> ScanState:
   match state:
@@ -2269,17 +2434,22 @@ def scan_operand(state: ScanState, token: String) -> ScanState:
         ScanState{scope, events, resting, positional_count,
           external, issue}, token)
 
-def scan_descend(state: ScanState, sub: SubFound) -> ScanState:
+def spec_inherit(spec: Spec) -> List<&2, SpecItem>:
+  match spec:
+    case Spec{keys, args, slots, variadic, subs, has_sub, external,
+        needs_sub, version, digit_short, inherit}: inherit
+
+def scan_descend(state: ScanState, sub: SubKey) -> ScanState:
   match state:
     case ScanState{scope, events, resting, positional_count,
         external, issue}:
       match scope:
-        case Scope{path, items, globals}:
+        case Scope{path, spec}:
           match sub:
-            case SubFound{+name, children}:
+            case SubKey{+name, aliases, children}:
               ScanState{Scope{
-                List.append(&2, String, path, [name]), children,
-                List.append(&2, Item, global_items(items), globals)},
+                List.append(&2, String, path, [name]),
+                spec_node(children, spec_inherit(spec))},
                 Enter{name} <> events, resting, 0n,
                 external, issue}
 
@@ -2290,10 +2460,6 @@ def scan_external(state: ScanState, name: String,
         external, issue}:
       ScanState{scope, events, resting, positional_count,
         Some{ExternalArgs{name, args}}, issue}
-
-def info_attrs(info: ArgInfo) -> List<&2, Item>:
-  match info:
-    case ArgInfo{id, usage, short, long, kind, attrs}: attrs
 
 # E04 quotes the first element that fails.
 def scan_value_result(found: Maybe<&2, Bad>, state: ScanState,
@@ -2349,28 +2515,10 @@ def scan_faulted(+state: ScanState, +token: String) -> Tail:
       Stopped{scan_event(state, HelpHit{False{}})},
       Faulted{state}))
 
-def short_digit(short: String) -> Bool:
-  match short:
-    case SCon{Chr{45}, SCon{head, tail}}: Char.is_digit(head)
-    case _: False{}
-
-def usage_digit_short(parsed: Usage) -> Bool:
-  match parsed:
-    case Parsed{id, short, long, kind}: short_digit(short)
-    case Invalid{col}: False{}
-
-def items_digit_short(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case Arg{usage, help, attrs} <> tail:
-      Bool.or(usage_digit_short(parse_usage(usage)),
-        items_digit_short(tail))
-    case head <> tail: items_digit_short(tail)
-
 def scope_digit_short(scope: Scope) -> Bool:
   match scope:
-    case Scope{path, items, globals}:
-      Bool.or(items_digit_short(items), items_digit_short(globals))
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}: digit_short
 
 def arg_has_hyphen(info: ArgInfo) -> Bool:
   match info:
@@ -2440,10 +2588,6 @@ def scan_simple_option(attached: Maybe<&2, String>, state: ScanState,
       scan_settle(scan_error(state, E05{arg_display(info), value}))
     case None{}: scan_settle(scan_simple_hit(state, info, polarity))
 
-def info_kind(info: ArgInfo) -> UsageKind:
-  match info:
-    case ArgInfo{id, usage, short, long, kind, attrs}: kind
-
 def scan_found_kind(kind: UsageKind, attached: Maybe<&2, String>,
     state: ScanState, info: ArgInfo, polarity: Bool) -> Mode:
   match kind:
@@ -2468,8 +2612,9 @@ def scan_found(found: OptFound, attached: Maybe<&2, String>,
 
 def scope_version(scope: Scope) -> Bool:
   match scope:
-    case Scope{path, items, globals}:
-      Bool.and(List.is_empty(&2, String, path), has_version_item(items))
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      Bool.and(List.is_empty(&2, String, path), version)
 
 def scan_builtin_hit(attached: Maybe<&2, String>, state: ScanState,
     event: ScanEvent, name: String) -> Mode:
@@ -2578,9 +2723,38 @@ def scan_short(token: String, +state: ScanState) -> Mode:
   +chars = String.drop(token, 1n)
   scan_short_go(chars, state, find_short_for_head(chars, state))
 
-def scope_items(scope: Scope) -> List<&2, Item>:
+def scope_external(scope: Scope) -> Bool:
   match scope:
-    case Scope{path, items, globals}: items
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}: external
+
+def scope_has_sub(scope: Scope) -> Bool:
+  match scope:
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}: has_sub
+
+def sub_key_found(key: SubKey, +query: String) -> Maybe<&2, SubKey>:
+  match key:
+    case SubKey{+name, +aliases, children}:
+      Bool.pick(Maybe<&2, SubKey>,
+        Bool.or(same_text(query, name),
+          List.contains(~String, ~String.eq, aliases, query)),
+        Some{SubKey{name, aliases, children}}, None{})
+
+# find_sub over a scope's subcommands; after a hit it only walks the rest.
+def find_sub_key(subs: List<&2, SubKey>, +query: String,
+    found: Maybe<&2, SubKey>) -> Maybe<&2, SubKey>:
+  match subs found:
+    case Nil{} hit: hit
+    case key <> tail Some{hit}: Some{hit}
+    case key <> tail None{}:
+      find_sub_key(tail, query, sub_key_found(key, query))
+
+def scope_find_sub(scope: Scope, query: String) -> Maybe<&2, SubKey>:
+  match scope:
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      find_sub_key(subs, query, None{})
 
 def scan_sub_unknown(allow_external: Bool, state: ScanState,
     token: String) -> Mode:
@@ -2588,12 +2762,12 @@ def scan_sub_unknown(allow_external: Bool, state: ScanState,
     case True{}: Capture{state, token}
     case False{}: Closed{Stopped{scan_error(state, E02{token})}}
 
-def scan_sub_found(found: Maybe<&2, SubFound>, +state: ScanState,
+def scan_sub_found(found: Maybe<&2, SubKey>, +state: ScanState,
     token: String) -> Mode:
   match found:
     case Some{sub}: scan_settle(scan_descend(state, sub))
     case None{}:
-      scan_sub_unknown(has_external(scope_items(scan_state_scope(state))),
+      scan_sub_unknown(scope_external(scan_state_scope(state)),
         state, token)
 
 def help_missing(+token: String, +state: ScanState) -> Tail:
@@ -2605,7 +2779,7 @@ def help_missing(+token: String, +state: ScanState) -> Tail:
         Stopped{scan_error(state, E01{token})},
         Stopped{scan_error(state, E02{token})})))
 
-def help_walk(found: Maybe<&2, SubFound>, state: ScanState,
+def help_walk(found: Maybe<&2, SubKey>, state: ScanState,
     token: String) -> Tail:
   match found:
     case Some{sub}: Walk{scan_descend(state, sub)}
@@ -2614,12 +2788,12 @@ def help_walk(found: Maybe<&2, SubFound>, state: ScanState,
 def scan_non_option_sub(+token: String, +state: ScanState) -> Mode:
   Bool.pick(Mode, String.eq(token, "help"),
     Closed{Walk{state}},
-    scan_sub_found(find_sub(scope_items(scan_state_scope(state)), token),
+    scan_sub_found(scope_find_sub(scan_state_scope(state), token),
       state, token))
 
 def scan_non_option(+token: String, +state: ScanState) -> Mode:
   Bool.pick(Mode,
-    has_sub_item(scope_items(scan_state_scope(state))),
+    scope_has_sub(scan_state_scope(state)),
     scan_non_option_sub(token, state),
     scan_settle(scan_operand(state, token)))
 
@@ -2652,7 +2826,7 @@ def scan_tail(tail: Tail, +token: String) -> Tail:
   match tail:
     case Faulted{state}: scan_faulted(state, token)
     case Walk{+state}:
-      help_walk(find_sub(scope_items(scan_state_scope(state)), token),
+      help_walk(scope_find_sub(scan_state_scope(state), token),
         state, token)
     case Stopped{state}: Stopped{state}
 
@@ -2696,7 +2870,7 @@ def scan_trace_of(state: ScanState, ended: Bool) -> ScanTrace:
     case ScanState{scope, events, resting, positional_count,
         external, issue}:
       match scope:
-        case Scope{path, items, globals}:
+        case Scope{path, spec}:
           ScanTrace{path, List.reverse(&2, ScanEvent, events),
             ended, external, issue}
 
@@ -2715,19 +2889,10 @@ def find_early(events: List<&2, ScanEvent>) -> Maybe<&2, Early>:
     case VersionHit{} <> tail: Some{EarlyVersion{}}
     case event <> tail: find_early(tail)
 
-def scope_path(scope: Scope) -> List<&2, String>:
-  match scope:
-    case Scope{path, items, globals}: path
-
-# A command that cannot complete without a subcommand (§8.4).
-def needs_sub(+items: List<&2, Item>) -> Bool:
-  Bool.and(has_sub_item(items),
-    Bool.and(Bool.not(has_sub_optional(items)),
-      Bool.not(has_external(items))))
-
 def scope_needs_sub(scope: Scope) -> Bool:
   match scope:
-    case Scope{path, items, globals}: needs_sub(items)
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}: needs_sub
 
 def bool_text(value: Bool) -> String:
   Bool.pick(String, value, "true", "false")
@@ -2873,10 +3038,10 @@ def resolve_option(+info: ArgInfo,
     events: List<&2, ScanEvent>, h: Host) -> FieldBuild:
   resolve_argv_gather(gather_arg(events, info), info, h)
 
-def scope_arg_items(scope: Scope) -> List<&2, Item>:
+def scope_arg_items(scope: Scope) -> List<&2, SpecItem>:
   match scope:
-    case Scope{path, items, globals}:
-      List.append(&2, Item, globals, items)
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}: args
 
 def combine_built(fields: List<&2, Field>,
     next: FieldBuild) -> FieldBuild:
@@ -2891,16 +3056,19 @@ def combine_build(first: FieldBuild,
     case Built{fields}: combine_built(fields, second)
     case BuildFault{fault}: BuildFault{fault}
 
-def resolve_options(items: List<&2, Item>,
+def resolve_arg(pos: Bool, +info: ArgInfo, events: List<&2, ScanEvent>,
+    h: Host, later: FieldBuild) -> FieldBuild:
+  match pos:
+    case True{}: later
+    case False{}: combine_build(resolve_option(info, events, h), later)
+
+def resolve_options(items: List<&2, SpecItem>,
     +events: List<&2, ScanEvent>, +h: Host) -> FieldBuild:
   match items:
     case Nil{}: Built{[]}
-    case Arg{+usage, help, attrs} <> tail:
-      +later = resolve_options(tail, events, h)
-      Bool.pick(FieldBuild,
-        usage_kind(~kind_pos, parse_usage(usage)), later,
-        combine_build(resolve_option(arg_info(usage, attrs), events, h),
-          later))
+    case SpecArg{+info} <> tail:
+      resolve_arg(kind_pos(info_kind(info)), info, events, h,
+        resolve_options(tail, events, h))
     case head <> tail: resolve_options(tail, events, h)
 
 def scan_operands(events: List<&2, ScanEvent>) ->
@@ -2912,11 +3080,11 @@ def scan_operands(events: List<&2, ScanEvent>) ->
     case event <> tail: scan_operands(tail)
 
 def position_take_count(kind: UsageKind,
-    after: List<&2, Item>, +tokens: List<&2, String>) -> Nat:
+    after: List<&2, ArgInfo>, +tokens: List<&2, String>) -> Nat:
   match kind:
     case PosKind{required, True{}}:
       Nat.sub(List.length(&2, String, tokens),
-        List.length(&2, Item, after))
+        List.length(&2, ArgInfo, after))
     case _:
       Bool.pick(Nat, List.is_empty(&2, String, tokens), 0n, 1n)
 
@@ -2940,22 +3108,20 @@ def resolve_pos(+info: ArgInfo,
       +split = apply_delim(find_delim(attrs), values)
       pos_valid_result(first_bad(split, attrs), info, split)
 
-def resolve_positions(slots: List<&2, Item>,
+def resolve_positions(slots: List<&2, ArgInfo>,
     +tokens: List<&2, String>, +h: Host) -> FieldBuild:
   match slots:
     case Nil{}: Built{[]}
-    case Arg{usage, help, attrs} <> +tail:
-      +info = arg_info(usage, attrs)
+    case +info <> +tail:
       +amount = position_take_count(info_kind(info), tail, tokens)
       combine_build(
         resolve_pos(info, List.take(&2, String, tokens, amount), h),
         resolve_positions(tail, List.drop(&2, String, tokens, amount), h))
-    case head <> tail: resolve_positions(tail, tokens, h)
 
-def scope_positions(scope: Scope) -> List<&2, Item>:
+def scope_positions(scope: Scope) -> List<&2, ArgInfo>:
   match scope:
-    case Scope{path, items, globals}:
-      positional_items(items)
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}: slots
 
 def resolve_scope(+scope: Scope, +events: List<&2, ScanEvent>,
     +h: Host) -> FieldBuild:
@@ -3003,17 +3169,26 @@ def group_usages(items: List<&2, Item>, +name: String) ->
         arg_display(arg_info(usage, attrs)) <> later, later)
     case head <> tail: group_usages(tail, name)
 
-def info_id(info: ArgInfo) -> String:
-  match info:
-    case ArgInfo{id, usage, short, long, kind, attrs}: id
+def spec_group_usages(items: List<&2, SpecItem>, +name: String) ->
+    List<&2, String>:
+  match items:
+    case Nil{}: Nil{}
+    case SpecArg{+info} <> tail:
+      +later = spec_group_usages(tail, name)
+      attrs = info_attrs(info)
+      Bool.pick(List<&2, String>, arg_in_group(attrs, name),
+        arg_display(info) <> later, later)
+    case head <> tail: spec_group_usages(tail, name)
 
-def group_given(items: List<&2, Item>,
+def spec_group_display(items: List<&2, SpecItem>, name: String) -> String:
+  String.concat(["<", String.join(spec_group_usages(items, name), "|"), ">"])
+
+def group_given(items: List<&2, SpecItem>,
     +fields: List<&2, Field>, +name: String) -> Bool:
   match items:
     case Nil{}: False{}
-    case Arg{usage, help, +attrs} <> tail:
-      Bool.or(Bool.and(arg_in_group(attrs, name),
-        field_given(fields, info_id(arg_info(usage, attrs)))),
+    case SpecArg{ArgInfo{id, usage, short, long, kind, attrs}} <> tail:
+      Bool.or(Bool.and(arg_in_group(attrs, name), field_given(fields, id)),
         group_given(tail, fields, name))
     case head <> tail: group_given(tail, fields, name)
 
@@ -3035,22 +3210,22 @@ def missing_arg(+info: ArgInfo,
     arg_required_missing(info, fields),
     [arg_display(info)], [])
 
-def missing_group(+items: List<&2, Item>,
+def missing_group(+items: List<&2, SpecItem>,
     fields: List<&2, Field>, +name: String) -> List<&2, String>:
   Bool.pick(List<&2, String>,
     group_given(items, fields, name), [],
-    [group_display(items, name)])
+    [spec_group_display(items, name)])
 
-def missing_items(items: List<&2, Item>,
-    +all_items: List<&2, Item>,
+def missing_items(items: List<&2, SpecItem>,
+    +all_items: List<&2, SpecItem>,
     +fields: List<&2, Field>) -> List<&2, String>:
   match items:
     case Nil{}: Nil{}
-    case Arg{usage, help, attrs} <> tail:
+    case SpecArg{info} <> tail:
       List.append(&2, String,
-        missing_arg(arg_info(usage, attrs), fields),
+        missing_arg(info, fields),
         missing_items(tail, all_items, fields))
-    case NeedOne{name} <> tail:
+    case SpecOther{NeedOne{name}} <> tail:
       List.append(&2, String,
         missing_group(all_items, fields, name),
         missing_items(tail, all_items, fields))
@@ -3115,10 +3290,26 @@ def find_arg_info(items: List<&2, Item>, +id: String) ->
         Some{info}, find_arg_info(tail, id))
     case head <> tail: find_arg_info(tail, id)
 
-def exclusive_groups(items: List<&2, Item>) -> List<&2, String>:
+def spec_info_found(item: SpecItem, id: String) -> Maybe<&2, ArgInfo>:
+  match item:
+    case SpecArg{+info}:
+      own = info_id(info)
+      Bool.pick(Maybe<&2, ArgInfo>, same_text(own, id), Some{info}, None{})
+    case SpecOther{other}: None{}
+
+# find_arg_info over parsed items; after a hit it only walks the rest.
+def find_spec_info(items: List<&2, SpecItem>, +id: String,
+    found: Maybe<&2, ArgInfo>) -> Maybe<&2, ArgInfo>:
+  match items found:
+    case Nil{} hit: hit
+    case item <> tail Some{hit}: Some{hit}
+    case item <> tail None{}:
+      find_spec_info(tail, id, spec_info_found(item, id))
+
+def exclusive_groups(items: List<&2, SpecItem>) -> List<&2, String>:
   match items:
     case Nil{}: Nil{}
-    case Exclusive{name} <> tail:
+    case SpecOther{Exclusive{name}} <> tail:
       name <> exclusive_groups(tail)
     case head <> tail: exclusive_groups(tail)
 
@@ -3154,7 +3345,7 @@ def pair_fault(+later: ArgInfo, earlier: Maybe<&2, ArgInfo>,
         Some{E07{arg_display(later), arg_display(prior)}}, None{})
 
 def earlier_conflict(earlier_ids: List<&2, String>,
-    +later: ArgInfo, +items: List<&2, Item>,
+    +later: ArgInfo, +items: List<&2, SpecItem>,
     +groups: List<&2, String>,
     found: Maybe<&2, ScanFault>) -> Maybe<&2, ScanFault>:
   match earlier_ids found:
@@ -3163,10 +3354,10 @@ def earlier_conflict(earlier_ids: List<&2, String>,
     case id <> tail Some{fault}: Some{fault}
     case id <> tail None{}:
       earlier_conflict(tail, later, items, groups,
-        pair_fault(later, find_arg_info(items, id), groups))
+        pair_fault(later, find_spec_info(items, id, None{}), groups))
 
 def conflict_for_id(info: Maybe<&2, ArgInfo>,
-    seen: List<&2, String>, items: List<&2, Item>,
+    seen: List<&2, String>, items: List<&2, SpecItem>,
     groups: List<&2, String>) -> Maybe<&2, ScanFault>:
   match info:
     case None{}: None{}
@@ -3174,7 +3365,7 @@ def conflict_for_id(info: Maybe<&2, ArgInfo>,
       earlier_conflict(seen, later, items, groups, None{})
 
 def conflict_go(ids: List<&2, String>,
-    +seen: List<&2, String>, +items: List<&2, Item>,
+    +seen: List<&2, String>, +items: List<&2, SpecItem>,
     +groups: List<&2, String>,
     found: Maybe<&2, ScanFault>) -> Maybe<&2, ScanFault>:
   match ids found:
@@ -3184,7 +3375,7 @@ def conflict_go(ids: List<&2, String>,
     case +id <> tail None{}:
       conflict_go(tail, List.append(&2, String, seen, [id]),
         items, groups,
-        conflict_for_id(find_arg_info(items, id),
+        conflict_for_id(find_spec_info(items, id, None{}),
           seen, items, groups))
 
 def require_target_fault(target: Maybe<&2, ArgInfo>,
@@ -3199,7 +3390,7 @@ def require_target_fault(target: Maybe<&2, ArgInfo>,
         None{})
 
 def require_targets(targets: List<&2, String>,
-    +requester: ArgInfo, +items: List<&2, Item>,
+    +requester: ArgInfo, +items: List<&2, SpecItem>,
     +fields: List<&2, Field>,
     found: Maybe<&2, ScanFault>) -> Maybe<&2, ScanFault>:
   match targets found:
@@ -3208,11 +3399,11 @@ def require_targets(targets: List<&2, String>,
     case name <> tail Some{fault}: Some{fault}
     case name <> tail None{}:
       require_targets(tail, requester, items, fields,
-        require_target_fault(find_arg_info(items, name),
+        require_target_fault(find_spec_info(items, name, None{}),
           requester, fields))
 
 def require_for_id(info: Maybe<&2, ArgInfo>,
-    items: List<&2, Item>,
+    items: List<&2, SpecItem>,
     fields: List<&2, Field>) -> Maybe<&2, ScanFault>:
   match info:
     case None{}: None{}
@@ -3221,7 +3412,7 @@ def require_for_id(info: Maybe<&2, ArgInfo>,
         requester, items, fields, None{})
 
 def require_go(ids: List<&2, String>,
-    +items: List<&2, Item>, +fields: List<&2, Field>,
+    +items: List<&2, SpecItem>, +fields: List<&2, Field>,
     found: Maybe<&2, ScanFault>) -> Maybe<&2, ScanFault>:
   match ids found:
     case Nil{} Some{fault}: Some{fault}
@@ -3229,7 +3420,7 @@ def require_go(ids: List<&2, String>,
     case id <> tail Some{fault}: Some{fault}
     case id <> tail None{}:
       require_go(tail, items, fields,
-        require_for_id(find_arg_info(items, id), items, fields))
+        require_for_id(find_spec_info(items, id, None{}), items, fields))
 
 def parse_requires(fault: Maybe<&2, ScanFault>,
     path: List<&2, String>, fields: List<&2, Field>,
