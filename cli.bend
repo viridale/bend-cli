@@ -2508,12 +2508,23 @@ def scan_settle(state: ScanState) -> Mode:
       scan_settle_case(resting, issue, scope, events, positional_count,
         external)
 
-def scan_faulted(+state: ScanState, +token: String) -> Tail:
-  Bool.pick(Tail, String.eq(token, "--help"),
-    Stopped{scan_event(state, HelpHit{True{}})},
-    Bool.pick(Tail, String.eq(token, "-h"),
-      Stopped{scan_event(state, HelpHit{False{}})},
-      Faulted{state}))
+def help_flag_case(long: Bool, short: Bool) -> Maybe<&2, Bool>:
+  match long short:
+    case True{} _: Some{True{}}
+    case False{} True{}: Some{False{}}
+    case False{} False{}: None{}
+
+# Which help flag a token is: Some{True{}} for --help, Some{False{}} for -h.
+def help_flag(+token: String) -> Maybe<&2, Bool>:
+  help_flag_case(String.eq(token, "--help"), String.eq(token, "-h"))
+
+def scan_faulted_case(help: Maybe<&2, Bool>, state: ScanState) -> Tail:
+  match help:
+    case Some{long}: Stopped{scan_event(state, HelpHit{long})}
+    case None{}: Faulted{state}
+
+def scan_faulted(state: ScanState, token: String) -> Tail:
+  scan_faulted_case(help_flag(token), state)
 
 def scope_digit_short(scope: Scope) -> Bool:
   match scope:
@@ -2630,14 +2641,25 @@ def scan_builtin_version(enabled: Bool, attached: Maybe<&2, String>,
     case False{}:
       scan_settle(scan_error(state, E01{"--version"}))
 
-def scan_builtin_long(+name: String, +attached: Maybe<&2, String>,
-    +state: ScanState) -> Mode:
-  Bool.pick(Mode, String.eq(name, "--help"),
-    scan_builtin_hit(attached, state, HelpHit{True{}}, "--help"),
-    Bool.pick(Mode, String.eq(name, "--version"),
+def scan_builtin_other(version: Bool, name: String,
+    attached: Maybe<&2, String>, +state: ScanState) -> Mode:
+  match version:
+    case True{}:
       scan_builtin_version(scope_version(scan_state_scope(state)),
-        attached, state),
-      scan_settle(scan_error(state, E01{name}))))
+        attached, state)
+    case False{}: scan_settle(scan_error(state, E01{name}))
+
+def scan_builtin_long_case(help: Bool, +name: String,
+    attached: Maybe<&2, String>, state: ScanState) -> Mode:
+  match help:
+    case True{}:
+      scan_builtin_hit(attached, state, HelpHit{True{}}, "--help")
+    case False{}:
+      scan_builtin_other(String.eq(name, "--version"), name, attached, state)
+
+def scan_builtin_long(+name: String, attached: Maybe<&2, String>,
+    state: ScanState) -> Mode:
+  scan_builtin_long_case(String.eq(name, "--help"), name, attached, state)
 
 def scan_long_found(found: Maybe<&2, OptFound>, name: String,
     attached: Maybe<&2, String>, state: ScanState) -> Mode:
@@ -2681,6 +2703,11 @@ def scan_short_bare_value(chars: String, state: ScanState,
     case _:
       scan_settle(scan_value(state, info, short_attached(chars)))
 
+def scan_short_version(enabled: Bool, state: ScanState) -> Mode:
+  match enabled:
+    case True{}: Closed{Stopped{scan_event(state, VersionHit{})}}
+    case False{}: scan_settle(scan_error(state, E01{"-V"}))
+
 def scan_short_go(chars: String, +state: ScanState,
     found: Maybe<&2, OptFound>) -> Mode:
   match chars found:
@@ -2689,11 +2716,7 @@ def scan_short_go(chars: String, +state: ScanState,
     case SCon{Chr{104}, +tail} None{}:
       Closed{Stopped{scan_event(state, HelpHit{False{}})}}
     case SCon{Chr{86}, tail} None{}:
-      +enabled = scope_version(scan_state_scope(state))
-      +next = scan_event(state, VersionHit{})
-      Bool.pick(Mode, enabled,
-        Closed{Stopped{next}},
-        scan_settle(scan_error(state, E01{"-V"})))
+      scan_short_version(scope_version(scan_state_scope(state)), state)
     case SCon{head, tail} None{}:
       scan_settle(scan_error(state,
         E01{String.append("-", Char.show(head))}))
@@ -2770,14 +2793,21 @@ def scan_sub_found(found: Maybe<&2, SubKey>, +state: ScanState,
       scan_sub_unknown(scope_external(scan_state_scope(state)),
         state, token)
 
-def help_missing(+token: String, +state: ScanState) -> Tail:
-  Bool.pick(Tail, String.eq(token, "-h"),
-    Stopped{scan_event(state, HelpHit{False{}})},
-    Bool.pick(Tail, String.eq(token, "--help"),
-      Stopped{scan_event(state, HelpHit{True{}})},
-      Bool.pick(Tail, String.starts_with(token, "-"),
-        Stopped{scan_error(state, E01{token})},
-        Stopped{scan_error(state, E02{token})})))
+def unknown_fault(dash: Bool, token: String) -> ScanFault:
+  match dash:
+    case True{}: E01{token}
+    case False{}: E02{token}
+
+def help_missing_case(help: Maybe<&2, Bool>, +token: String,
+    state: ScanState) -> Tail:
+  match help:
+    case Some{long}: Stopped{scan_event(state, HelpHit{long})}
+    case None{}:
+      Stopped{scan_error(state,
+        unknown_fault(String.starts_with(token, "-"), token))}
+
+def help_missing(+token: String, state: ScanState) -> Tail:
+  help_missing_case(help_flag(token), token, state)
 
 def help_walk(found: Maybe<&2, SubKey>, state: ScanState,
     token: String) -> Tail:
@@ -2785,17 +2815,25 @@ def help_walk(found: Maybe<&2, SubKey>, state: ScanState,
     case Some{sub}: Walk{scan_descend(state, sub)}
     case None{}: help_missing(token, state)
 
-def scan_non_option_sub(+token: String, +state: ScanState) -> Mode:
-  Bool.pick(Mode, String.eq(token, "help"),
-    Closed{Walk{state}},
-    scan_sub_found(scope_find_sub(scan_state_scope(state), token),
-      state, token))
+def scan_non_option_sub_case(help: Bool, +token: String,
+    +state: ScanState) -> Mode:
+  match help:
+    case True{}: Closed{Walk{state}}
+    case False{}:
+      scan_sub_found(scope_find_sub(scan_state_scope(state), token),
+        state, token)
 
-def scan_non_option(+token: String, +state: ScanState) -> Mode:
-  Bool.pick(Mode,
-    scope_has_sub(scan_state_scope(state)),
-    scan_non_option_sub(token, state),
-    scan_settle(scan_operand(state, token)))
+def scan_non_option_sub(+token: String, state: ScanState) -> Mode:
+  scan_non_option_sub_case(String.eq(token, "help"), token, state)
+
+def scan_non_option_case(has_sub: Bool, token: String,
+    state: ScanState) -> Mode:
+  match has_sub:
+    case True{}: scan_non_option_sub(token, state)
+    case False{}: scan_settle(scan_operand(state, token))
+
+def scan_non_option(token: String, +state: ScanState) -> Mode:
+  scan_non_option_case(scope_has_sub(scan_state_scope(state)), token, state)
 
 def scan_hyphen_candidate(state: ScanState, +token: String) -> Bool:
   match state:
@@ -2808,19 +2846,37 @@ def scan_hyphen_candidate(state: ScanState, +token: String) -> Bool:
           Bool.and(is_negative_number(token),
             Bool.not(scope_digit_short(scope)))))
 
-def scan_dash_token(+token: String, +state: ScanState) -> Mode:
-  Bool.pick(Mode, scan_hyphen_candidate(state, token),
-    scan_settle(scan_operand(state, token)),
-    scan_short(token, state))
+def scan_dash_case(operand: Bool, token: String, state: ScanState) -> Mode:
+  match operand:
+    case True{}: scan_settle(scan_operand(state, token))
+    case False{}: scan_short(token, state)
 
-def scan_token(+token: String, +state: ScanState) -> Mode:
-  Bool.pick(Mode, String.starts_with(token, "--"),
-    scan_long(token, state),
-    Bool.pick(Mode,
-      Bool.and(String.starts_with(token, "-"),
-        Bool.not(String.eq(token, "-"))),
-      scan_dash_token(token, state),
-      scan_non_option(token, state)))
+def scan_dash_token(+token: String, +state: ScanState) -> Mode:
+  scan_dash_case(scan_hyphen_candidate(state, token), token, state)
+
+# How an open scan reads a token: a long option, a dash token (a cluster of
+# short options, or an operand a slot takes), or a word; "-" is a word.
+type TokenClass is Data:
+  LongToken{}
+  DashToken{}
+  WordToken{}
+
+def token_class(token: String) -> TokenClass:
+  match token:
+    case SCon{Chr{45}, SCon{Chr{45}, rest}}: LongToken{}
+    case SCon{Chr{45}, SNil{}}: WordToken{}
+    case SCon{Chr{45}, rest}: DashToken{}
+    case _: WordToken{}
+
+def scan_token_case(kind: TokenClass, token: String,
+    state: ScanState) -> Mode:
+  match kind:
+    case LongToken{}: scan_long(token, state)
+    case DashToken{}: scan_dash_token(token, state)
+    case WordToken{}: scan_non_option(token, state)
+
+def scan_token(+token: String, state: ScanState) -> Mode:
+  scan_token_case(token_class(token), token, state)
 
 def scan_tail(tail: Tail, +token: String) -> Tail:
   match tail:

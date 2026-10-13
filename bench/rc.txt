@@ -114,3 +114,25 @@
 #   same_text and has_global take, which added keeps to lint's
 #   arg_collision, sub_collision and global_entries and slowed bench's lint
 #   phase by 15%.
+#
+# Scanner dispatch by match, against main's build (bc56410), both from
+# bench/main.bend; main.bend's per-def diff is the same. scan_token,
+# scan_dash_token, scan_non_option, scan_non_option_sub, scan_faulted,
+# help_missing, scan_builtin_long and scan_short_go's -V arm chose with
+# nested Bool.pick, which evaluates every branch: each token ran scan_long,
+# scan_dash_token and scan_non_option, and each word the subcommand lookup
+# and the operand scan, before one result was kept. Each now matches a
+# classification (token_class, help_flag or a Bool) in a helper. Builds
+# counting executed ops show every kind falling on bench --threads 1
+# (keeps 7.16M -> 5.61M, takes 20.8M -> 20.0M, seals 41.1M -> 36.0M):
+# FID_CLI_SCAN_OPEN 31 5 393 -> 102 4 20: scan_token and the defs under it,
+#   each now with one caller, are inlined here, so FID_CLI_SCAN_LONG
+#   61 8 411, FID_CLI_SCAN_DASH_TOKEN 28 5 262, FID_CLI_SCAN_NON_OPTION
+#   27 5 262, FID_CLI_SCAN_NON_OPTION_SUB 28 5 156, FID_CLI_SCAN_SHORT
+#   13 1 2 and FID_CLI_SCAN_SUB_FOUND 13 0 0 are gone: 201 29 1486 with
+#   scan_open's own. Most keeps are a +state's 13 non-scalar fields, in the
+#   arms that read the state before passing it on; one arm runs a token,
+#   where each of the three branches kept it.
+# FID_CLI_SCAN_SHORT_GO 143 6 257 -> 130 1 101, FID_CLI_SCAN_TAIL 57 3 114
+#   -> 16 0 9 and FID_CLI_SCAN_FAULTED 27 3 90 -> 0 0 9 fall; the new
+#   FID_CLI_HELP_FLAG 1 0 0 keeps the token for its two String.eq calls.
