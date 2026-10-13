@@ -1436,6 +1436,17 @@ law p19_arg:
   {Cli.find_spec_info(Cli.spec_items(items), id, None{})
     == Cli.find_arg_info(items, id) : Maybe<&2, Cli.ArgInfo>}
 
+# P19: a compiled scope's args, which fill its fields in order and which the
+# required, group, conflict and requires checks walk, are the globals it
+# inherits and then its own items.
+law p19_arg_order:
+  for +items: List<&2, Cli.Item>
+  for +globals: List<&2, Cli.SpecItem>
+  for path: List<&2, String>
+  {Cli.scope_arg_items(Cli.Scope{path, Cli.spec_node(items, globals)})
+    == List.append(&2, Cli.SpecItem, globals, Cli.spec_items(items))
+    : List<&2, Cli.SpecItem>}
+
 # The children of the first Sub named name.
 def named_sub(items: List<&2, Cli.Item>, +name: String) ->
     Maybe<&2, List<&2, Cli.Item>>:

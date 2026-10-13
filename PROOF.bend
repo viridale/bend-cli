@@ -3594,6 +3594,9 @@ def spec_go(items: List<&2, Cli.Item>, +id: String,
 def Laws.p19_arg(items, id):
   spec_go(items, id, None{})
 
+def Laws.p19_arg_order(items, globals, path):
+  {==}
+
 # P19 inherit: spec_items keeps an Arg's attrs (attrs_parsed), so it
 # commutes with keeping the globals (global_comm) and with append.
 def attrs_parsed(parsed: Cli.Usage, usage: String,
