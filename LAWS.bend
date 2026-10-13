@@ -16,7 +16,8 @@
 # find_by_key, find_sub, find_arg_info, same_text) against references that
 # walk the whole list with String.eq, P19 fixes the scanner's compiled scopes
 # against those raw lookups, and P20 fixes which route keys name a command
-# against cutting the key into words. P3-P6 and P15 fix the quoters against
+# against cutting the key into words, and route's whole answer against
+# references that walk its table. P3-P6 and P15 fix the quoters against
 # models of how each shell and man(7) read text; G-COMP and G-MAN fix the
 # bytes of script and roff, and g_eval_builtins fixes V6. Nothing here fixes
 # what a real shell offers from a script, nor Run.main's IO, which
@@ -1487,6 +1488,63 @@ law p20:
   for +items: List<&2, Cli.Item>
   {Cli.route_key(key, items) == command_words(key_words(key), Some{items})
     : Bool}
+
+# The callback of table's first entry keyed key.
+def table_call(-A: Type, table: List<(String & Cli.Call(A))>, +key: String)
+    -> Maybe<Cli.Call(A)>:
+  match table:
+    case Nil{}: None{}
+    case entry <> tail:
+      (k, call) = entry
+      Bool.pick(Maybe<Cli.Call(A)>, String.eq(k, key), Some{call},
+        table_call(A, tail, key))
+
+# Table's first key whose words name no command, from items.
+def table_bad(-A: Type, table: List<(String & Cli.Call(A))>,
+    +items: List<&2, Cli.Item>) -> Maybe<&2, String>:
+  match table:
+    case Nil{}: None{}
+    case entry <> tail:
+      (+key, call) = entry
+      Bool.pick(Maybe<&2, String>, command_words(key_words(key), Some{items}),
+        table_bad(A, tail, items), Some{key})
+
+# The found callback applied to m, unless bad names a key that names no
+# command.
+def bad_answer(-A: Type, bad: Maybe<&2, String>, call: Cli.Call(A),
+    m: Cli.Matches) -> Cli.Dec(A):
+  match bad:
+    case None{}: call(m)
+    case Some{key}:
+      Fail{Cli.Bug{String.concat(["route '", key, "' is not a command"])}}
+
+# route's answer from what it found: no callback for the path is a Bug at
+# text, the command's path, reported before any bad key.
+def route_answer(-A: Type, found: Maybe<Cli.Call(A)>,
+    bad: Maybe<&2, String>, text: String, m: Cli.Matches) -> Cli.Dec(A):
+  match found:
+    case None{}: Fail{Cli.Bug{String.concat(["no route for '", text, "'"])}}
+    case Some{call}: bad_answer(A, bad, call, m)
+
+# P20: at the Matches of a command's path, route answers a Bug when no
+# table key is the path's words joined by spaces, checked first; else a Bug
+# naming the table's first key whose words name no command (p20's rule);
+# else the path's first callback, applied to those same Matches.
+law p20_route:
+  for -A: Type
+  for +name: String
+  for +about: String
+  for +items: List<&2, Cli.Item>
+  for +path: List<&2, String>
+  for +fields: List<&2, Cli.Field>
+  for +external: Maybe<&2, Cli.ExternalArgs>
+  for table: List<(String & Cli.Call(A))>
+  {Cli.route(A, Cli.Matches{Cli.Cmd{name, about, items}, path, fields,
+      external}, table)
+    == route_answer(A, table_call(A, table, String.join(path, " ")),
+      table_bad(A, table, items), String.join(name <> path, " "),
+      Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+    : Cli.Dec(A)}
 
 def sampled() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [

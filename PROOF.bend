@@ -5137,6 +5137,245 @@ def Laws.p20(key, items):
     case SNil{}: {==}
     case SCon{h, t}: route_go(items, SCon{h, t})
 
+# P20 route. The table holds callbacks, so no proof can walk it twice. And
+# code specific to Call(A) wraps each callback it names as m => c(m), which
+# the kernel (no eta) tells apart from c inside data. So tab_cons walks the
+# table once in generic code, and route_tab instantiates it, naming a
+# callback only where route_answer applies it.
+
+# A hit found before keys and values stays found.
+def Stays(a, -A: Kind(a), keys: List<&2, String>, values: List<a, A>,
+    key: String) -> Type:
+  @-h: A ->
+    {Cli.find_by_key_go(a, A, keys, values, key, Some{h}) == Some{h}
+      : Maybe<a, A>}
+
+# table's keys and values as unzip_keyed splits them; find_by_key and keyed
+# agree there; non_command finds B's key; and keyed's answer through F is L's.
+def Tab(a, -A: Kind(a), -D: Type, -F: Maybe<a, A> -> D,
+    -L: List<(String & A)> -> D, -B: List<(String & A)> -> Maybe<&2, String>,
+    table: List<(String & A)>, key: String, items: List<&2, Cli.Item>)
+    -> Type:
+  &keys: List<&2, String> -> &values: List<a, A> ->
+  ({(keys, values) == Cli.unzip_keyed(a, A, table)
+      : (List<&2, String> & List<a, A>)} &
+   ({Cli.find_by_key(a, A, keys, values, key)
+       == Laws.keyed(a, A, keys, values, key) : Maybe<a, A>} &
+    (Stays(a, A, keys, values, key) &
+     ({Cli.non_command(keys, items) == B(table) : Maybe<&2, String>} &
+      {F(Laws.keyed(a, A, keys, values, key)) == L(table) : D}))))
+
+def tab_unzip(a, -A: Kind(a), -k: String, -v: A,
+    -tail: List<(String & A)>, -keys: List<&2, String>,
+    -values: List<a, A>,
+    e: {(keys, values) == Cli.unzip_keyed(a, A, tail)
+      : (List<&2, String> & List<a, A>)}) ->
+    {(k <> keys, v <> values) == Cli.unzip_keyed(a, A, (k, v) <> tail)
+      : (List<&2, String> & List<a, A>)}:
+  %e : {(k <> keys, v <> values) == Cli.keyed_cons(a, A, k, v, _)
+    : (List<&2, String> & List<a, A>)}
+  {==}
+
+# by_key_hit's answer, then the walk on from None.
+def hit_pick(a, -A: Kind(a), hit: Bool, -v: A, -keys: List<&2, String>,
+    -values: List<a, A>, -key: String, stays: Stays(a, A, keys, values, key))
+    -> {Cli.find_by_key_go(a, A, keys, values, key,
+        Cli.by_key_hit(a, A, hit, v))
+      == Bool.pick(Maybe<a, A>, hit, Some{v},
+        Cli.find_by_key_go(a, A, keys, values, key, None{}))
+      : Maybe<a, A>}:
+  match hit:
+    case True{}: stays(v)
+    case False{}: {==}
+
+def tab_find(a, -A: Kind(a), +k: String, -v: A, -keys: List<&2, String>,
+    -values: List<a, A>, +key: String,
+    e: {Cli.find_by_key(a, A, keys, values, key)
+      == Laws.keyed(a, A, keys, values, key) : Maybe<a, A>},
+    stays: Stays(a, A, keys, values, key)) ->
+    {Cli.find_by_key(a, A, k <> keys, v <> values, key)
+      == Laws.keyed(a, A, k <> keys, v <> values, key) : Maybe<a, A>}:
+  %e : {Cli.find_by_key(a, A, k <> keys, v <> values, key)
+    == Bool.pick(Maybe<a, A>, String.eq(k, key), Some{v}, _) : Maybe<a, A>}
+  %Laws.p18_text(k, key) : {Cli.find_by_key(a, A, k <> keys, v <> values, key)
+    == Bool.pick(Maybe<a, A>, _, Some{v},
+      Cli.find_by_key(a, A, keys, values, key)) : Maybe<a, A>}
+  hit_pick(a, A, Cli.same_text(k, key), v, keys, values, key, stays)
+
+def tab_bad(a, -A: Kind(a), -B: List<(String & A)> -> Maybe<&2, String>,
+    +k: String, -v: A, -tail: List<(String & A)>, -keys: List<&2, String>,
+    +items: List<&2, Cli.Item>,
+    e: {Cli.non_command(keys, items) == B(tail) : Maybe<&2, String>},
+    step: {Bool.pick(Maybe<&2, String>,
+        Laws.command_words(Laws.key_words(k), Some{items}), B(tail), Some{k})
+      == B((k, v) <> tail) : Maybe<&2, String>}) ->
+    {Cli.non_command(k <> keys, items) == B((k, v) <> tail)
+      : Maybe<&2, String>}:
+  %step : {Cli.non_command(k <> keys, items) == _ : Maybe<&2, String>}
+  %e : {Cli.non_command(k <> keys, items)
+    == Bool.pick(Maybe<&2, String>,
+      Laws.command_words(Laws.key_words(k), Some{items}), _, Some{k})
+    : Maybe<&2, String>}
+  %Laws.p20(k, items) : {Cli.non_command(k <> keys, items)
+    == Bool.pick(Maybe<&2, String>, _, Cli.non_command(keys, items),
+      Some{k}) : Maybe<&2, String>}
+  {==}
+
+# keyed's answer through F at the entry (k, v): hit says it is L's when k is
+# key, and miss that L skips the entry otherwise.
+def tab_pick(a, -A: Kind(a), -D: Type, -F: Maybe<a, A> -> D,
+    -L: List<(String & A)> -> D, hit: Bool, -k: String, -v: A,
+    -tail: List<(String & A)>, -keys: List<&2, String>, -values: List<a, A>,
+    -key: String, same: {hit == String.eq(k, key) : Bool},
+    rest: {F(Laws.keyed(a, A, keys, values, key)) == L(tail) : D},
+    on_hit: {True{} == String.eq(k, key) : Bool} ->
+      {F(Some{v}) == L((k, v) <> tail) : D},
+    on_miss: {False{} == String.eq(k, key) : Bool} ->
+      {L(tail) == L((k, v) <> tail) : D}) ->
+    {F(Bool.pick(Maybe<a, A>, hit, Some{v},
+        Laws.keyed(a, A, keys, values, key))) == L((k, v) <> tail) : D}:
+  match hit:
+    case True{}: on_hit(same)
+    case False{}:
+      %on_miss(same) : {F(Laws.keyed(a, A, keys, values, key)) == _ : D}
+      rest
+
+def tab_cons(a, -A: Kind(a), -D: Type, -F: Maybe<a, A> -> D,
+    -L: List<(String & A)> -> D, -B: List<(String & A)> -> Maybe<&2, String>,
+    entry: (String & A), -tail: List<(String & A)>, +key: String,
+    +items: List<&2, Cli.Item>, ih: Tab(a, A, D, F, L, B, tail, key, items),
+    on_hit: @-k: String -> @-v: A -> {True{} == String.eq(k, key) : Bool} ->
+      {F(Some{v}) == L((k, v) <> tail) : D},
+    on_miss: @-k: String -> @-v: A -> {False{} == String.eq(k, key) : Bool} ->
+      {L(tail) == L((k, v) <> tail) : D},
+    on_bad: @-k: String -> @-v: A ->
+      {Bool.pick(Maybe<&2, String>,
+          Laws.command_words(Laws.key_words(k), Some{items}), B(tail),
+          Some{k})
+        == B((k, v) <> tail) : Maybe<&2, String>}) ->
+    Tab(a, A, D, F, L, B, entry <> tail, key, items):
+  match entry:
+    case (+k, v):
+      match ih:
+        case (+keys, (values, (e1, (e2, (stays, (e3, e4)))))):
+          (k <> keys, (v <> values,
+            (tab_unzip(a, A, k, v, tail, keys, values, e1),
+            (tab_find(a, A, k, v, keys, values, key, e2, stays),
+            (h => {==},
+            (tab_bad(a, A, B, k, v, tail, keys, items, e3, on_bad(k, v)),
+            tab_pick(a, A, D, F, L, String.eq(k, key), k, v, tail, keys,
+              values, key, {==}, e4, on_hit(k, v), on_miss(k, v))))))))
+
+# route_tab's F, L and B: route_answer at found, at table_call's answer, and
+# table_bad's.
+def route_tab(-A: Type, table: List<(String & Cli.Call(A))>, +key: String,
+    +items: List<&2, Cli.Item>, -bad: Maybe<&2, String>, -text: String,
+    -m: Cli.Matches) ->
+    Tab(&1, Cli.Call(A), Cli.Dec(A),
+      f => Laws.route_answer(A, f, bad, text, m),
+      t => Laws.route_answer(A, Laws.table_call(A, t, key), bad, text, m),
+      t => Laws.table_bad(A, t, items), table, key, items):
+  match table:
+    case Nil{}: ([], ([], ({==}, ({==}, (h => {==}, ({==}, {==}))))))
+    case entry <> tail:
+      tab_cons(&1, Cli.Call(A), Cli.Dec(A),
+        f => Laws.route_answer(A, f, bad, text, m),
+        t => Laws.route_answer(A, Laws.table_call(A, t, key), bad, text, m),
+        t => Laws.table_bad(A, t, items), entry, tail, key, items,
+        route_tab(A, tail, key, items, bad, text, m),
+        k => v => e =>
+          (%e : {Laws.route_answer(A, Some{v}, bad, text, m)
+              == Laws.route_answer(A,
+                Bool.pick(Maybe<Cli.Call(A)>, _, Some{v},
+                  Laws.table_call(A, tail, key)), bad, text, m)
+              : Cli.Dec(A)}
+            {==}),
+        k => v => e =>
+          (%e : {Laws.route_answer(A, Laws.table_call(A, tail, key), bad,
+                text, m)
+              == Laws.route_answer(A,
+                Bool.pick(Maybe<Cli.Call(A)>, _, Some{v},
+                  Laws.table_call(A, tail, key)), bad, text, m)
+              : Cli.Dec(A)}
+            {==}),
+        k => v => {==})
+
+# route_call is bad_answer, and route_found is route_answer, for any bad
+# and found.
+def bad_same(-A: Type, bad: Maybe<&2, String>, -call: Cli.Call(A),
+    -m: Cli.Matches) ->
+    {Cli.route_call(A, bad, call, m) == Laws.bad_answer(A, bad, call, m)
+      : Cli.Dec(A)}:
+  match bad:
+    case None{}: {==}
+    case Some{key}: {==}
+
+def found_same(-A: Type, found: Maybe<Cli.Call(A)>, keys: List<&2, String>,
+    -name: String, -about: String, items: List<&2, Cli.Item>,
+    -path: List<&2, String>, -m: Cli.Matches) ->
+    {Cli.route_found(A, found, keys, Cli.Cmd{name, about, items}, path, m)
+      == Laws.route_answer(A, found, Cli.non_command(keys, items),
+        String.join(name <> path, " "), m) : Cli.Dec(A)}:
+  match found:
+    case None{}: {==}
+    case Some{call}: bad_same(A, Cli.non_command(keys, items), call, m)
+
+def route_at(-A: Type, -name: String, -about: String,
+    +items: List<&2, Cli.Item>, +path: List<&2, String>,
+    -fields: List<&2, Cli.Field>, -external: Maybe<&2, Cli.ExternalArgs>,
+    -table: List<(String & Cli.Call(A))>,
+    tab: Tab(&1, Cli.Call(A), Cli.Dec(A),
+      f => Laws.route_answer(A, f, Laws.table_bad(A, table, items),
+        String.join(name <> path, " "),
+        Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external}),
+      t => Laws.route_answer(A, Laws.table_call(A, t, String.join(path, " ")),
+        Laws.table_bad(A, table, items), String.join(name <> path, " "),
+        Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external}),
+      t => Laws.table_bad(A, t, items), table, String.join(path, " "),
+      items)) ->
+    {Cli.route_pick(A, Cli.unzip_keyed(&1, Cli.Call(A), table),
+        Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+      == Laws.route_answer(A,
+        Laws.table_call(A, table, String.join(path, " ")),
+        Laws.table_bad(A, table, items), String.join(name <> path, " "),
+        Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+      : Cli.Dec(A)}:
+  match tab:
+    case (+keys, (values, (e1, (e2, (stays, (e3, e4)))))):
+      %e4 : {Cli.route_pick(A, Cli.unzip_keyed(&1, Cli.Call(A), table),
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        == _ : Cli.Dec(A)}
+      %e3 : {Cli.route_pick(A, Cli.unzip_keyed(&1, Cli.Call(A), table),
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        == Laws.route_answer(A,
+          Laws.keyed(&1, Cli.Call(A), keys, values, String.join(path, " ")),
+          _, String.join(name <> path, " "),
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        : Cli.Dec(A)}
+      %e2 : {Cli.route_pick(A, Cli.unzip_keyed(&1, Cli.Call(A), table),
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        == Laws.route_answer(A, _, Cli.non_command(keys, items),
+          String.join(name <> path, " "),
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        : Cli.Dec(A)}
+      %e1 : {Cli.route_pick(A, _,
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        == Laws.route_answer(A,
+          Cli.find_by_key(&1, Cli.Call(A), keys, values,
+            String.join(path, " ")), Cli.non_command(keys, items),
+          String.join(name <> path, " "),
+          Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+        : Cli.Dec(A)}
+      found_same(A, Cli.find_by_key(&1, Cli.Call(A), keys, values,
+        String.join(path, " ")), keys, name, about, items, path,
+        Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external})
+
+def Laws.p20_route(A, name, about, items, path, fields, external, table):
+  route_at(A, name, about, items, path, fields, external, table,
+    route_tab(A, table, String.join(path, " "), items,
+      Laws.table_bad(A, table, items), String.join(name <> path, " "),
+      Cli.Matches{Cli.Cmd{name, about, items}, path, fields, external}))
+
 def Laws.g_check_sample_values():
   {==}
 
