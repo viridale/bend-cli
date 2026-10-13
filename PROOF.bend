@@ -91,6 +91,9 @@ def Laws.g_lint_mixed():
 def Laws.g_lint_bad_choices():
   {==}
 
+def Laws.g_lint_bad_choice():
+  ({==}, ({==}, ({==}, {==})))
+
 def Laws.g_lint_need_bare():
   {==}
 

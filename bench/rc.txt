@@ -197,3 +197,22 @@
 #   and raised 28 more defs, and matching each event instead of event_id
 #   inlined find_spec_info thrice (16 21 60). tools/bench.sh: threads=1 237.6
 #   -> 232.0 ms, all cores 45.8 -> 45.6 ms, peak RSS 10.7 MB both.
+#
+# Lint names a one_of value its arg's type rejects (BadChoice), against
+# main's build (3671cf8); bench/main.bend and main.bend give the same per-def
+# diff but for FID_CLI_LINTED, which main.bend does not reach, and the static
+# total 5863 -> 5937 (main.bend 5960 -> 6030):
+# FID_CLI_ARG_ISSUES 17 4 106 -> 20 6 117: it keeps attrs, id and at once
+#   more for the new FID_CLI_CHECK_CHOICES 0 0 5 and FID_CLI_CHOICE_BAD 1 1 0,
+#   and its list of problems gains a cell. Lint walks each arg once.
+# Every other rise is the new constructor's branch where a Problem is rebuilt
+#   from its flattened fields or taken apart, one branch per constructor;
+#   only a BadChoice runs it: 3 seals per when_problem site in
+#   FID_CLI_ARG_ALIAS_ISSUE, FID_CLI_ARG_PROBLEMS, FID_CLI_MISSING_REFS,
+#   FID_CLI_POSITIONAL_ISSUE, FID_CLI_PROBLEMS and FID_CLI_SUB_ALIAS_ISSUE
+#   (+3) and FID_CLI_COMMAND_BODY_ISSUES and FID_CLI_SUB_NAME_ISSUES (+6);
+#   a take and 3 seals in FID_CLI_LINTED 3 14 30 -> 3 15 33 and
+#   FID_CLI_OUTCOME (8 14 30 -> 8 15 33; main.bend 26 19 37 -> 26 20 40);
+#   a take in FID_CLI_PROBLEM_LINES 0 14 6 -> 0 15 6; and the new sentence in
+#   FID_CLI_PROBLEM_LINE 0 0 112 -> 0 0 124. tools/bench.sh: threads=1
+#   231.0 -> 232.1 ms, all cores 48.1 -> 45.3 ms, peak RSS 10.7 MB both.

@@ -307,6 +307,28 @@ law g_lint_bad_choices:
   ])) == [Cli.BadChoices{"tool", "mode"}]
     : List<&2, Cli.Problem>}
 
+# G-LINT BadChoice: each one_of value must pass the arg's value type, which
+# parse checks before the choices, so a choice that fails could never be
+# given; lint names the first, whatever the order of the attributes. Untyped
+# and file choices take any text.
+law g_lint_bad_choice:
+  {Cli.problems(Cli.cmd("tool", "Tool description", [
+    Cli.arg("--n <N>", "Count",
+      [Cli.as_u32(), Cli.one_of(["1", "4294967296", "x"])]),
+  ])) == [Cli.BadChoice{"tool", "n", "4294967296"}]
+    : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool description", [
+    Cli.arg("--n <N>", "Count",
+      [Cli.one_of(["0", "4294967295", "y"]), Cli.as_u32()]),
+  ])) == [Cli.BadChoice{"tool", "n", "y"}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool description", [
+    Cli.arg("--mode <M>", "Mode", [Cli.one_of(["", "x"])]),
+    Cli.arg("--path <P>", "Path", [Cli.as_file(), Cli.one_of(["-"])]),
+    Cli.arg("<N>", "Level", [Cli.as_nat(), Cli.one_of(["0", "7"])]),
+  ])) == [] : List<&2, Cli.Problem>} &
+  {Cli.problem_line(Cli.BadChoice{"tool", "n", "x"})
+    == "  tool: 'n' cannot have the choice 'x'" : String}
+
 # G-LINT NeedBare: an optional-value option requires a bare value.
 law g_lint_need_bare:
   {Cli.problems(Cli.cmd("tool", "Tool description", [

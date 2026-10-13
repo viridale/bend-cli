@@ -725,6 +725,7 @@ type Problem is Data:
   BadPositional{at: String, id: String, why: String}
   Mixed{at: String}
   BadChoices{at: String, id: String}
+  BadChoice{at: String, id: String, value: String}
   NeedBare{at: String, id: String}
   DecodeBug{at: String, msg: String}
 
@@ -1754,6 +1755,29 @@ def check_default(found: Maybe<&2, String>, kind: UsageKind,
       bad_default(has_required(attrs), value_issue(kind, attrs, value),
         value, id, at)
 
+# The first choice the arg's type rejects; after a hit it only walks the rest.
+def choice_bad(values: List<&2, String>, +found: Maybe<&2, ValueType>,
+    bad: Maybe<&2, Bad>) -> Maybe<&2, Bad>:
+  match values bad:
+    case Nil{} hit: hit
+    case value <> tail Some{hit}: Some{hit}
+    case +value <> tail None{}:
+      choice_bad(tail, found, bad_value(reason_from_type(found, value), value))
+
+def bad_choice(found: Maybe<&2, Bad>, id: String, at: String) ->
+    List<&2, Problem>:
+  match found:
+    case None{}: Nil{}
+    case Some{Bad{value, why}}: [BadChoice{at, id, value}]
+
+# Parse checks a value's type before its choices, so a choice the type
+# rejects could never be given.
+def check_choices(found: Maybe<&2, List<&2, String>>,
+    kind: Maybe<&2, ValueType>, id: String, at: String) -> List<&2, Problem>:
+  match found:
+    case None{}: Nil{}
+    case Some{values}: bad_choice(choice_bad(values, kind, None{}), id, at)
+
 def positional_issue(+kind: UsageKind, +id: String,
     attrs: List<&2, Item>, rest_items: List<&2, LintItem>,
     +seen_optional: Bool, +seen_variadic: Bool, +at: String) ->
@@ -1807,6 +1831,7 @@ def arg_issues(+kind: UsageKind, +id: String, +short: String,
       find_requires(attrs), find_conflicts(attrs)), ids, at),
     positional_issue(kind, id, attrs, remaining, optional, variadic, at),
     when_problem(bad_choices(attrs), BadChoices{at, id}),
+    check_choices(find_one_of(attrs), find_as(attrs), id, at),
     bare_issue(kind, id, short, attrs, at),
   ])
 
@@ -5399,6 +5424,9 @@ def problem_line(p: Problem) -> String:
     case BadChoices{at, id}:
       String.concat(["  ", at, ": one_of for '", id,
         "' is empty or repeats a value"])
+    case BadChoice{at, id, value}:
+      String.concat(["  ", at, ": '", id, "' cannot have the choice '", value,
+        "'"])
     case NeedBare{at, id}:
       String.concat(["  ", at, ": '", id,
         "' needs [=<V>] and bare() together, with no short"])
