@@ -339,7 +339,7 @@ def tallied(s: Cli.Step<Run>, t: Tally) -> Tally:
   match s:
     case Cli.Go{r, term}:
       went(t, fnv(term_text(term), fnv(run_text(r), 2166136261)))
-    case Cli.Exit{+code, out, err}:
+    case Cli.Quit{+code, out, err}:
       exited(t, code, fnv(err, fnv(out, code)))
 
 # t with each argv in argvs evaluated against l and h.

@@ -114,7 +114,7 @@ def ended(r: (U32 & String)) -> IO(Unit):
 def stepped(~A: Type, ~act: @+t: Cli.Term -> A -> IO(U32),
     s: Cli.Step<A>) -> IO(Unit):
   match s:
-    case Cli.Exit{code, out, err}: finish(code, out, err)
+    case Cli.Quit{code, out, err}: finish(code, out, err)
     case Cli.Go{a, t}:
       do IO<Unit>:
         n : U32 <- act(t, a)

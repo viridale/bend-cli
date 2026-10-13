@@ -6965,7 +6965,7 @@ def outcome_linted(l: Linted, +h: Host, +argv: List<&2, String>) -> Outcome:
 
 type Step<-A: Type> is Type:
   Go{value: A, term: Term}
-  Exit{code: U32, out: String, err: String}
+  Quit{code: U32, out: String, err: String}
 
 # E12: a decoder's Usage message as an error at the matched scope, printed
 # as given, in stderr's colors.
@@ -6979,9 +6979,9 @@ def usage_err(t: Term, msg: String, view: View) -> String:
 def faulted(-A: Type, f: Fault, +cmd: Cmd, path: List<&2, String>, h: Host,
     argv: List<&2, String>) -> Step<A>:
   match f:
-    case Bug{msg}: Exit{70, "", String.concat(["bug: ", msg, "\n"])}
+    case Bug{msg}: Quit{70, "", String.concat(["bug: ", msg, "\n"])}
     case Usage{msg}:
-      Exit{2, "", usage_err(term(cmd, h, argv), msg, view_of(cmd, path))}
+      Quit{2, "", usage_err(term(cmd, h, argv), msg, view_of(cmd, path))}
 
 # V7: Done is Go with term's decisions; a fault exits 70 or 2.
 def decoded(-A: Type, d: Dec(A), cmd: Cmd, path: List<&2, String>, h: Host,
@@ -6993,7 +6993,7 @@ def decoded(-A: Type, d: Dec(A), cmd: Cmd, path: List<&2, String>, h: Host,
 def eval_step(-A: Type, decode: @+m: Matches -> Dec(A), o: Outcome, h: Host,
     argv: List<&2, String>) -> Step<A>:
   match o:
-    case Shown{code, out, err}: Exit{code, out, err}
+    case Shown{code, out, err}: Quit{code, out, err}
     case Matched{Matches{+cmd, +path, fields, external}}:
       decoded(A, decode(Matches{cmd, path, fields, external}), cmd, path, h,
         argv)

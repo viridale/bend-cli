@@ -2574,17 +2574,17 @@ law g_lint_flag_default:
     Cli.arg("-v...", "Verbosity", [Cli.default("2")]),
   ])) == [Cli.Misplaced{"tool", "default"}] : List<&2, Cli.Problem>}
 
-# M5: eval answers outcome's Shown as Exit and decodes a Matched (V7).
+# M5: eval answers outcome's Shown as Quit and decodes a Matched (V7).
 # eval_with is eval with the decoder passed as a value, so a law can
 # quantify over decoders. eval must be a direct forwarding definition,
 # eval(~A, ~decode, c, h, argv) = eval_with(A, decode, c, h, argv), so P10
 # and P11, proved of eval_with, carry to every eval; eval_bridge checks it.
 
-# P10: for every decoder, eval_with answers Go, or Exit with code 0, 2 or 70.
+# P10: for every decoder, eval_with answers Go, or Quit with code 0, 2 or 70.
 def p10_code(-A: Type, s: Cli.Step<A>) -> Bool:
   match s:
     case Cli.Go{value, term}: True{}
-    case Cli.Exit{+code, out, err}:
+    case Cli.Quit{+code, out, err}:
       Bool.or(U32.is_eq(code, 0),
         Bool.or(U32.is_eq(code, 2), U32.is_eq(code, 70)))
 
@@ -2601,7 +2601,7 @@ law p10:
 def p11_streams(-A: Type, s: Cli.Step<A>) -> Bool:
   match s:
     case Cli.Go{value, term}: True{}
-    case Cli.Exit{+code, out, err}:
+    case Cli.Quit{+code, out, err}:
       Bool.and(Bool.or(Bool.not(U32.is_eq(code, 0)), String.is_empty(err)),
         Bool.or(Bool.not(Bool.or(U32.is_eq(code, 2), U32.is_eq(code, 70))),
           String.is_empty(out)))
@@ -2741,7 +2741,7 @@ def went_to(path: List<&2, String>, fields: List<&2, Cli.Field>,
 
 def failed(-A: Type, message: String, tips: List<&2, String>,
     usage: String) -> Cli.Step<A>:
-  Cli.Exit{2, "", error_text(message, tips, usage)}
+  Cli.Quit{2, "", error_text(message, tips, usage)}
 
 # G-LEX through G-REL through eval: each M2 case's Go value, or its exact
 # help, version or error bytes with their tips (§12.2). Each law covers
@@ -2839,7 +2839,7 @@ law g_lex_errors_eval:
 
 law g_lex_recovery_eval:
   {ran(flags(), host(), ["--bad=x", "--help"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Tool",
       "",
       "Usage: tool [OPTIONS]",
@@ -2910,7 +2910,7 @@ law g_pos_cases_eval:
   {ran(Cli.cmd("tool", "Tool", [
     Cli.arg("<X>", "Operand", [Cli.hyphen()]),
   ]), host(), ["-h"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Tool",
       "",
       "Usage: tool <X>",
@@ -2944,7 +2944,7 @@ law g_sub_alias_eval:
 
 law g_sub_help_eval:
   {ran(sub_tool(), host(), ["help"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Tool",
       "",
       "Usage: tool [OPTIONS] <COMMAND>",
@@ -2959,7 +2959,7 @@ law g_sub_help_eval:
       "  -h, --help    Print help",
     ]), ""} : Cli.Step<Parsed>} &
   {ran(sub_tool(), host(), ["help", "a", "beta"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Beta",
       "",
       "Usage: tool alpha beta [OPTIONS]",
@@ -2972,7 +2972,7 @@ law g_sub_help_eval:
     failed(Parsed, "unrecognized subcommand 'bad'",
       [], "tool [OPTIONS] <COMMAND>") : Cli.Step<Parsed>} &
   {ran(sub_tool(), host(), ["alpha", "--help"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Alpha",
       "",
       "Usage: tool alpha [OPTIONS] [COMMAND]",
@@ -3017,7 +3017,7 @@ law g_sub_missing_eval:
       "'tool' requires a subcommand but none was provided\n  [subcommands: alpha, help]",
       [], "tool [OPTIONS] <COMMAND>") : Cli.Step<Parsed>} &
   {ran(sub_tool(), host(), []) ==
-    Cli.Exit{2, "", page([
+    Cli.Quit{2, "", page([
       "Tool",
       "",
       "Usage: tool [OPTIONS] <COMMAND>",
@@ -3047,7 +3047,7 @@ law g_sub_short_shadow_eval:
   {ran(Cli.cmd("tool", "Tool", [
     Cli.arg("-h", "Human", []),
   ]), host(), ["--help"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Tool",
       "",
       "Usage: tool [OPTIONS]",
@@ -3067,7 +3067,7 @@ law g_sub_short_shadow_eval:
     Cli.version("1.0"),
     Cli.arg("-V", "Verbose", []),
   ]), host(), ["--version"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "tool 1.0",
     ]), ""} : Cli.Step<Parsed>}
 
@@ -3285,7 +3285,7 @@ law g_rel_need_one_eval:
     Cli.arg("--a", "A", [Cli.group("pick")]),
     Cli.arg("--b", "B", [Cli.group("pick")]),
   ]), host(), ["--help"]) ==
-    Cli.Exit{0, page([
+    Cli.Quit{0, page([
       "Tool",
       "",
       "Usage: tool [OPTIONS] <--a|--b>",
@@ -3416,7 +3416,7 @@ law g_err_decode:
     failed(String, "pass --ok to accept", [], "tool deep [OPTIONS]")
     : Cli.Step<String>} &
   {strict_run(Cli.host_tty(host(), False{}, True{}), []) ==
-    Cli.Exit{2, "", page([
+    Cli.Quit{2, "", page([
       "\u{1B}[1;31merror:\u{1B}[0m pass --ok to accept",
       "",
       "\u{1B}[1;4mUsage:\u{1B}[0m \u{1B}[1mtool\u{1B}[0m [OPTIONS] [COMMAND]",
@@ -3424,9 +3424,9 @@ law g_err_decode:
       "For more information, try '\u{1B}[1m--help\u{1B}[0m'.",
     ])} : Cli.Step<String>} &
   {strict_run(host(), ["--ok", "deep", "--bug"]) ==
-    Cli.Exit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
+    Cli.Quit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
   {strict_run(tty(), ["--bug"]) ==
-    Cli.Exit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
+    Cli.Quit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
   {strict_run(host(), ["deep", "--ok"]) ==
     Cli.Go{"accepted", Cli.Term{False{}, False{}, 80n}} : Cli.Step<String>} &
   {strict_run(Cli.host_tty(Cli.host(200n), True{}, False{}), ["--ok"]) ==
@@ -3435,7 +3435,7 @@ law g_err_decode:
     ["--color=never", "list"]) ==
     Cli.Go{Demo.Action{0n, None{}, Demo.Show{False{}, Demo.Text{}}},
       Cli.Term{False{}, False{}, 80n}} : Cli.Step<Demo.Action>} &
-  {newline_run([]) == Cli.Exit{2, "", page([
+  {newline_run([]) == Cli.Quit{2, "", page([
     "error: pass --ok to accept",
     "",
     "",
@@ -3444,7 +3444,7 @@ law g_err_decode:
     "For more information, try '--help'.",
   ])} : Cli.Step<String>} &
   {newline_run(["--bug"]) ==
-    Cli.Exit{70, "", "bug: --bug was given\n\n"} : Cli.Step<String>}
+    Cli.Quit{70, "", "bug: --bug was given\n\n"} : Cli.Step<String>}
 
 # G-LINT: lint comes before every rule, so a bad spec exits 70 even for
 # --help, --version or empty argv; the text is never colored.
@@ -3459,7 +3459,7 @@ def broken() -> Cli.Cmd:
   ])
 
 def broken_exit() -> Cli.Step<Parsed>:
-  Cli.Exit{70, "", page([
+  Cli.Quit{70, "", page([
     "bug: invalid command-line definition",
     "  tool: '--help' is reserved",
     "  tool run: '-v' is declared more than once",
@@ -4994,7 +4994,7 @@ def pkg_run(h: Cli.Host, argv: List<&2, String>) -> Cli.Step<Demo.Action>:
   Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), h, argv)
 
 def shown(-A: Type, out: String) -> Cli.Step<A>:
-  Cli.Exit{0, out, ""}
+  Cli.Quit{0, out, ""}
 
 # V6: completions prints script(c, shell) and man prints roff(c, path) on
 # stdout with exit 0, uncolored, before any decoder runs. Help and scan

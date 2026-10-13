@@ -37,14 +37,14 @@ def page() -> String:
 # Each text has one paragraph, so -h and --help print the same page.
 law help:
   {Cli.eval(~App.Greeting, ~App.decode, App.cli(), Cli.host(80n), ["-h"])
-    == Cli.Exit{0, page(), ""} : Cli.Step<App.Greeting>} &
+    == Cli.Quit{0, page(), ""} : Cli.Step<App.Greeting>} &
   {Cli.eval(~App.Greeting, ~App.decode, App.cli(), Cli.host(80n), ["--help"])
-    == Cli.Exit{0, page(), ""} : Cli.Step<App.Greeting>}
+    == Cli.Quit{0, page(), ""} : Cli.Step<App.Greeting>}
 
 law second_name:
   {Cli.eval(~App.Greeting, ~App.decode, App.cli(), Cli.host(80n),
     ["Ada", "Bo"])
-    == Cli.Exit{2, "", String.concat([
+    == Cli.Quit{2, "", String.concat([
       "error: unexpected argument 'Bo' found\n",
       "\n",
       "Usage: hello [NAME]\n",
@@ -57,7 +57,7 @@ law second_name:
 law option:
   {Cli.eval(~App.Greeting, ~App.decode, App.cli(), Cli.host(80n),
     ["--name", "Ada"])
-    == Cli.Exit{2, "", String.concat([
+    == Cli.Quit{2, "", String.concat([
       "error: unexpected argument '--name' found\n",
       "\n",
       "  tip: to pass '--name' as a value, use '-- --name'\n",

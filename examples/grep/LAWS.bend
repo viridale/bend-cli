@@ -38,7 +38,7 @@ def examples() -> String:
 # -h prints each text's first paragraph.
 law help_short:
   {Cli.eval(~App.Grep, ~App.decode, App.cli(), Cli.host(80n), ["-h"])
-    == Cli.Exit{0, String.concat([
+    == Cli.Quit{0, String.concat([
       "Print lines that contain a pattern\n",
       "\n",
       options(),
@@ -49,7 +49,7 @@ law help_short:
 # --help prints every paragraph.
 law help_long:
   {Cli.eval(~App.Grep, ~App.decode, App.cli(), Cli.host(80n), ["--help"])
-    == Cli.Exit{0, String.concat([
+    == Cli.Quit{0, String.concat([
       "Print lines that contain a pattern\n",
       "\n",
       "PATTERN is plain text, not a regular expression. Each FILE is read whole, so it\n",
@@ -85,7 +85,7 @@ law argv_max:
 law bad_max:
   {Cli.eval(~App.Grep, ~App.decode, App.cli(), Cli.host(80n),
     ["-m", "lots", "todo", "a.txt"])
-    == Cli.Exit{2, "", String.concat([
+    == Cli.Quit{2, "", String.concat([
       "error: invalid value 'lots' for '--max-count <NUM>': expected a whole number from 0 to 4294967295\n",
       "\n",
       "Usage: grep [OPTIONS] <PATTERN> <FILE>...\n",
@@ -95,7 +95,7 @@ law bad_max:
 
 law no_file:
   {Cli.eval(~App.Grep, ~App.decode, App.cli(), Cli.host(80n), ["todo"])
-    == Cli.Exit{2, "", String.concat([
+    == Cli.Quit{2, "", String.concat([
       "error: the following required arguments were not provided:\n",
       "  <FILE>...\n",
       "\n",

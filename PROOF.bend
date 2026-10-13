@@ -6158,25 +6158,25 @@ def pieces_eq(+x: String, +g: String, e: {pieces(x) == pieces(g) : List<&2, Stri
 # A step with its out cut into pieces.
 type Cut<-A: Type> is Type:
   CutGo{value: A, term: Cli.Term}
-  CutExit{code: U32, out: List<&2, String>, err: String}
+  CutQuit{code: U32, out: List<&2, String>, err: String}
 
 def step_cut(-A: Type, s: Cli.Step<A>) -> Cut<A>:
   match s:
     case Cli.Go{value, term}: CutGo{value, term}
-    case Cli.Exit{code, out, err}: CutExit{code, pieces(out), err}
+    case Cli.Quit{code, out, err}: CutQuit{code, pieces(out), err}
 
 def step_join(-A: Type, c: Cut<A>) -> Cli.Step<A>:
   match c:
     case CutGo{value, term}: Cli.Go{value, term}
-    case CutExit{code, out, err}: Cli.Exit{code, String.concat(out), err}
+    case CutQuit{code, out, err}: Cli.Quit{code, String.concat(out), err}
 
 def join_cut(-A: Type, s: Cli.Step<A>) ->
     {step_join(A, step_cut(A, s)) == s : Cli.Step<A>}:
   match s:
     case Cli.Go{value, term}: {==}
-    case Cli.Exit{+code, +out, +err}:
-      %concat_pieces(out) : {Cli.Exit{code, String.concat(pieces(out)), err}
-        == Cli.Exit{code, _, err} : Cli.Step<A>}
+    case Cli.Quit{+code, +out, +err}:
+      %concat_pieces(out) : {Cli.Quit{code, String.concat(pieces(out)), err}
+        == Cli.Quit{code, _, err} : Cli.Step<A>}
       {==}
 
 # Steps with equal cuts are equal.

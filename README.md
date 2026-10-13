@@ -118,7 +118,7 @@ its page.
 ## State and prove CLI behavior
 
 `Cli.eval` takes a command, a host value, and argv without the program name;
-it returns either `Go{value, term}` or `Exit{code, out, err}`. No process IO
+it returns either `Go{value, term}` or `Quit{code, out, err}`. No process IO
 is needed to test parsing or exact output. `Cli.check` checks the command
 definition and exercises the decoder on one sample per completable command
 path.
