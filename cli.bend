@@ -1529,42 +1529,22 @@ def missing_refs(targets: List<&2, String>, +ids: List<&2, String>,
         when_problem(Bool.not(List.contains(~String, ~String.eq, ids, target)),
           BadRef{at, target}), missing_refs(tail, ids, at))
 
-def u32_digits(s: String, +acc: U32) -> Bool:
-  match s:
-    case SNil{}:
-      True{}
-    case SCon{+h, tail}:
-      +digit = U32.sub(Char.to_u32(h), 48)
-      valid = Bool.and(Char.is_digit(h),
-        Bool.or(U32.is_lt(acc, 429496729),
-          Bool.and(U32.is_eq(acc, 429496729), U32.is_le(digit, 5))))
-      Bool.pick(Bool, valid,
-        u32_digits(tail, U32.add(U32.mul(acc, 10), digit)), False{})
+# A U32 value is what U32.read reads (P22).
+def valid_u32(s: String) -> Bool:
+  Maybe.is_some(&2, U32, U32.read(s))
 
-def valid_u32(+s: String) -> Bool:
-  Bool.and(Bool.not(String.is_empty(s)), u32_digits(s, 0))
-
+# Decimal digits by Nat.read's own test, which Char.is_digit agrees with.
 def decimal_digits(s: String) -> Bool:
   match s:
     case SNil{}: True{}
-    case SCon{head, tail}:
-      Bool.and(Char.is_digit(head), decimal_digits(tail))
+    case SCon{Chr{x}, tail}:
+      Bool.and(U32.is_lt(U32.sub(x, 48), 10), decimal_digits(tail))
 
-def trim_zeroes(s: String) -> String:
-  match s:
-    case SCon{Chr{48}, tail}: trim_zeroes(tail)
-    case SNil{}: SNil{}
-    case SCon{head, tail}: SCon{head, tail}
-
-def nat_fits(+digits: String) -> Bool:
-  +length = String.length(digits)
-  Bool.or(Nat.is_lt(length, 15n),
-    Bool.and(Nat.is_eq(length, 15n),
-      String.is_le(digits, "281474976710655")))
-
+# A Nat value is what Nat.read reads (P22): digits that, less leading
+# zeroes, fit under its cap of 2^48-1.
 def valid_nat(+s: String) -> Bool:
   Bool.and(Bool.not(String.is_empty(s)),
-    Bool.and(decimal_digits(s), nat_fits(trim_zeroes(s))))
+    Bool.and(decimal_digits(s), Nat.read.fits(Nat.read.trim(s))))
 
 def valid_bool(s: String) -> Bool:
   List.contains(~String, ~String.eq,
@@ -5071,7 +5051,8 @@ def by_distance(levels: Nat, +d: Nat, +found: List<&2, Scored>) ->
 
 # At most 3 names within max(1, n / 3) edits, by distance, then order.
 # key is bound because a temporary argument makes String.length take its
-# string, adding a keep to each caller that reuses one (nat_fits, arg_display).
+# string, adding a keep to each caller that reuses one (Nat.read.fits,
+# arg_display).
 def suggest(+typed: String, names: List<&2, String>) -> List<&2, String>:
   key = undashed(typed)
   +limit = Nat.max(1n, Nat.div(String.length(key), 3n))
@@ -7101,7 +7082,7 @@ def vars(c: Cmd) -> List<&2, String>:
 # is bound because a temporary argument makes String.is_empty take its
 # string, adding a take to each caller that reuses one (valid_nat).
 def columns_ok(+value: String) -> Bool:
-  digits = trim_zeroes(value)
+  digits = Nat.read.trim(value)
   Bool.and(valid_nat(value), Bool.not(String.is_empty(digits)))
 
 def columns_valid(ok: Bool, value: String) -> Maybe<&2, Nat>:

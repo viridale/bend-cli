@@ -7651,10 +7651,10 @@ def nat_digits(+v: String, +e: {Cli.valid_nat(v) == True{} : Bool}) ->
       : Bool}:
   and_true(Bool.not(String.is_empty(v)), Cli.decimal_digits(v),
     and_left(Bool.not(String.is_empty(v)), Bool.and(Cli.decimal_digits(v),
-      Cli.nat_fits(Cli.trim_zeroes(v))), e),
-    and_left(Cli.decimal_digits(v), Cli.nat_fits(Cli.trim_zeroes(v)),
+      Nat.read.fits(Nat.read.trim(v))), e),
+    and_left(Cli.decimal_digits(v), Nat.read.fits(Nat.read.trim(v)),
       and_right(Bool.not(String.is_empty(v)), Bool.and(Cli.decimal_digits(v),
-        Cli.nat_fits(Cli.trim_zeroes(v))), e)))
+        Nat.read.fits(Nat.read.trim(v))), e)))
 
 def count_one(+attrs: List<&2, Cli.Item>, +v: String,
     e: {Bool.and(Bool.not(String.is_empty(v)), Cli.decimal_digits(v))
@@ -7747,7 +7747,7 @@ def env_good(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +v: String,
 # divmod.go's remainder stays at most 9 while it and m add up to 9.
 
 def digit_ok(r: Nat) -> Bool:
-  Char.is_digit(Chr{U32.from_nat(Nat.add(48n, r))})
+  U32.is_lt(U32.sub(U32.from_nat(Nat.add(48n, r)), 48), 10)
 
 def npred(n: Nat) -> Nat:
   match n:
@@ -7847,9 +7847,14 @@ def dm_ok(n: Nat, m: Nat, -d: Nat, +r: Nat,
             Nat.add(r, 1n+mp), 9n, Equal.sym(Nat, Nat.add(r, 1n+mp),
               1n+Nat.add(r, mp), add_succ_right(r, mp)), e))
 
+# decimal_digits' test of a char.
+def DigC(d: Char) -> Type:
+  match d:
+    case Chr{x}: {U32.is_lt(U32.sub(x, 48), 10) == True{} : Bool}
+
 def DigOk(dq: Char & Nat) -> Type:
   match dq:
-    case (d, q): {Char.is_digit(d) == True{} : Bool}
+    case (d, q): DigC(d)
 
 def put_dig(qr: Nat & Nat, ok: DmOk(qr)) -> DigOk(Nat.show.put(qr)):
   match qr:
@@ -7867,12 +7872,17 @@ def fin_ok(-g: Nat, +acc: String, dq: Char & Nat,
       {cnt_ok(Nat.show.go(g, n2, acc2)) == True{} : Bool}) ->
     {cnt_ok(Nat.show.fin(g, acc, dq)) == True{} : Bool}:
   match dq:
-    case (+d, q):
-      match q:
-        case 0n: and_true(Char.is_digit(d), Cli.decimal_digits(acc), ed, ea)
-        case 1n+p:
-          ih(1n+p, SCon{d, acc},
-            and_true(Char.is_digit(d), Cli.decimal_digits(acc), ed, ea))
+    case (d, q):
+      match d:
+        case Chr{+x}:
+          match q:
+            case 0n:
+              and_true(U32.is_lt(U32.sub(x, 48), 10), Cli.decimal_digits(acc),
+                ed, ea)
+            case 1n+p:
+              ih(1n+p, SCon{Chr{x}, acc},
+                and_true(U32.is_lt(U32.sub(x, 48), 10),
+                  Cli.decimal_digits(acc), ed, ea))
 
 def cnt_digits(+s: String, e: {cnt_ok(s) == True{} : Bool}) ->
     {Cli.decimal_digits(s) == True{} : Bool}:
@@ -13741,6 +13751,262 @@ def p21_go(c: Cli.Cmd, h: Cli.Host, +argv: List<&2, String>, +id: String,
 
 def Laws.p21(c, h, argv, id, want, e):
   p21_go(c, h, argv, id, want, e)
+
+# P22 nat: Nat.read.go reads a string exactly when decimal_digits holds,
+# since both apply the same test to each char, and Nat.read.trim keeps
+# decimal_digits' answer.
+
+def nat_go_if(ok: Bool, t: String, acc: Nat, d: U32,
+    ih: @a: Nat -> {Cli.decimal_digits(t)
+      == Maybe.is_some(&2, Nat, Nat.read.go(t, a)) : Bool}) ->
+    {Bool.and(ok, Cli.decimal_digits(t))
+      == Maybe.is_some(&2, Nat, Nat.read.if(t, acc, d, ok)) : Bool}:
+  match ok:
+    case True{}: ih(Nat.add(Nat.mul(acc, 10n), U32.to_nat(d)))
+    case False{}: {==}
+
+def nat_go(s: String, acc: Nat) ->
+    {Cli.decimal_digits(s) == Maybe.is_some(&2, Nat, Nat.read.go(s, acc))
+      : Bool}:
+  match s:
+    case SNil{}: {==}
+    case SCon{c, +t}:
+      match c:
+        case Chr{+x}:
+          nat_go_if(U32.is_lt(U32.sub(x, 48), 10), t, acc, U32.sub(x, 48),
+            a => nat_go(t, a))
+
+# Nat.read.trim on a string that does not start with '0'.
+def TrimOther(c: Char) -> Type:
+  @t: String -> {SCon{c, t} == Nat.read.trim(SCon{c, t}) : String}
+
+def TrimView(c: Char) -> Type:
+  {Chr{48} == c : Char} | TrimOther(c)
+
+# Arms: python3 tools/charsplit.py 't => {==}' 48
+def trim_view(c: Char) -> TrimView(c):
+  match c:
+    case Chr{U32{WCon{True{}, _}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{True{}, _}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{True{}, _}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, _}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{True{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WNil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}:
+      Inl{{==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{True{}, WCon{False{}, _}}}}}}}}:
+      Inr{t => {==}}
+    case Chr{U32{WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, WCon{False{}, _}}}}}}}:
+      Inr{t => {==}}
+
+def trim_at(-c: Char, t: String, v: TrimView(c),
+    ih: {Cli.decimal_digits(Nat.read.trim(t)) == Cli.decimal_digits(t)
+      : Bool}) ->
+    {Cli.decimal_digits(Nat.read.trim(SCon{c, t}))
+      == Cli.decimal_digits(SCon{c, t}) : Bool}:
+  match v:
+    case Inl{e}:
+      %e : {Cli.decimal_digits(Nat.read.trim(SCon{_, t}))
+        == Cli.decimal_digits(SCon{_, t}) : Bool}
+      ih
+    case Inr{o}:
+      %o(t) : {Cli.decimal_digits(_) == Cli.decimal_digits(SCon{c, t}) : Bool}
+      {==}
+
+# Trimming leading zeroes keeps decimal_digits' answer.
+def nat_trim(s: String) ->
+    {Cli.decimal_digits(Nat.read.trim(s)) == Cli.decimal_digits(s) : Bool}:
+  match s:
+    case SNil{}: {==}
+    case SCon{+c, +t}: trim_at(c, t, trim_view(c), nat_trim(t))
+
+def and_true_r(b: Bool) -> {b == Bool.and(b, True{}) : Bool}:
+  match b:
+    case True{}: {==}
+    case False{}: {==}
+
+def and_false_r(b: Bool) -> {Bool.and(b, False{}) == False{} : Bool}:
+  match b:
+    case True{}: {==}
+    case False{}: {==}
+
+def nat_gate(f: Bool, +s: String) ->
+    {Bool.and(Cli.decimal_digits(s), f)
+      == Maybe.is_some(&2, Nat, Nat.read.gate(Nat.read.trim(s), f)) : Bool}:
+  match f:
+    case True{}:
+      %and_true_r(Cli.decimal_digits(s)) :
+        {_ == Maybe.is_some(&2, Nat, Nat.read.go(Nat.read.trim(s), 0n)) : Bool}
+      %nat_trim(s) :
+        {_ == Maybe.is_some(&2, Nat, Nat.read.go(Nat.read.trim(s), 0n)) : Bool}
+      nat_go(Nat.read.trim(s), 0n)
+    case False{}: and_false_r(Cli.decimal_digits(s))
+
+def p22_nat_go(+v: String) ->
+    {Cli.valid_nat(v) == Maybe.is_some(&2, Nat, Nat.read(v)) : Bool}:
+  match v:
+    case SNil{}: {==}
+    case SCon{+h, +t}:
+      nat_gate(Nat.read.fits(Nat.read.trim(SCon{h, t})), SCon{h, t})
+
+def Laws.p22_nat(v):
+  p22_nat_go(v)
+
+# valid_u32 is U32.read's answer.
+def Laws.p22_u32(v):
+  {==}
+
+# P22 choose: a passing choose verdict leaves choose_fits and keys_verdict's
+# test true, and all_in is read_keys.
+
+def or_left(a: Maybe<&2, String>, -b: Maybe<&2, String>,
+    e: {Maybe.or(&2, String, a, b) == None{} : Maybe<&2, String>}) ->
+    {a == None{} : Maybe<&2, String>}:
+  match a:
+    case None{}: {==}
+    case Some{x}:
+      Empty.absurd({Some{x} == None{} : Maybe<&2, String>},
+        why_some_absurd(x, e))
+
+def or_right(a: Maybe<&2, String>, -b: Maybe<&2, String>,
+    e: {Maybe.or(&2, String, a, b) == None{} : Maybe<&2, String>}) ->
+    {b == None{} : Maybe<&2, String>}:
+  match a:
+    case None{}: e
+    case Some{x}:
+      Empty.absurd({b == None{} : Maybe<&2, String>}, why_some_absurd(x, e))
+
+def kind_false_absurd(-id: String, -kind: Cli.UsageKind,
+    -attrs: List<&2, Cli.Item>,
+    e: {Cli.kind_verdict(False{}, id, kind, attrs) == None{}
+      : Maybe<&2, String>}) -> Empty:
+  %e : why_none_disc(_)
+  Unit{}
+
+def kind_none(fits: Bool, -id: String, -kind: Cli.UsageKind,
+    -attrs: List<&2, Cli.Item>,
+    e: {Cli.kind_verdict(fits, id, kind, attrs) == None{}
+      : Maybe<&2, String>}) -> {fits == True{} : Bool}:
+  match fits:
+    case True{}: {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool},
+        kind_false_absurd(id, kind, attrs, e))
+
+def fits_some(+kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    e: {Cli.choose_fits(kind, attrs) == True{} : Bool}) ->
+    {Maybe.is_some(&2, List<&2, String>, Cli.find_one_of(attrs)) == True{}
+      : Bool}:
+  and_right(Bool.not(Cli.kind_many(kind)),
+    Maybe.is_some(&2, List<&2, String>, Cli.find_one_of(attrs)),
+    and_right(Cli.kind_valued(kind), Bool.and(Bool.not(Cli.kind_many(kind)),
+      Maybe.is_some(&2, List<&2, String>, Cli.find_one_of(attrs))), e))
+
+def all_in_ref(xs: List<&2, String>, +ys: List<&2, String>) ->
+    {Cli.all_in(xs, ys) == Laws.read_keys(xs, ys) : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case head <> tail:
+      %all_in_ref(tail, ys) :
+        {Bool.and(List.contains(~String, ~String.eq, ys, head),
+          Cli.all_in(tail, ys))
+          == Bool.and(List.contains(~String, ~String.eq, ys, head), _)
+          : Bool}
+      {==}
+
+def keys_are_ok(found: Maybe<&2, List<&2, String>>, +keys: List<&2, String>,
+    -id: String,
+    es: {Maybe.is_some(&2, List<&2, String>, found) == True{} : Bool},
+    e: {Cli.keys_verdict(found, keys, id) == None{} : Maybe<&2, String>}) ->
+    {Laws.keys_are(keys, found) == True{} : Bool}:
+  match found:
+    case None{}:
+      Empty.absurd({False{} == True{} : Bool}, false_true_absurd(es))
+    case Some{+values}:
+      %all_in_ref(keys, values) :
+        {Bool.and(Bool.not(List.is_empty(&2, String, keys)),
+          Bool.and(_, Laws.read_keys(values, keys))) == True{} : Bool}
+      %all_in_ref(values, keys) :
+        {Bool.and(Bool.not(List.is_empty(&2, String, keys)),
+          Bool.and(Cli.all_in(keys, values), _)) == True{} : Bool}
+      keys_none(Bool.and(Bool.not(List.is_empty(&2, String, keys)),
+        Bool.and(Cli.all_in(keys, values), Cli.all_in(values, keys))), id, e)
+
+def p22_choose_go(opt: Bool, +keys: List<&2, String>, +id: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +e: {Cli.want_verdict(Cli.WChoose{opt, keys}, id, kind, attrs)
+      == None{} : Maybe<&2, String>}) ->
+    {Laws.keys_are(keys, Cli.find_one_of(attrs)) == True{} : Bool}:
+  keys_are_ok(Cli.find_one_of(attrs), keys, id,
+    fits_some(kind, attrs, kind_none(Cli.choose_fits(kind, attrs), id, kind,
+      attrs, or_left(Cli.kind_verdict(Cli.choose_fits(kind, attrs), id, kind,
+        attrs), Maybe.or(&2, String, Cli.absent_verdict(Bool.and(
+          Bool.not(opt), Cli.may_absent(kind, attrs)), id, "choose"),
+          Cli.keys_verdict(Cli.find_one_of(attrs), keys, id)), e))),
+    or_right(Cli.absent_verdict(Bool.and(Bool.not(opt),
+      Cli.may_absent(kind, attrs)), id, "choose"),
+      Cli.keys_verdict(Cli.find_one_of(attrs), keys, id),
+      or_right(Cli.kind_verdict(Cli.choose_fits(kind, attrs), id, kind,
+        attrs), Maybe.or(&2, String, Cli.absent_verdict(Bool.and(
+          Bool.not(opt), Cli.may_absent(kind, attrs)), id, "choose"),
+          Cli.keys_verdict(Cli.find_one_of(attrs), keys, id)), e)))
+
+def Laws.p22_choose(opt, keys, id, kind, attrs, e):
+  p22_choose_go(opt, keys, id, kind, attrs, e)
 
 def Laws.g_check_sample_values():
   {==}

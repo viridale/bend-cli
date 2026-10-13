@@ -20,8 +20,11 @@
 # key into words, and route's whole answer against references that walk its
 # table. P21 fixes that a reader whose verdict passes reads only values the
 # parse or the sample validated, on any argv of a lint-clean command; which
-# values a type accepts is G-VAL's, and that the converters (Nat.read,
-# U32.read, F32.read) read every one is open. P3-P6 and P15 fix the quoters
+# values a type accepts is G-VAL's. P22 fixes that valid_nat and valid_u32
+# accept exactly what Nat.read and U32.read read, so those readers never
+# fall back to 0; F32.read does not reduce in the checker (K8), so the f32
+# end-to-end cases cover it. P22 also fixes that choose's verdict passes only
+# a table whose keys are its arg's values. P3-P6 and P15 fix the quoters
 # against models of how each shell and man(7) read text; G-COMP and G-MAN fix
 # the bytes of script and roff, and g_eval_builtins fixes V6. Nothing here
 # fixes what a real shell offers from a script, nor Run.main's IO, which
@@ -1780,6 +1783,41 @@ law p21_sample:
   {read_at(Cli.verdict(c, path, id, want), want,
     Cli.field_values(Cli.field_find(Cli.sample_fields(c, path), id)))
     == True{} : Bool}
+
+# P22: valid_nat, which parse, lint and check apply to a Nat value, accepts
+# exactly the strings Nat.read reads, so nat_of never falls back to 0 on a
+# value that passed it.
+law p22_nat:
+  for +v: String
+  {Cli.valid_nat(v) == Maybe.is_some(&2, Nat, Nat.read(v)) : Bool}
+
+# P22: so does valid_u32 for U32.read, which u32_of reads with.
+law p22_u32:
+  for +v: String
+  {Cli.valid_u32(v) == Maybe.is_some(&2, U32, U32.read(v)) : Bool}
+
+# Whether keys are found's values as a set: not empty, none missing, and none
+# extra.
+def keys_are(+keys: List<&2, String>,
+    found: Maybe<&2, List<&2, String>>) -> Bool:
+  match found:
+    case None{}: False{}
+    case Some{+values}:
+      Bool.and(Bool.not(List.is_empty(&2, String, keys)),
+        Bool.and(read_keys(keys, values), read_keys(values, keys)))
+
+# P22: choose and choose_opt's verdict on an arg passes only with a table
+# whose keys are the arg's one_of values as a set (g_check_choose); p19_verdict
+# names the arg.
+law p22_choose:
+  for opt: Bool
+  for +keys: List<&2, String>
+  for +id: String
+  for +kind: Cli.UsageKind
+  for +attrs: List<&2, Cli.Item>
+  {Cli.want_verdict(Cli.WChoose{opt, keys}, id, kind, attrs)
+    == None{} : Maybe<&2, String>} ->
+  {keys_are(keys, Cli.find_one_of(attrs)) == True{} : Bool}
 
 def sampled() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
