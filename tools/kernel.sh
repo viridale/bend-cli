@@ -12,7 +12,7 @@
 # sha256(<LEAN_VERSION> NUL <bendtt.lean>), LEAN_VERSION read from the bend
 # binary and bendtt.lean from the bend2 directory beside its bin directory.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.36
+BEND_TOOLS_PIN=2.0.37
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"

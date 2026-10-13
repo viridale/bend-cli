@@ -23,7 +23,7 @@
 # FID_RUN_<DEF>, so bench/main.bend's own run_text stays out. A harness in
 # the root can't tell its own cli_* or run_* defs from them.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.36
+BEND_TOOLS_PIN=2.0.37
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"

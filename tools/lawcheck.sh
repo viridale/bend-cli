@@ -15,7 +15,7 @@
 # -p then plants a law with a type error and requires the check to reject
 # it, so a passing count is not vacuous.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.36
+BEND_TOOLS_PIN=2.0.37
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"

@@ -14,7 +14,7 @@
 # lines beginning with # are ignored.
 # - "N TODOs found" in a LAWS.bend, when N is its number of laws.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.36
+BEND_TOOLS_PIN=2.0.37
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"

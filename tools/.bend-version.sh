@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
 # Shared advisory for tools pinned to a Bend release. Never blocks a tool.
 
+bend_tools_version_at_least() {
+  local -a have need
+  local i
+  IFS=. read -r -a have <<<"$1"
+  IFS=. read -r -a need <<<"$2"
+  for i in 0 1 2; do
+    if (( 10#${have[i]} > 10#${need[i]} )); then return 0; fi
+    if (( 10#${have[i]} < 10#${need[i]} )); then return 1; fi
+  done
+  return 0
+}
+
 bend_tools_latest_release() {
+  local min_version=${1:-}
   local cache_dir=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/bend-tools
   local cache=$cache_dir/latest-release checked='' cached='' now body latest tmp
   now=$(date +%s)
   if [ -r "$cache" ]; then
     read -r checked cached <"$cache" || true
     if [[ $checked =~ ^[0-9]+$ && $cached =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] &&
-      (( now >= checked && now - checked < 86400 )); then
+      (( now >= checked && now - checked < 86400 )) &&
+      { [ -z "$min_version" ] || bend_tools_version_at_least "$cached" "$min_version"; }; then
       printf '%s\n' "$cached"
       return 0
     fi
@@ -51,7 +65,7 @@ bend_tools_warn_version() {
   else
     printf '%s: cannot read installed Bend version (pin %s)\n' "$tool" "$pin" >&2
   fi
-  if latest=$(bend_tools_latest_release); then
+  if latest=$(bend_tools_latest_release "$pin"); then
     if [ "$latest" != "$pin" ]; then
       printf '%s: pinned to Bend %s; latest release is %s; review whether this tool is still needed\n' \
         "$tool" "$pin" "$latest" >&2
