@@ -5,13 +5,16 @@
 #   "rc: <n> defs equal <baseline>", or each differing def and exit 1.
 # Run: tools/rc.sh build/bench.c [bench/rc.txt]
 #
-# A def's counts cover its segment, its continuations (FID_<def>_C<n> and
-# FID_<def>_K<n>, which follow it), and each spin helper they call, once per
-# call site and expanded through the spins that spin calls. Spin and
-# continuation numbers change between builds, so a spin counts only toward its
-# callers and a continuation only toward its def; a def with equal counts
-# compares equal whatever the numbering. A def whose own name ends in _c<n> or
-# _k<n> after another def's segment reads as that def's continuation.
+# A def's counts cover its segment, the segments split from it (continuations
+# FID_<def>_K<n> and lifted closures FID_<def>_C<n>), and each spin helper
+# they call, once per call site and expanded through the spins that spin
+# calls. A closure counts toward the def that builds it, though it runs when
+# its callee applies it. Spin, continuation and closure numbers change between
+# builds, so a spin counts only toward its callers and the rest are keyed by
+# their def's name; a def with equal counts compares equal whatever the
+# numbering. Every segment name loses a trailing _C<n> or _K<n>: a def named
+# foo_k1 prints as FID_CLI_FOO, merged with foo, and the closures of a def
+# inlined everywhere print under its name though it has no segment.
 #
 # Bend names an imported def after its file's path from the harness, with
 # "_" for each "." and "/" ("../cli.bend" gives FID____CLI_<DEF>), and the
