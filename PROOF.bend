@@ -4529,6 +4529,139 @@ def Laws.p19_option(items, globals, path, query):
         Cli.find_option(globals, query)) : Maybe<&2, Cli.OptFound>}
   {==}
 
+# P19 verdict: scope_walk follows the path down the scan's scopes and
+# scope_args' globals together, generalised over the globals inherited so
+# far; at each name, p19_sub makes both walks take the same subcommand and
+# p19_inherit gives its scope those globals. At the path's end, spec_append
+# and p19_arg make the scanner's lookup find_arg_info's.
+
+# Past a name with no subcommand, scope_at stays None.
+def none_at(path: List<&2, String>) ->
+    {None{} == Laws.scope_at(path, None{}) : Maybe<&2, Cli.Scope>}:
+  match path:
+    case Nil{}: {==}
+    case name <> tail: {==}
+
+# What the scanner's lookup finds in scope, when there is one, against what
+# find_arg_info finds among args.
+def ScopeFound(scope: Maybe<&2, Cli.Scope>, args: List<&2, Cli.Item>,
+    id: String) -> Type:
+  match scope:
+    case None{}: Unit
+    case Some{s}:
+      {Cli.find_spec_info(Cli.scope_arg_items(s), id, None{})
+        == Cli.find_arg_info(args, id) : Maybe<&2, Cli.ArgInfo>}
+
+def scope_end(+items: List<&2, Cli.Item>, +globals: List<&2, Cli.Item>,
+    -p: List<&2, String>, id: String) ->
+    ScopeFound(Some{Cli.Scope{p,
+        Cli.spec_node(items, Cli.spec_items(globals))}},
+      Cli.scope_args([], items, globals), id):
+  %Equal.sym(List<&2, Cli.SpecItem>,
+      List.append(&2, Cli.SpecItem, Cli.spec_items(globals),
+        Cli.spec_items(items)),
+      Cli.spec_items(List.append(&2, Cli.Item, globals, items)),
+      spec_append(globals, items)) :
+    {Cli.find_spec_info(_, id, None{})
+      == Cli.find_arg_info(List.append(&2, Cli.Item, globals, items), id)
+      : Maybe<&2, Cli.ArgInfo>}
+  Laws.p19_arg(List.append(&2, Cli.Item, globals, items), id)
+
+def scope_step(found: Maybe<&2, Cli.SubFound>, tail: List<&2, String>,
+    items: List<&2, Cli.Item>, globals: List<&2, Cli.Item>,
+    p: List<&2, String>, -events: List<&2, Cli.ScanEvent>, -resting: Bool,
+    -count: Nat, -external: Maybe<&2, Cli.ExternalArgs>,
+    -issue: Maybe<&2, Cli.ScanFault>, -id: String,
+    ih: @p2: List<&2, String> -> @-ev2: List<&2, Cli.ScanEvent> ->
+      @kids: List<&2, Cli.Item> ->
+      ScopeFound(Laws.scope_at(tail, Some{Cli.ScanState{Cli.Scope{p2,
+          Cli.spec_node(kids, Cli.spec_items(List.append(&2, Cli.Item,
+            Cli.global_items(items), globals)))}, ev2, resting, 0n, external,
+          issue}}),
+        Cli.scope_args(tail, kids, List.append(&2, Cli.Item,
+          Cli.global_items(items), globals)), id)) ->
+    ScopeFound(Laws.scope_at(tail, Laws.scan_enter(Laws.sub_key_of(found),
+        Cli.ScanState{Cli.Scope{p,
+          Cli.spec_node(items, Cli.spec_items(globals))}, events, resting,
+          count, external, issue})),
+      Cli.scope_args(tail, Cli.sub_items(found), List.append(&2, Cli.Item,
+        Cli.global_items(items), globals)), id):
+  match found:
+    case None{}:
+      %none_at(tail) : ScopeFound(_, Cli.scope_args(tail, [],
+        List.append(&2, Cli.Item, Cli.global_items(items), globals)), id)
+      Unit{}
+    case Some{Cli.SubFound{name, children}}:
+      %Equal.sym(List<&2, Cli.SpecItem>,
+          Cli.spec_inherit(Cli.spec_node(items, Cli.spec_items(globals))),
+          Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(items),
+            globals)), Laws.p19_inherit(items, globals)) :
+        ScopeFound(Laws.scope_at(tail,
+          Some{Cli.ScanState{Cli.Scope{List.append(&2, String, p, [name]),
+            Cli.spec_node(children, _)}, Cli.Enter{name} <> events, resting,
+            0n, external, issue}}),
+        Cli.scope_args(tail, children, List.append(&2, Cli.Item,
+          Cli.global_items(items), globals)), id)
+      ih(List.append(&2, String, p, [name]), Cli.Enter{name} <> events,
+        children)
+
+def scope_walk(path: List<&2, String>, +items: List<&2, Cli.Item>,
+    +globals: List<&2, Cli.Item>, +p: List<&2, String>,
+    -events: List<&2, Cli.ScanEvent>, -resting: Bool, -count: Nat,
+    -external: Maybe<&2, Cli.ExternalArgs>, -issue: Maybe<&2, Cli.ScanFault>,
+    +id: String) ->
+    ScopeFound(Laws.scope_at(path, Some{Cli.ScanState{Cli.Scope{p,
+        Cli.spec_node(items, Cli.spec_items(globals))}, events, resting, count,
+        external, issue}}), Cli.scope_args(path, items, globals), id):
+  match path:
+    case Nil{}: scope_end(items, globals, p, id)
+    case +name <> +tail:
+      %Equal.sym(Maybe<&2, Cli.SubKey>,
+          Cli.scope_find_sub(Cli.Scope{p, Cli.spec_node(items,
+            Cli.spec_items(globals))}, name),
+          Laws.sub_key_of(Cli.find_sub(items, name)),
+          Laws.p19_sub(items, Cli.spec_items(globals), p, name)) :
+        ScopeFound(Laws.scope_at(tail, Laws.scan_enter(_,
+            Cli.ScanState{Cli.Scope{p, Cli.spec_node(items,
+              Cli.spec_items(globals))}, events, resting, count, external,
+              issue})),
+          Cli.scope_args(tail, Cli.sub_items(Cli.find_sub(items, name)),
+            List.append(&2, Cli.Item, Cli.global_items(items), globals)), id)
+      scope_step(Cli.find_sub(items, name), tail, items, globals, p, events,
+        resting, count, external, issue, id,
+        p2 => ev2 => kids => scope_walk(tail, kids,
+          List.append(&2, Cli.Item, Cli.global_items(items), globals), p2,
+          ev2, resting, 0n, external, issue, id))
+
+# arg_verdict is verdict_ref, whatever it found.
+def arg_verdict_same(found: Maybe<&2, Cli.ArgInfo>, -id: String,
+    -name: String, -path: List<&2, String>, -want: Cli.Want) ->
+    {Cli.arg_verdict(found, id, name, path, want)
+      == Laws.verdict_ref(found, id, name, path, want) : Maybe<&2, String>}:
+  match found:
+    case None{}: {==}
+    case Some{Cli.ArgInfo{key, usage, short, long, kind, attrs}}: {==}
+
+def verdict_scope(scope: Maybe<&2, Cli.Scope>, -name: String,
+    -about: String, -items: List<&2, Cli.Item>, -path: List<&2, String>,
+    id: String, -want: Cli.Want,
+    found: ScopeFound(scope, Cli.scope_args(path, items, []), id)) ->
+    Laws.verdict_at(scope, name, about, items, path, id, want):
+  match scope:
+    case None{}: Unit{}
+    case Some{s}:
+      %found : {Cli.arg_verdict(_, id, name, path, want)
+        == Laws.verdict_ref(Cli.find_spec_info(Cli.scope_arg_items(s), id,
+          None{}), id, name, path, want) : Maybe<&2, String>}
+      arg_verdict_same(Cli.find_spec_info(Cli.scope_arg_items(s), id, None{}),
+        id, name, path, want)
+
+def Laws.p19_verdict(name, about, items, path, id, want):
+  verdict_scope(Laws.scope_at(path,
+      Some{Cli.scan_start(Cli.Cmd{name, about, items})}), name, about, items,
+    path, id, want, scope_walk(path, items, [], [], [], False{}, 0n, None{},
+      None{}, id))
+
 # P20: key_go reads a key one word at a time with word_rest, while
 # command_words takes the words String.split cuts. cut reads the first
 # word as String.split does (split_cut) and as word_rest does (word_cut).

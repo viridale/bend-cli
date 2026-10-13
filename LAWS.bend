@@ -15,9 +15,10 @@
 # Linted (eval_linted_bridge). P18 fixes the first-match lookups (field_find,
 # find_by_key, find_sub, find_arg_info, same_text) against references that
 # walk the whole list with String.eq, P19 fixes the scanner's compiled scopes
-# against those raw lookups, and P20 fixes which route keys name a command
-# against cutting the key into words, and route's whole answer against
-# references that walk its table. P3-P6 and P15 fix the quoters against
+# against those raw lookups and verdict's arg against the scope the scan
+# reaches, and P20 fixes which route keys name a command against cutting the
+# key into words, and route's whole answer against references that walk its
+# table. P3-P6 and P15 fix the quoters against
 # models of how each shell and man(7) read text; G-COMP and G-MAN fix the
 # bytes of script and roff, and g_eval_builtins fixes V6. Nothing here fixes
 # what a real shell offers from a script, nor Run.main's IO, which
@@ -1447,6 +1448,62 @@ law p19_arg_order:
   {Cli.scope_arg_items(Cli.Scope{path, Cli.spec_node(items, globals)})
     == List.append(&2, Cli.SpecItem, globals, Cli.spec_items(items))
     : List<&2, Cli.SpecItem>}
+
+# The scan's state once it enters found's subcommand, as it does for a
+# subcommand token; None when no subcommand answered.
+def scan_enter(found: Maybe<&2, Cli.SubKey>, state: Cli.ScanState) ->
+    Maybe<&2, Cli.ScanState>:
+  match found:
+    case None{}: None{}
+    case Some{sub}: Some{Cli.scan_descend(state, sub)}
+
+# The scope the scan reaches from found's state by entering each name on
+# path in turn; None at a name its scope has no subcommand for.
+def scope_at(path: List<&2, String>, found: Maybe<&2, Cli.ScanState>) ->
+    Maybe<&2, Cli.Scope>:
+  match path found:
+    case _ None{}: None{}
+    case Nil{} Some{state}: Some{Cli.scan_state_scope(state)}
+    case name <> tail Some{+state}:
+      scope_at(tail,
+        scan_enter(Cli.scope_find_sub(Cli.scan_state_scope(state), name),
+          state))
+
+# verdict's answer once found holds id's arg, or none: a Bug naming the
+# command path, else want's check of that arg's kind and attributes.
+def verdict_ref(found: Maybe<&2, Cli.ArgInfo>, id: String, name: String,
+    path: List<&2, String>, want: Cli.Want) -> Maybe<&2, String>:
+  match found:
+    case None{}:
+      Some{String.concat(["'", id, "' is not an argument of '",
+        String.join(name <> path, " "), "'"])}
+    case Some{Cli.ArgInfo{key, usage, short, long, kind, attrs}}:
+      Cli.want_verdict(want, id, kind, attrs)
+
+def verdict_at(scope: Maybe<&2, Cli.Scope>, +name: String, about: String,
+    items: List<&2, Cli.Item>, +path: List<&2, String>, +id: String,
+    +want: Cli.Want) -> Type:
+  match scope:
+    case None{}: Unit
+    case Some{s}:
+      {Cli.verdict(Cli.Cmd{name, about, items}, path, id, want)
+        == verdict_ref(Cli.find_spec_info(Cli.scope_arg_items(s), id,
+          None{}), id, name, path, want) : Maybe<&2, String>}
+
+# P19: verdict, which every reader and choose call, judges id's arg in the
+# scope the scan reaches at path from scan_start: the first arg there with
+# that id, whose field the reader reads (p19_arg_order, p18_field). It says
+# nothing at a path the scan cannot reach.
+law p19_verdict:
+  for +name: String
+  for +about: String
+  for +items: List<&2, Cli.Item>
+  for +path: List<&2, String>
+  for +id: String
+  for +want: Cli.Want
+  verdict_at(scope_at(path,
+    Some{Cli.scan_start(Cli.Cmd{name, about, items})}), name, about, items,
+    path, id, want)
 
 # The children of the first Sub named name.
 def named_sub(items: List<&2, Cli.Item>, +name: String) ->
