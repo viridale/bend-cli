@@ -12,11 +12,15 @@
 # values for chosen cases. P16 makes eval_linted on the Linted that linted
 # returns answer as eval does, P17 fixes its success and failure answers, and
 # p10_linted and p11_linted carry P10 and P11 to eval_linted on every
-# Linted (eval_linted_bridge). P3-P6 and P15 fix the quoters against models of
-# how each shell and man(7) read text; G-COMP and G-MAN fix the bytes of
-# script and roff, and g_eval_builtins fixes V6. Nothing here fixes what a
-# real shell offers from a script, nor Run.main's IO, which tests/e2e.bend
-# covers (K4).
+# Linted (eval_linted_bridge). P18 fixes the first-match lookups (field_find,
+# find_by_key, find_sub, find_arg_info, same_text) against references that
+# walk the whole list with String.eq, P19 fixes the scanner's compiled scopes
+# against those raw lookups, and P20 fixes which route keys name a command
+# against cutting the key into words. P3-P6 and P15 fix the quoters against
+# models of how each shell and man(7) read text; G-COMP and G-MAN fix the
+# bytes of script and roff, and g_eval_builtins fixes V6. Nothing here fixes
+# what a real shell offers from a script, nor Run.main's IO, which
+# tests/e2e.bend covers (K4).
 
 import Base
 import ./cli.bend as Cli
@@ -1295,6 +1299,183 @@ law g_check_route_words:
     : Maybe<&2, String>} &
   {word_bug(["a ab"]) == Some{"route 'a ab' is not a command"}
     : Maybe<&2, String>}
+
+# ---- First-match lookups ----
+# Each reference below walks its whole list and compares with String.eq;
+# the code's walks stop at their first hit and compare with same_text.
+
+# P18: same_text is String.eq.
+law p18_text:
+  for a: String
+  for b: String
+  {Cli.same_text(a, b) == String.eq(a, b) : Bool}
+
+# The value under the first key equal to key, keys and values paired up to
+# the shorter list.
+def keyed(a, -A: Kind(a), keys: List<&2, String>, values: List<a, A>,
+    +key: String) -> Maybe<a, A>:
+  match keys values:
+    case k <> kt v <> vt:
+      Bool.pick(Maybe<a, A>, String.eq(k, key), Some{v},
+        keyed(a, A, kt, vt, key))
+    case _ _: None{}
+
+# P18: find_by_key, which choose (values Data) and route (callbacks) call,
+# answers keyed's value.
+law p18_key:
+  for -a: Quant
+  for -A: Kind(a)
+  for +keys: List<&2, String>
+  for values: List<a, A>
+  for +key: String
+  {Cli.find_by_key(a, A, keys, values, key)
+    == keyed(a, A, keys, values, key) : Maybe<a, A>}
+
+# The first field whose key is id, or an absent one named id.
+def field_ref(fields: List<&2, Cli.Field>, +id: String) -> Cli.Field:
+  match fields:
+    case Nil{}: Cli.Field{id, [], Cli.Absent{}}
+    case Cli.Field{+key, values, source} <> tail:
+      Bool.pick(Cli.Field, String.eq(key, id),
+        Cli.Field{key, values, source}, field_ref(tail, id))
+
+# P18: field_find, which every reader calls, answers field_ref's field.
+law p18_field:
+  for +fields: List<&2, Cli.Field>
+  for +id: String
+  {Cli.field_find(fields, id) == field_ref(fields, id) : Cli.Field}
+
+# Whether some Alias among items is named query.
+def aliases_name(items: List<&2, Cli.Item>, +query: String) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case Cli.Alias{name} <> tail:
+      Bool.or(String.eq(name, query), aliases_name(tail, query))
+    case head <> tail: aliases_name(tail, query)
+
+# The first Sub named query or with an Alias named query.
+def sub_ref(items: List<&2, Cli.Item>, +query: String) ->
+    Maybe<&2, Cli.SubFound>:
+  match items:
+    case Nil{}: None{}
+    case Cli.Sub{+name, about, +children} <> tail:
+      Bool.pick(Maybe<&2, Cli.SubFound>,
+        Bool.or(String.eq(query, name), aliases_name(children, query)),
+        Some{Cli.SubFound{name, children}}, sub_ref(tail, query))
+    case head <> tail: sub_ref(tail, query)
+
+# P18: find_sub, which help, tips and verdict's scope walk call, answers
+# sub_ref's subcommand.
+law p18_sub:
+  for +items: List<&2, Cli.Item>
+  for +query: String
+  {Cli.find_sub(items, query) == sub_ref(items, query)
+    : Maybe<&2, Cli.SubFound>}
+
+# The info of the first Arg whose id is id.
+def arg_ref(items: List<&2, Cli.Item>, +id: String) ->
+    Maybe<&2, Cli.ArgInfo>:
+  match items:
+    case Nil{}: None{}
+    case Cli.Arg{usage, help, attrs} <> tail:
+      +info = Cli.arg_info(usage, attrs)
+      Bool.pick(Maybe<&2, Cli.ArgInfo>, String.eq(Cli.info_id(info), id),
+        Some{info}, arg_ref(tail, id))
+    case head <> tail: arg_ref(tail, id)
+
+# P18: find_arg_info, which verdict calls, answers arg_ref's info.
+law p18_arg:
+  for +items: List<&2, Cli.Item>
+  for +id: String
+  {Cli.find_arg_info(items, id) == arg_ref(items, id)
+    : Maybe<&2, Cli.ArgInfo>}
+
+# P19: a scope the scanner compiles from items, inheriting globals, finds an
+# option as find_option does on items and then on globals. So its own keys
+# answer before inherited ones, which only a spec lint rejects can show.
+law p19_option:
+  for +items: List<&2, Cli.Item>
+  for +globals: List<&2, Cli.Item>
+  for path: List<&2, String>
+  for +query: String
+  {Cli.find_option_scope(Cli.Scope{path,
+    Cli.spec_node(items, Cli.spec_items(globals))}, query)
+    == Maybe.or(&2, Cli.OptFound, Cli.find_option(items, query),
+      Cli.find_option(globals, query)) : Maybe<&2, Cli.OptFound>}
+
+# P19: that scope's children inherit its own globals, then globals. With
+# p19_option, a scope at any depth finds its own options first, then its
+# parent's globals, and so on up to the root's.
+law p19_inherit:
+  for +items: List<&2, Cli.Item>
+  for +globals: List<&2, Cli.Item>
+  {Cli.spec_inherit(Cli.spec_node(items, Cli.spec_items(globals)))
+    == Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(items),
+      globals)) : List<&2, Cli.SpecItem>}
+
+def sub_key_of(found: Maybe<&2, Cli.SubFound>) -> Maybe<&2, Cli.SubKey>:
+  match found:
+    case None{}: None{}
+    case Some{Cli.SubFound{name, +children}}:
+      Some{Cli.SubKey{name, Cli.find_aliases(children), children}}
+
+# P19: the compiled scope finds the subcommand find_sub finds on items.
+law p19_sub:
+  for +items: List<&2, Cli.Item>
+  for globals: List<&2, Cli.SpecItem>
+  for path: List<&2, String>
+  for +query: String
+  {Cli.scope_find_sub(Cli.Scope{path, Cli.spec_node(items, globals)}, query)
+    == sub_key_of(Cli.find_sub(items, query)) : Maybe<&2, Cli.SubKey>}
+
+# P19: the scanner's arg lookup over parsed items, which the group, conflict
+# and requires checks call, answers as find_arg_info on the raw items.
+law p19_arg:
+  for +items: List<&2, Cli.Item>
+  for +id: String
+  {Cli.find_spec_info(Cli.spec_items(items), id, None{})
+    == Cli.find_arg_info(items, id) : Maybe<&2, Cli.ArgInfo>}
+
+# The children of the first Sub named name.
+def named_sub(items: List<&2, Cli.Item>, +name: String) ->
+    Maybe<&2, List<&2, Cli.Item>>:
+  match items:
+    case Nil{}: None{}
+    case Cli.Sub{key, about, children} <> tail:
+      Bool.pick(Maybe<&2, List<&2, Cli.Item>>, String.eq(key, name),
+        Some{children}, named_sub(tail, name))
+    case head <> tail: named_sub(tail, name)
+
+# A found subcommand's children, unless it is a built-in.
+def user_found(found: Maybe<&2, List<&2, Cli.Item>>) ->
+    Maybe<&2, List<&2, Cli.Item>>:
+  match found:
+    case None{}: None{}
+    case Some{+children}:
+      Bool.pick(Maybe<&2, List<&2, Cli.Item>>, Cli.has_builtin(children),
+        None{}, Some{children})
+
+# Whether each word names a user subcommand of the one before, from found.
+def command_words(words: List<&2, String>,
+    found: Maybe<&2, List<&2, Cli.Item>>) -> Bool:
+  match words found:
+    case _ None{}: False{}
+    case Nil{} Some{items}: True{}
+    case word <> tail Some{items}:
+      command_words(tail, user_found(named_sub(items, word)))
+
+# A route key's words: none for "", else its text cut at every space.
+def key_words(+key: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(key), [],
+    String.split(key, ' '))
+
+# P20: route_key, which route checks every table key with, holds exactly
+# when the key's words name a command, as g_check_route_words describes.
+law p20:
+  for +key: String
+  for +items: List<&2, Cli.Item>
+  {Cli.route_key(key, items) == command_words(key_words(key), Some{items})
+    : Bool}
 
 def sampled() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
