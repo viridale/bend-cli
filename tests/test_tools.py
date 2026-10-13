@@ -53,6 +53,37 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(got.returncode, 0)
         self.assertIn('Inl{{==}}', got.stdout)
 
+    def test_ctorarms_prints_one_arm_per_constructor(self):
+        self.write('t.bend', """type T is Data:
+  A{xs: List<&2, T>, n: U32}
+  B{}
+  C{f: Maybe<&2, (String & String)>}
+
+type U is Data:
+  D{}
+""")
+        got = self.run_tool('ctorarms.py', '--prefix', 'M.', '--skip', 'B',
+                            't.bend', 'T', '$P <> t', 'go(t)')
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout, '    case M.A{x0, x1} <> t: go(t)\n'
+                                     '    case M.C{x0} <> t: go(t)\n')
+        got = self.run_tool('ctorarms.py', 't.bend', 'T', '$P',
+                            '%e : {$H == _}\\n  {==}')
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn('    case B{}:\n      %e : {B{} == _}\n        {==}\n',
+                      got.stdout)
+
+    def test_ctorarms_rejects_invalid_input(self):
+        self.write('t.bend', 'type T is Data:\n  A{}\n')
+        for argv in [('t.bend', 'T', 'no hole', 'x'),
+                     ('t.bend', 'U', '$P', 'x'),
+                     ('--skip', 'Z', 't.bend', 'T', '$P', 'x'),
+                     ('missing.bend', 'T', '$P', 'x')]:
+            with self.subTest(argv=argv):
+                got = self.run_tool('ctorarms.py', *argv)
+                self.assertEqual(got.returncode, 2)
+                self.assertIn('error:', got.stderr)
+
     def test_version_pin_warns_for_new_release_without_blocking(self):
         self.write('bin/curl', '''#!/bin/sh
 mkdir -p "$XDG_CACHE_HOME"
@@ -83,7 +114,7 @@ printf '{"tag_name": "v2.0.37"}\\n'
         self.write('bin/curl', '#!/bin/sh\nprintf \'{"tag_name": "v2.0.37"}\\n\'\n',
                    executable=True)
         for name in ('bench.sh', 'chk.sh', 'kernel.sh', 'lawcheck.sh',
-                     'perlaw.sh', 'rc.sh', 'charsplit.py'):
+                     'perlaw.sh', 'rc.sh', 'charsplit.py', 'ctorarms.py'):
             with self.subTest(name=name):
                 got = self.run_tool(name)
                 self.assertIn('latest release is 2.0.37', got.stderr)

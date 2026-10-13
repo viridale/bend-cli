@@ -3263,6 +3263,8 @@ def Laws.p18_field(fields, id):
   {==}
 
 # P18 sub: has_alias from found is found or aliases_name.
+# Arms: python3 tools/ctorarms.py --prefix Cli. cli.bend Item '$P <> tail True{}' '{==}'
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Alias cli.bend Item '$P <> tail False{}' 'alias_go(tail, q, False{})'
 def alias_go(items: List<&2, Cli.Item>, +q: String, found: Bool) ->
     {Bool.or(found, Laws.aliases_name(items, q))
       == Cli.has_alias(items, q, found) : Bool}:
@@ -3296,9 +3298,6 @@ def alias_go(items: List<&2, Cli.Item>, +q: String, found: Bool) ->
     case Cli.Requires{x0} <> tail True{}: {==}
     case Cli.Group{x0} <> tail True{}: {==}
     case Cli.Builtin{} <> tail True{}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail False{}: alias_go(tail, q, False{})
-    case Cli.Sub{x0, x1, x2} <> tail False{}: alias_go(tail, q, False{})
-    case Cli.Version{x0} <> tail False{}: alias_go(tail, q, False{})
     case Cli.Alias{+name} <> tail False{}:
       %alias_go(tail, q, Cli.same_text(name, q)) :
         {Bool.or(String.eq(name, q), Laws.aliases_name(tail, q)) == _
@@ -3308,6 +3307,9 @@ def alias_go(items: List<&2, Cli.Item>, +q: String, found: Bool) ->
           == Bool.or(Cli.same_text(name, q), Laws.aliases_name(tail, q))
           : Bool}
       {==}
+    case Cli.Arg{x0, x1, x2} <> tail False{}: alias_go(tail, q, False{})
+    case Cli.Sub{x0, x1, x2} <> tail False{}: alias_go(tail, q, False{})
+    case Cli.Version{x0} <> tail False{}: alias_go(tail, q, False{})
     case Cli.Hidden{} <> tail False{}: alias_go(tail, q, False{})
     case Cli.Example{x0, x1} <> tail False{}: alias_go(tail, q, False{})
     case Cli.After{x0} <> tail False{}: alias_go(tail, q, False{})
@@ -3360,6 +3362,7 @@ def sub_pick(same: Bool, -name: String, +children: List<&2, Cli.Item>,
             rest) : Maybe<&2, Cli.SubFound>}
       alias_pick(Laws.aliases_name(children, q), name, children, rest)
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> tail None{}' 'sub_go(tail, q, None{})'
 def sub_go(items: List<&2, Cli.Item>, +q: String,
     found: Maybe<&2, Cli.SubFound>) ->
     {Maybe.or(&2, Cli.SubFound, found, Laws.sub_ref(items, q))
@@ -3368,7 +3371,6 @@ def sub_go(items: List<&2, Cli.Item>, +q: String,
     case Nil{} None{}: {==}
     case Nil{} Some{h}: {==}
     case h <> tail Some{g}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail None{}: sub_go(tail, q, None{})
     case Cli.Sub{+name, about, +children} <> tail None{}:
       %sub_go(tail, q, Cli.sub_hit(Cli.same_text(q, name), name, children,
         q)) :
@@ -3385,6 +3387,7 @@ def sub_go(items: List<&2, Cli.Item>, +q: String,
           : Maybe<&2, Cli.SubFound>}
       sub_pick(Cli.same_text(q, name), name, children, q,
         Laws.sub_ref(tail, q))
+    case Cli.Arg{x0, x1, x2} <> tail None{}: sub_go(tail, q, None{})
     case Cli.Version{x0} <> tail None{}: sub_go(tail, q, None{})
     case Cli.Alias{x0} <> tail None{}: sub_go(tail, q, None{})
     case Cli.Hidden{} <> tail None{}: sub_go(tail, q, None{})
@@ -3427,6 +3430,7 @@ def arg_pick(hit: Bool, -info: Cli.ArgInfo,
     case True{}: {==}
     case False{}: {==}
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg cli.bend Item '$P <> tail None{}' 'arg_go(tail, id, None{})'
 def arg_go(items: List<&2, Cli.Item>, +id: String,
     found: Maybe<&2, Cli.ArgInfo>) ->
     {Maybe.or(&2, Cli.ArgInfo, found, Laws.arg_ref(items, id))
@@ -3486,13 +3490,14 @@ def Laws.p18_arg(items, id):
 
 # P19 arg: spec_items keeps each Arg's info and drops each Sub, and
 # find_spec_info walks it as find_arg_go walks the items.
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> tail' '{==}'
 def spec_some(items: List<&2, Cli.Item>, +id: String, -h: Cli.ArgInfo) ->
     {Cli.find_spec_info(Cli.spec_items(items), id, Some{h}) == Some{h}
       : Maybe<&2, Cli.ArgInfo>}:
   match items:
     case Nil{}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail: {==}
     case Cli.Sub{x0, x1, x2} <> tail: spec_some(tail, id, h)
+    case Cli.Arg{x0, x1, x2} <> tail: {==}
     case Cli.Version{x0} <> tail: {==}
     case Cli.Alias{x0} <> tail: {==}
     case Cli.Hidden{} <> tail: {==}
@@ -3519,6 +3524,8 @@ def spec_some(items: List<&2, Cli.Item>, +id: String, -h: Cli.ArgInfo) ->
     case Cli.Group{x0} <> tail: {==}
     case Cli.Builtin{} <> tail: {==}
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> tail Some{h}' '{==}'
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg cli.bend Item '$P <> tail None{}' 'spec_go(tail, id, None{})'
 def spec_go(items: List<&2, Cli.Item>, +id: String,
     found: Maybe<&2, Cli.ArgInfo>) ->
     {Cli.find_spec_info(Cli.spec_items(items), id, found)
@@ -3526,8 +3533,8 @@ def spec_go(items: List<&2, Cli.Item>, +id: String,
   match items found:
     case Nil{} None{}: {==}
     case Nil{} Some{h}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail Some{h}: {==}
     case Cli.Sub{x0, x1, x2} <> tail Some{h}: spec_some(tail, id, h)
+    case Cli.Arg{x0, x1, x2} <> tail Some{h}: {==}
     case Cli.Version{x0} <> tail Some{h}: {==}
     case Cli.Alias{x0} <> tail Some{h}: {==}
     case Cli.Hidden{} <> tail Some{h}: {==}
@@ -3608,6 +3615,7 @@ def global_pick(g: Bool, +usage: String, -help: String,
     case True{}: {==}
     case False{}: {==}
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg cli.bend Item '$P <> tail' 'global_comm(tail)'
 def global_comm(items: List<&2, Cli.Item>) ->
     {Cli.spec_items(Cli.global_items(items))
       == Cli.global_spec(Cli.spec_items(items)) : List<&2, Cli.SpecItem>}:
@@ -3660,12 +3668,14 @@ def global_comm(items: List<&2, Cli.Item>) ->
     case Cli.Group{x0} <> tail: global_comm(tail)
     case Cli.Builtin{} <> tail: global_comm(tail)
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub --skip Arg cli.bend Item '$P <> tail' '%spec_append(tail, ys) :\n  {Cli.SpecOther{$H}\n    <> List.append(&2, Cli.SpecItem, Cli.spec_items(tail),\n      Cli.spec_items(ys))\n    == Cli.SpecOther{$H} <> _ : List<&2, Cli.SpecItem>}\n{==}'
 def spec_append(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>) ->
     {List.append(&2, Cli.SpecItem, Cli.spec_items(xs), Cli.spec_items(ys))
       == Cli.spec_items(List.append(&2, Cli.Item, xs, ys))
       : List<&2, Cli.SpecItem>}:
   match xs:
     case Nil{}: {==}
+    case Cli.Sub{x0, x1, x2} <> tail: spec_append(tail, ys)
     case Cli.Arg{x0, x1, x2} <> tail:
       %spec_append(tail, ys) :
         {Cli.SpecArg{Cli.arg_info(x0, x2)}
@@ -3674,7 +3684,6 @@ def spec_append(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>) ->
           == Cli.SpecArg{Cli.arg_info(x0, x2)} <> _
           : List<&2, Cli.SpecItem>}
       {==}
-    case Cli.Sub{x0, x1, x2} <> tail: spec_append(tail, ys)
     case Cli.Version{x0} <> tail:
       %spec_append(tail, ys) :
         {Cli.SpecOther{Cli.Version{x0}}
@@ -3860,20 +3869,21 @@ def Laws.p19_inherit(items, globals):
 
 # P19 sub: raw_subs keeps each Sub's name, aliases and children, and
 # find_sub_key walks it as find_sub_go walks the items.
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Alias cli.bend Item '$P <> tail' 'contains_aliases(tail, q)'
 def contains_aliases(items: List<&2, Cli.Item>, +q: String) ->
     {Laws.aliases_name(items, q)
       == List.contains(~String, ~String.eq, Cli.find_aliases(items), q)
       : Bool}:
   match items:
     case Nil{}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail: contains_aliases(tail, q)
-    case Cli.Sub{x0, x1, x2} <> tail: contains_aliases(tail, q)
-    case Cli.Version{x0} <> tail: contains_aliases(tail, q)
     case Cli.Alias{name} <> tail:
       %contains_aliases(tail, q) :
         {Bool.or(String.eq(name, q), Laws.aliases_name(tail, q))
           == Bool.or(String.eq(name, q), _) : Bool}
       {==}
+    case Cli.Arg{x0, x1, x2} <> tail: contains_aliases(tail, q)
+    case Cli.Sub{x0, x1, x2} <> tail: contains_aliases(tail, q)
+    case Cli.Version{x0} <> tail: contains_aliases(tail, q)
     case Cli.Hidden{} <> tail: contains_aliases(tail, q)
     case Cli.Example{x0, x1} <> tail: contains_aliases(tail, q)
     case Cli.After{x0} <> tail: contains_aliases(tail, q)
@@ -3905,13 +3915,14 @@ def sub_go_some(items: List<&2, Cli.Item>, +q: String, -h: Cli.SubFound) ->
     case Nil{}: {==}
     case head <> tail: {==}
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> tail' 'subkey_some(tail, q, k)'
 def subkey_some(items: List<&2, Cli.Item>, +q: String, -k: Cli.SubKey) ->
     {Some{k} == Cli.find_sub_key(Cli.raw_subs(items), q, Some{k})
       : Maybe<&2, Cli.SubKey>}:
   match items:
     case Nil{}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail: subkey_some(tail, q, k)
     case Cli.Sub{x0, x1, x2} <> tail: {==}
+    case Cli.Arg{x0, x1, x2} <> tail: subkey_some(tail, q, k)
     case Cli.Version{x0} <> tail: subkey_some(tail, q, k)
     case Cli.Alias{x0} <> tail: subkey_some(tail, q, k)
     case Cli.Hidden{} <> tail: subkey_some(tail, q, k)
@@ -3994,16 +4005,17 @@ def subkey_step(same: Bool, -name: String, +children: List<&2, Cli.Item>,
       subkey_alias(Laws.aliases_name(children, q), name, children, tail, q,
         ih)
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> tail' 'subkey_go(tail, q)'
 def subkey_go(items: List<&2, Cli.Item>, +q: String) ->
     {Cli.find_sub_key(Cli.raw_subs(items), q, None{})
       == Laws.sub_key_of(Cli.find_sub_go(items, q, None{}))
       : Maybe<&2, Cli.SubKey>}:
   match items:
     case Nil{}: {==}
-    case Cli.Arg{x0, x1, x2} <> tail: subkey_go(tail, q)
     case Cli.Sub{+name, about, +children} <> +tail:
       subkey_step(Cli.same_text(q, name), name, children, tail, q,
         subkey_go(tail, q))
+    case Cli.Arg{x0, x1, x2} <> tail: subkey_go(tail, q)
     case Cli.Version{x0} <> tail: subkey_go(tail, q)
     case Cli.Alias{x0} <> tail: subkey_go(tail, q)
     case Cli.Hidden{} <> tail: subkey_go(tail, q)
@@ -4441,6 +4453,7 @@ def or_pick(m: Maybe<&2, Cli.OptFound>, -rest: Maybe<&2, Cli.OptFound>) ->
     case None{}: {==}
     case Some{x}: {==}
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg cli.bend Item '$P <> tail' 'option_go(tail, q)'
 def option_go(items: List<&2, Cli.Item>, +q: String) ->
     {Cli.find_option(items, q)
       == Cli.find_key(Cli.spec_keys(Cli.spec_items(items)), q, None{})
@@ -4954,6 +4967,7 @@ def sub_step(same: Bool, -name: String, -about: String,
       builtin_step(Cli.has_builtin(children), cut_rest(cut(text)), name,
         about, children, tail, text, ih)
 
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> +tail' '%split_cut(text) :\n  {Cli.key_go(tail, text, Cli.key_step(tail, text))\n    == Laws.command_words(_, Some{$H <> tail}) : Bool}\nsplit_tail(text, tail, route_go(tail, text))'
 def route_go(items: List<&2, Cli.Item>, +text: String) ->
     {Cli.key_go(items, text, Cli.key_step(items, text))
       == Laws.command_words(String.split(text, ' '), Some{items}) : Bool}:
@@ -4961,11 +4975,6 @@ def route_go(items: List<&2, Cli.Item>, +text: String) ->
     case Nil{}:
       %split_cut(text) : {False{} == Laws.command_words(_, Some{Nil{}}) : Bool}
       cw_none(rest_words(cut_rest(cut(text))))
-    case Cli.Arg{x0, x1, x2} <> +tail:
-      %split_cut(text) :
-        {Cli.key_go(tail, text, Cli.key_step(tail, text))
-          == Laws.command_words(_, Some{Cli.Arg{x0, x1, x2} <> tail}) : Bool}
-      split_tail(text, tail, route_go(tail, text))
     case Cli.Sub{+name, about, +children} <> +tail:
       %split_cut(text) :
         {Cli.key_go(Cli.Sub{name, about, children} <> tail, text,
@@ -4989,6 +4998,11 @@ def route_go(items: List<&2, Cli.Item>, +text: String) ->
       sub_step(Cli.same_text(name, cut_word(cut(text))), name, about,
         children, tail, text, route_go(tail, text),
         r => route_go(children, r))
+    case Cli.Arg{x0, x1, x2} <> +tail:
+      %split_cut(text) :
+        {Cli.key_go(tail, text, Cli.key_step(tail, text))
+          == Laws.command_words(_, Some{Cli.Arg{x0, x1, x2} <> tail}) : Bool}
+      split_tail(text, tail, route_go(tail, text))
     case Cli.Version{x0} <> +tail:
       %split_cut(text) :
         {Cli.key_go(tail, text, Cli.key_step(tail, text))
