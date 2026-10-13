@@ -1255,6 +1255,47 @@ law g_check_builtins:
     keep_table(["man", "completions"]))), lookalikes()) ==
     [] : List<&2, Cli.Problem>}
 
+def worded() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.completions(),
+    Cli.sub("completions", "Namesake", []),
+    Cli.sub("ab", "AB", []),
+    Cli.sub("a", "A", [Cli.sub("b", "B", [])]),
+    Cli.sub("a", "Namesake", []),
+    Cli.sub("xy", "XY", []),
+    Cli.sub("c d", "Spaced", []),
+  ])
+
+# Route's Bug at worded()'s root for a table of "" and keys, or none.
+def word_bug(keys: List<&2, String>) -> Maybe<&2, String>:
+  bug_of(Cli.Matches, Cli.route(Cli.Matches, Cli.sample(worded(), []),
+    keep_table("" <> keys)))
+
+# G-CHECK: a route key's words are its text cut at every space, "" giving
+# none; each word is the whole name of the first subcommand so named among
+# the previous word's subcommands, from the root, and that one must not be a
+# built-in. So a name is not matched by a prefix, an extension, a name with
+# a space, a later namesake, or a word left empty by a leading, trailing or
+# doubled space.
+law g_check_route_words:
+  {word_bug(["ab", "a", "a b", "xy"]) == None{} : Maybe<&2, String>} &
+  {word_bug(["ax"]) == Some{"route 'ax' is not a command"}
+    : Maybe<&2, String>} &
+  {word_bug(["x"]) == Some{"route 'x' is not a command"}
+    : Maybe<&2, String>} &
+  {word_bug(["c d"]) == Some{"route 'c d' is not a command"}
+    : Maybe<&2, String>} &
+  {word_bug(["completions"]) ==
+    Some{"route 'completions' is not a command"} : Maybe<&2, String>} &
+  {word_bug(["a  b"]) == Some{"route 'a  b' is not a command"}
+    : Maybe<&2, String>} &
+  {word_bug(["a "]) == Some{"route 'a ' is not a command"}
+    : Maybe<&2, String>} &
+  {word_bug([" a"]) == Some{"route ' a' is not a command"}
+    : Maybe<&2, String>} &
+  {word_bug(["a ab"]) == Some{"route 'a ab' is not a command"}
+    : Maybe<&2, String>}
+
 def sampled() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
     Cli.arg("-v, --verbose...", "Verbosity", [Cli.global()]),

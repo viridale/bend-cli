@@ -2860,27 +2860,46 @@ def call_same(bad: Maybe<&2, String>, +m1: Cli.Matches, +m2: Cli.Matches) ->
     case None{}: {==}
     case Some{key}: {==}
 
-def keep_pick(hit: Bool, keys: List<&2, String>, +all: List<&2, String>,
+def keep_hit(hit: Bool, keys: List<&2, String>, +all: List<&2, String>,
     +key: String, c: Cli.Cmd, +path: List<&2, String>, +m1: Cli.Matches,
     +m2: Cli.Matches,
     rest: {Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
-      Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
-        key), all, c, path, m1)) ==
+      Cli.find_by_key_go(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+        key, None{}), all, c, path, m1)) ==
       Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
-        Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
-          key), all, c, path, m2)) : Maybe<&2, String>}) ->
+        Cli.find_by_key_go(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+          key, None{}), all, c, path, m2)) : Maybe<&2, String>}) ->
     {Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
-      Bool.pick(Maybe<Cli.Call(Cli.Matches)>, hit, Some{+n => Cli.keep(n)},
-        Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
-          key)), all, c, path, m1)) ==
+      Cli.find_by_key_go(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+        key, Cli.by_key_hit(&1, Cli.Call(Cli.Matches), hit,
+          +n => Cli.keep(n))), all, c, path, m1)) ==
       Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
-        Bool.pick(Maybe<Cli.Call(Cli.Matches)>, hit, Some{+n => Cli.keep(n)},
-          Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
-            key)), all, c, path, m2)) : Maybe<&2, String>}:
-  match hit c:
-    case True{} Cli.Cmd{name, about, items}:
+        Cli.find_by_key_go(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+          key, Cli.by_key_hit(&1, Cli.Call(Cli.Matches), hit,
+            +n => Cli.keep(n))), all, c, path, m2)) : Maybe<&2, String>}:
+  match hit keys c:
+    case True{} Nil{} Cli.Cmd{name, about, items}:
       call_same(Cli.non_command(all, items), m1, m2)
-    case False{} _: rest
+    case True{} head <> tail Cli.Cmd{name, about, items}:
+      call_same(Cli.non_command(all, items), m1, m2)
+    case False{} _ _: rest
+
+def keep_go(keys: List<&2, String>, +all: List<&2, String>, +key: String,
+    +c: Cli.Cmd, +path: List<&2, String>, +m1: Cli.Matches,
+    +m2: Cli.Matches) ->
+    {Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+      Cli.find_by_key_go(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+        key, None{}), all, c, path, m1)) ==
+      Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
+        Cli.find_by_key_go(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
+          key, None{}), all, c, path, m2)) : Maybe<&2, String>}:
+  match keys:
+    case Nil{}:
+      match c:
+        case Cli.Cmd{name, about, items}: {==}
+    case +head <> +tail:
+      keep_hit(Cli.same_text(head, key), tail, all, key, c, path, m1, m2,
+        keep_go(tail, all, key, c, path, m1, m2))
 
 def keep_ok(keys: List<&2, String>, +all: List<&2, String>, +key: String,
     +c: Cli.Cmd, +path: List<&2, String>, +m1: Cli.Matches,
@@ -2891,13 +2910,7 @@ def keep_ok(keys: List<&2, String>, +all: List<&2, String>, +key: String,
       Laws.bug_of(Cli.Matches, Cli.route_found(Cli.Matches,
         Cli.find_by_key(&1, Cli.Call(Cli.Matches), keys, keep_calls(keys),
           key), all, c, path, m2)) : Maybe<&2, String>}:
-  match keys:
-    case Nil{}:
-      match c:
-        case Cli.Cmd{name, about, items}: {==}
-    case +head <> +tail:
-      keep_pick(String.eq(head, key), tail, all, key, c, path, m1, m2,
-        keep_ok(tail, all, key, c, path, m1, m2))
+  keep_go(keys, all, key, c, path, m1, m2)
 
 type Rd is Data:
   RFlag{}
@@ -3124,6 +3137,9 @@ def Laws.g_check_samples():
 
 def Laws.g_check_builtins():
   ({==}, {==})
+
+def Laws.g_check_route_words():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
 
 def Laws.g_check_sample_values():
   {==}

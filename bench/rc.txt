@@ -136,3 +136,51 @@
 # FID_CLI_SCAN_SHORT_GO 143 6 257 -> 130 1 101, FID_CLI_SCAN_TAIL 57 3 114
 #   -> 16 0 9 and FID_CLI_SCAN_FAULTED 27 3 90 -> 0 0 9 fall; the new
 #   FID_CLI_HELP_FLAG 1 0 0 keeps the token for its two String.eq calls.
+#
+# Lazy decode searches and a char-walk route check, against main's build
+# (e2b09a0), both from bench/main.bend; main.bend's per-def diff is the same
+# but for FID_CLI_CHOOSE_PICK 2 1 0 -> 2 6 4 and FID_CLI_OUTCOME 25 17 37 ->
+# 26 19 37 (find_by_key and sub_at inlined), with no FID_CLI_OUTCOME_PARSE or
+# FID_CLI_U32 rise. find_by_key, field_find, find_sub, find_arg_info and
+# same_text walked whole lists or strings through an eager Bool.pick or
+# Bool.and; each is now a wrapper over a loop that stops at its first hit
+# (find_by_key_go, field_seek, find_sub_go, find_arg_go, same_go), and
+# find_sub and sub_key_found check aliases only after the name misses.
+# non_command walks each route key's characters against subcommand names
+# (route_key, key_go, word_rest) instead of String.split and the eager
+# sub_children. Static total 5709 -> 5817, since the wrappers inline into
+# every caller; executed ops on bench --threads 1 all fall (keeps 5.61M ->
+# 4.59M, takes 20.0M -> 12.0M, seals 36.0M -> 21.7M), and per family the
+# executed counts of the risen defs and the callees they absorbed fall:
+# FID_CLI_NON_COMMAND 2 2 2 -> 5 14 2 and FID_CLI_ROUTE 6 4 16 -> 5 5 16:
+#   the char walk is a spin inlined into non_command, and find_by_key_go
+#   into route; FID_CLI_IS_COMMAND, FID_CLI_USER_SUB, FID_CLI_SUB_CHILDREN,
+#   FID_CLI_KEY_NAMES and FID_CLI_FIND_BY_KEY are gone. Executed with them:
+#   0.94M/2.65M/1.23M -> 0.85M/1.05M/0.05M, and String.split falls 1.16M ->
+#   0.35M takes.
+# FID_CLI_FLAG, FID_CLI_COUNT, FID_CLI_STR, FID_CLI_STRS, FID_CLI_STR_OPT
+#   and FID_CLI_U32 1 0 0 -> 1 4 4 (STR and STR_OPT 1 1 0 -> 1 5 4) and
+#   FID_CLI_BUILTIN_PAGE 47 3 232 -> 47 11 240: field_seek is inlined into
+#   each reader, so FID_CLI_FIELD_FIND 2 3 6 is gone. Executed readers with
+#   field_find: 94K/133K/262K -> 7K/86K/138K.
+# FID_CLI_SCOPE_ARGS 1 1 0 -> 1 2 0, FID_CLI_OUTCOME_PARSE 17 3 7 ->
+#   18 5 7, FID_CLI_OWNER 6 1 6 -> 6 3 6 and FID_CLI_LONG_TIPS 5 1 14 ->
+#   4 3 14: find_sub_go is inlined into each, and sub_at into
+#   outcome_parse, so FID_CLI_FIND_SUB 4 4 6 and FID_CLI_SUB_AT 2 1 0 are
+#   gone. Executed scope_args, outcome_parse, find_sub and sub_at:
+#   555K/490K/554K -> 19K/220K/1K; owner and long_tips run in help only.
+# FID_CLI_SCAN_OPEN 102 4 20 -> 101 8 30, FID_CLI_SCOPE_OPTION_KNOWN 0 0 9
+#   -> 0 4 19 and FID_CLI_FIND_SHORT_FOR_HEAD 0 0 2 -> 0 4 12: same_text
+#   now inlines, and with it find_key and key_found, so FID_CLI_FIND_KEY
+#   0 2 0, FID_CLI_KEY_FOUND 0 2 10 and FID_CLI_FIND_OPTION_SCOPE 0 0 0 are
+#   gone. Executed, the five sum to 179123/109136/339948 before and after.
+# FID_CLI_CONFLICT_GO 5 1 2 -> 10 6 11, FID_CLI_REQUIRE_GO 3 1 0 -> 8 6 9,
+#   FID_CLI_EARLIER_CONFLICT 7 1 0 -> 12 6 9 and FID_CLI_REQUIRE_TARGETS
+#   7 1 0 -> 12 6 9: spec_info_found and find_spec_info inline here for the
+#   same reason, so FID_CLI_SPEC_INFO_FOUND 5 2 9 and FID_CLI_FIND_SPEC_INFO
+#   0 3 0 are gone. Executed, they sum to 438502/202904/685274 before and
+#   after.
+# FID_CLI_FIND_ARG_INFO 6 4 18 -> 0 0 0 becomes FID_CLI_FIND_ARG_GO 0 1 0
+#   and FID_CLI_ARG_INFO_FOUND 5 3 9; executed 420K/231K/945K ->
+#   210K/105K/378K. FID_CLI_SUB_KEY_FOUND 1 2 4 -> 1 0 0 and FID_CLI_VERDICT
+#   10 8 8 -> 8 8 8 fall.

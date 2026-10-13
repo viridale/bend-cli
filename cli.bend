@@ -1384,13 +1384,16 @@ type Seen is Data:
   SeenArgAlias{name: String}
   SeenSubAlias{name: String}
 
-# String.eq, without rebuilding both strings to hand them back.
+# String.eq, without rebuilding both strings to hand them back; the walk
+# stops at the first difference.
+def same_go(a: String, b: String, same: Bool) -> Bool:
+  match a b same:
+    case SNil{} SNil{} done: done
+    case SCon{x, xt} SCon{y, yt} True{}: same_go(xt, yt, Char.is_eq(x, y))
+    case _ _ _: False{}
+
 def same_text(a: String, b: String) -> Bool:
-  match a b:
-    case SNil{} SNil{}: True{}
-    case SCon{x, xt} SCon{y, yt}:
-      Bool.and(Char.is_eq(x, y), same_text(xt, yt))
-    case _ _: False{}
+  same_go(a, b, True{})
 
 def same_nonempty(+a: String, b: String) -> Bool:
   Bool.and(Bool.not(String.is_empty(a)), same_text(a, b))
@@ -2139,17 +2142,45 @@ def find_option_scope(scope: Scope, query: String) ->
         external, needs_sub, version, digit_short, inherit}}:
       find_key(keys, query, None{})
 
+# Whether items alias query; after a hit it walks no further.
+def has_alias(items: List<&2, Item>, +query: String, found: Bool) -> Bool:
+  match items found:
+    case _ True{}: True{}
+    case Nil{} False{}: False{}
+    case Alias{name} <> tail False{}:
+      has_alias(tail, query, same_text(name, query))
+    case head <> tail False{}: has_alias(tail, query, False{})
+
+def alias_hit(aliased: Bool, name: String, children: List<&2, Item>) ->
+    Maybe<&2, SubFound>:
+  match aliased:
+    case True{}: Some{SubFound{name, children}}
+    case False{}: None{}
+
+def sub_hit(same: Bool, name: String, +children: List<&2, Item>,
+    query: String) -> Maybe<&2, SubFound>:
+  match same:
+    case True{}: Some{SubFound{name, children}}
+    case False{}:
+      alias_hit(has_alias(children, query, False{}), name, children)
+
+def sub_found(item: Item, +query: String) -> Maybe<&2, SubFound>:
+  match item:
+    case Sub{+name, about, children}:
+      sub_hit(same_text(query, name), name, children, query)
+    case _: None{}
+
+# The first Sub named or aliased query; after a hit it walks no further.
+def find_sub_go(items: List<&2, Item>, +query: String,
+    found: Maybe<&2, SubFound>) -> Maybe<&2, SubFound>:
+  match items found:
+    case _ Some{hit}: Some{hit}
+    case Nil{} None{}: None{}
+    case item <> tail None{}: find_sub_go(tail, query, sub_found(item, query))
+
 def find_sub(items: List<&2, Item>, +query: String) ->
     Maybe<&2, SubFound>:
-  match items:
-    case Nil{}: None{}
-    case Sub{+name, about, +children} <> tail:
-      Bool.pick(Maybe<&2, SubFound>,
-        Bool.or(String.eq(query, name),
-          List.contains(~String, ~String.eq,
-            find_aliases(children), query)),
-        Some{SubFound{name, children}}, find_sub(tail, query))
-    case head <> tail: find_sub(tail, query)
+  find_sub_go(items, query, None{})
 
 def has_external(items: List<&2, Item>) -> Bool:
   match items:
@@ -2756,13 +2787,24 @@ def scope_has_sub(scope: Scope) -> Bool:
     case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
         external, needs_sub, version, digit_short, inherit}}: has_sub
 
+def sub_key_aliased(aliased: Bool, name: String, aliases: List<&2, String>,
+    children: List<&2, Item>) -> Maybe<&2, SubKey>:
+  match aliased:
+    case True{}: Some{SubKey{name, aliases, children}}
+    case False{}: None{}
+
+def sub_key_hit(same: Bool, name: String, +aliases: List<&2, String>,
+    children: List<&2, Item>, query: String) -> Maybe<&2, SubKey>:
+  match same:
+    case True{}: Some{SubKey{name, aliases, children}}
+    case False{}:
+      sub_key_aliased(List.contains(~String, ~String.eq, aliases, query),
+        name, aliases, children)
+
 def sub_key_found(key: SubKey, +query: String) -> Maybe<&2, SubKey>:
   match key:
-    case SubKey{+name, +aliases, children}:
-      Bool.pick(Maybe<&2, SubKey>,
-        Bool.or(same_text(query, name),
-          List.contains(~String, ~String.eq, aliases, query)),
-        Some{SubKey{name, aliases, children}}, None{})
+    case SubKey{+name, aliases, children}:
+      sub_key_hit(same_text(query, name), name, aliases, children, query)
 
 # find_sub over a scope's subcommands; after a hit it only walks the rest.
 def find_sub_key(subs: List<&2, SubKey>, +query: String,
@@ -3336,15 +3378,25 @@ def present_order(events: List<&2, ScanEvent>,
     fields: List<&2, Field>) -> List<&2, String>:
   env_order(fields, argv_order(events, []))
 
+def arg_info_found(item: Item, id: String) -> Maybe<&2, ArgInfo>:
+  match item:
+    case Arg{usage, help, attrs}:
+      +info = arg_info(usage, attrs)
+      own = info_id(info)
+      Bool.pick(Maybe<&2, ArgInfo>, same_text(own, id), Some{info}, None{})
+    case _: None{}
+
+# The first Arg whose id is id; after a hit it walks no further.
+def find_arg_go(items: List<&2, Item>, +id: String,
+    found: Maybe<&2, ArgInfo>) -> Maybe<&2, ArgInfo>:
+  match items found:
+    case _ Some{hit}: Some{hit}
+    case Nil{} None{}: None{}
+    case item <> tail None{}: find_arg_go(tail, id, arg_info_found(item, id))
+
 def find_arg_info(items: List<&2, Item>, +id: String) ->
     Maybe<&2, ArgInfo>:
-  match items:
-    case Nil{}: None{}
-    case Arg{usage, help, attrs} <> tail:
-      +info = arg_info(usage, attrs)
-      Bool.pick(Maybe<&2, ArgInfo>, String.eq(info_id(info), id),
-        Some{info}, find_arg_info(tail, id))
-    case head <> tail: find_arg_info(tail, id)
+  find_arg_go(items, id, None{})
 
 def spec_info_found(item: SpecItem, id: String) -> Maybe<&2, ArgInfo>:
   match item:
@@ -3796,13 +3848,22 @@ def verdict(cmd: Cmd, +path: List<&2, String>, +id: String,
       arg_verdict(find_arg_info(scope_args(path, items, []), id), id, name,
         path, want)
 
-# The field for id, or an absent one.
+def field_found(f: Field, id: String) -> Maybe<&2, Field>:
+  match f:
+    case Field{+key, values, source}:
+      Bool.pick(Maybe<&2, Field>, same_text(key, id),
+        Some{Field{key, values, source}}, None{})
+
+# The field for id, or an absent one; after a hit it walks no further.
+def field_seek(fields: List<&2, Field>, +id: String,
+    found: Maybe<&2, Field>) -> Field:
+  match fields found:
+    case _ Some{f}: f
+    case Nil{} None{}: Field{id, [], Absent{}}
+    case f <> tail None{}: field_seek(tail, id, field_found(f, id))
+
 def field_find(fields: List<&2, Field>, +id: String) -> Field:
-  match fields:
-    case Nil{}: Field{id, [], Absent{}}
-    case Field{+key, values, source} <> tail:
-      Bool.pick(Field, String.eq(key, id), Field{key, values, source},
-        field_find(tail, id))
+  field_seek(fields, id, None{})
 
 # Validation first; reading a validated value never fails (§6.5).
 def read_check(~T: Data, ~get: Field -> T, verdict: Maybe<&2, String>,
@@ -3926,17 +3987,24 @@ def given(m: Matches, id: String) -> Dec(Bool):
 def source(m: Matches, id: String) -> Dec(Src):
   read_with(~Src, ~field_src, WAny{}, m, id)
 
-# The value under the first key equal to key.
+def by_key_hit(a, -A: Kind(a), same: Bool, value: A) -> Maybe<a, A>:
+  match same:
+    case True{}: Some{value}
+    case False{}: None{}
+
+# The value under the first key equal to key; after a hit it walks no further.
+def find_by_key_go(a, -A: Kind(a), keys: List<&2, String>,
+    values: List<a, A>, +key: String, found: Maybe<a, A>) -> Maybe<a, A>:
+  match keys values found:
+    case _ _ Some{hit}: Some{hit}
+    case head <> tail value <> rest None{}:
+      find_by_key_go(a, A, tail, rest, key,
+        by_key_hit(a, A, same_text(head, key), value))
+    case _ _ None{}: None{}
+
 def find_by_key(a, -A: Kind(a), keys: List<&2, String>, values: List<a, A>,
     +key: String) -> Maybe<a, A>:
-  match keys:
-    case Nil{}: None{}
-    case head <> tail:
-      match values:
-        case Nil{}: None{}
-        case value <> rest:
-          Bool.pick(Maybe<a, A>, String.eq(head, key), Some{value},
-            find_by_key(a, A, tail, rest, key))
+  find_by_key_go(a, A, keys, values, key, None{})
 
 def keyed_cons(a, -A: Kind(a), key: String, value: A,
     rest: (List<&2, String> & List<a, A>)) -> (List<&2, String> & List<a, A>):
@@ -3999,46 +4067,73 @@ def choose(-A: Data, m: Matches, id: String,
 def Call(-A: Type) -> Type:
   @+m: Matches -> Dec(A)
 
-# The declared subcommand name leads to; built-ins are not commands (§6.4).
-def sub_children(items: List<&2, Item>, +name: String) ->
-    Maybe<&2, List<&2, Item>>:
-  match items:
-    case Nil{}: None{}
-    case Sub{key, about, children} <> tail:
-      Bool.pick(Maybe<&2, List<&2, Item>>, String.eq(key, name),
-        Some{children}, sub_children(tail, name))
-    case head <> tail: sub_children(tail, name)
+# Some{None{}} when text is the word name, Some{Some{rest}} when it is name,
+# a space and rest, None{} otherwise. Words are cut at spaces, so a name with
+# a space (Chr{32}) is no word.
+def word_rest(name: String, text: String, same: Bool) ->
+    Maybe<&2, Maybe<&2, String>>:
+  match name text same:
+    case _ _ False{}: None{}
+    case SNil{} SNil{} True{}: Some{None{}}
+    case SNil{} SCon{Chr{32}, rest} True{}: Some{Some{rest}}
+    case SCon{Chr{32}, xs} _ True{}: None{}
+    case SCon{x, xs} SCon{y, ys} True{}: word_rest(xs, ys, Char.is_eq(x, y))
+    case _ _ _: None{}
 
-def user_children(found: Maybe<&2, List<&2, Item>>) ->
-    Maybe<&2, List<&2, Item>>:
+# How a route key's next word meets an item: not its subcommand, the
+# subcommand of a built-in, the command the key ends at, or a command whose
+# subcommands take the rest (§6.4).
+type KeyStep is Data:
+  KeyMiss{}
+  KeyStop{}
+  KeyEnd{}
+  KeyNext{rest: String}
+
+def key_user(builtin: Bool, rest: Maybe<&2, String>) -> KeyStep:
+  match builtin rest:
+    case True{} _: KeyStop{}
+    case False{} None{}: KeyEnd{}
+    case False{} Some{text}: KeyNext{text}
+
+def key_word(found: Maybe<&2, Maybe<&2, String>>,
+    children: List<&2, Item>) -> KeyStep:
   match found:
-    case None{}: None{}
-    case Some{+children}:
-      Bool.pick(Maybe<&2, List<&2, Item>>, has_builtin(children), None{},
-        Some{children})
+    case None{}: KeyMiss{}
+    case Some{rest}: key_user(has_builtin(children), rest)
 
-def user_sub(items: List<&2, Item>, name: String) ->
-    Maybe<&2, List<&2, Item>>:
-  user_children(sub_children(items, name))
+def key_step(items: List<&2, Item>, text: String) -> KeyStep:
+  match items:
+    case Sub{name, about, children} <> tail:
+      key_word(word_rest(name, text, True{}), children)
+    case _: KeyMiss{}
 
-def is_command(names: List<&2, String>,
-    found: Maybe<&2, List<&2, Item>>) -> Bool:
-  match names found:
-    case Nil{} None{}: False{}
-    case Nil{} Some{items}: True{}
-    case name <> tail None{}: False{}
-    case name <> tail Some{items}: is_command(tail, user_sub(items, name))
+# The first subcommand named by each word of text, from items down, is a
+# command.
+def key_go(items: List<&2, Item>, +text: String, step: KeyStep) -> Bool:
+  match items step:
+    case Nil{} _: False{}
+    case head <> +tail KeyMiss{}: key_go(tail, text, key_step(tail, text))
+    case head <> tail KeyStop{}: False{}
+    case head <> tail KeyEnd{}: True{}
+    case Sub{name, about, +children} <> tail KeyNext{+rest}:
+      key_go(children, rest, key_step(children, rest))
+    case _ _: False{}
 
-# A route key's subcommand names; "" is the root.
-def key_names(+key: String) -> List<&2, String>:
-  Bool.pick(List<&2, String>, String.is_empty(key), [], String.split(key, ' '))
+def route_text(empty: Bool, +key: String, +items: List<&2, Item>) -> Bool:
+  match empty:
+    case True{}: True{}
+    case False{}: key_go(items, key, key_step(items, key))
+
+# A route key's words name a command; "" is the root.
+def route_key(+key: String, items: List<&2, Item>) -> Bool:
+  route_text(String.is_empty(key), key, items)
 
 def non_command(keys: List<&2, String>, +items: List<&2, Item>) ->
     Maybe<&2, String>:
   match keys:
     case Nil{}: None{}
     case +key <> tail:
-      Bool.pick(Maybe<&2, String>, is_command(key_names(key), Some{items}),
+      Bool.pick(Maybe<&2, String>, route_key(key, items),
         non_command(tail, items), Some{key})
 
 def route_call(-A: Type, bad: Maybe<&2, String>, call: Call(A),
