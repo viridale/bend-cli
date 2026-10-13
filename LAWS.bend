@@ -633,6 +633,43 @@ law g_sub_deep_globals:
   {Cli.parse(deep_tool(), host(), ["alpha", "beta", "--child"]) ==
     Cli.Rejected{["alpha", "beta"], Cli.E01{"--child"}} : Cli.ParseResult}
 
+def own_tool() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--out <O>", "Root output", []),
+    Cli.arg("-v, --verbose...", "Root verbosity", []),
+    Cli.sub("run", "Run", [
+      Cli.sub_optional(),
+      Cli.arg("--out <N>", "Run output", [Cli.as_nat(), Cli.global()]),
+      Cli.arg("-v, --verbose", "Run verbose", []),
+      Cli.sub("go", "Go", []),
+    ]),
+    Cli.sub("need", "Need", [
+      Cli.arg("--out <O>", "Need output", [Cli.required()]),
+    ]),
+  ])
+
+# G-SUB: an arg reads only occurrences scanned where it is in scope. An
+# ancestor's non-global arg with the same id, given before the descent,
+# neither fills it nor satisfies its required(); a global still collects
+# occurrences from every scope below the one declaring it.
+law g_sub_own_ids:
+  {Cli.parse(own_tool(), host(), ["--out", "abc", "-vv", "run"]) ==
+    Cli.Accepted{["run"], [], None{}} : Cli.ParseResult} &
+  {Cli.parse(own_tool(), host(), ["--out", "abc", "run", "--out", "5",
+      "-v"]) ==
+    Cli.Accepted{["run"], [
+      field("out", ["5"], Cli.Argv{}),
+      field("verbose", ["true"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult} &
+  {Cli.parse(own_tool(), host(), ["--out", "abc", "run", "go"]) ==
+    Cli.Accepted{["run", "go"], [], None{}} : Cli.ParseResult} &
+  {Cli.parse(own_tool(), host(), ["run", "--out", "5", "go"]) ==
+    Cli.Accepted{["run", "go"], [
+      field("out", ["5"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult} &
+  {Cli.parse(own_tool(), host(), ["--out", "x", "need"]) ==
+    Cli.Rejected{["need"], Cli.E06{["--out <O>"]}} : Cli.ParseResult}
+
 # G-SUB: the help subcommand walks named descendants.
 law g_sub_help:
   {Cli.parse(sub_tool(), host(), ["help"]) ==

@@ -184,3 +184,16 @@
 #   and FID_CLI_ARG_INFO_FOUND 5 3 9; executed 420K/231K/945K ->
 #   210K/105K/378K. FID_CLI_SUB_KEY_FOUND 1 2 4 -> 1 0 0 and FID_CLI_VERDICT
 #   10 8 8 -> 8 8 8 fall.
+#
+# Hits before a descent reach the subcommand only on the globals it
+# inherits (SPEC §8.4), against main's build (53502f4); bench/main.bend and
+# main.bend give the same per-def diff, and the static total 5817 -> 5863 is
+# the new def's 45 plus one keep:
+# FID_CLI_SCAN_DESCEND 1 0 5 -> 2 0 5: it keeps the inherited globals, which
+#   both the child's spec and the new FID_CLI_EVENTS_INHERITED 8 11 26 read.
+#   events_inherited walks the events scanned before each subcommand token,
+#   once per descent, looking each hit's id up among the globals with
+#   find_spec_info; a walk with its own membership test gave same_text a caller
+#   and raised 28 more defs, and matching each event instead of event_id
+#   inlined find_spec_info thrice (16 21 60). tools/bench.sh: threads=1 237.6
+#   -> 232.0 ms, all cores 45.8 -> 45.6 ms, peak RSS 10.7 MB both.

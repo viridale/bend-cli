@@ -2688,6 +2688,9 @@ def Laws.g_sub_alias():
 def Laws.g_sub_deep_globals():
   ({==}, {==})
 
+def Laws.g_sub_own_ids():
+  ({==}, ({==}, ({==}, ({==}, {==}))))
+
 def Laws.g_sub_help():
   ({==}, ({==}, ({==}, {==})))
 
@@ -4598,12 +4601,15 @@ def scope_step(found: Maybe<&2, Cli.SubFound>, tail: List<&2, String>,
             globals)), Laws.p19_inherit(items, globals)) :
         ScopeFound(Laws.scope_at(tail,
           Some{Cli.ScanState{Cli.Scope{List.append(&2, String, p, [name]),
-            Cli.spec_node(children, _)}, Cli.Enter{name} <> events, resting,
+            Cli.spec_node(children, _)},
+            Cli.Enter{name} <> Cli.events_inherited(events, _), resting,
             0n, external, issue}}),
         Cli.scope_args(tail, children, List.append(&2, Cli.Item,
           Cli.global_items(items), globals)), id)
-      ih(List.append(&2, String, p, [name]), Cli.Enter{name} <> events,
-        children)
+      ih(List.append(&2, String, p, [name]),
+        Cli.Enter{name} <> Cli.events_inherited(events,
+          Cli.spec_items(List.append(&2, Cli.Item, Cli.global_items(items),
+            globals))), children)
 
 def scope_walk(path: List<&2, String>, +items: List<&2, Cli.Item>,
     +globals: List<&2, Cli.Item>, +p: List<&2, String>,

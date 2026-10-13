@@ -2470,6 +2470,53 @@ def spec_inherit(spec: Spec) -> List<&2, SpecItem>:
     case Spec{keys, args, slots, variadic, subs, has_sub, external,
         needs_sub, version, digit_short, inherit}: inherit
 
+def event_id(event: ScanEvent) -> Maybe<&2, String>:
+  match event:
+    case FlagHit{id, value}: Some{id}
+    case CountHit{id}: Some{id}
+    case ValueHit{id, value}: Some{id}
+    case _: None{}
+
+def spec_info_found(item: SpecItem, id: String) -> Maybe<&2, ArgInfo>:
+  match item:
+    case SpecArg{+info}:
+      own = info_id(info)
+      Bool.pick(Maybe<&2, ArgInfo>, same_text(own, id), Some{info}, None{})
+    case SpecOther{other}: None{}
+
+# find_arg_info over parsed items; after a hit it only walks the rest.
+def find_spec_info(items: List<&2, SpecItem>, +id: String,
+    found: Maybe<&2, ArgInfo>) -> Maybe<&2, ArgInfo>:
+  match items found:
+    case Nil{} hit: hit
+    case item <> tail Some{hit}: Some{hit}
+    case item <> tail None{}:
+      find_spec_info(tail, id, spec_info_found(item, id))
+
+# An arg's hits from before the scan enters a subcommand stay only when the
+# scope being left passes the arg down as a global (SPEC 8.4); operands,
+# entries, help and version stay.
+def event_inherited(found: Maybe<&2, String>,
+    +globals: List<&2, SpecItem>) -> Bool:
+  match found:
+    case None{}: True{}
+    case Some{id}:
+      Maybe.is_some(&2, ArgInfo, find_spec_info(globals, id, None{}))
+
+def events_kept(keep: Bool, event: ScanEvent,
+    rest: List<&2, ScanEvent>) -> List<&2, ScanEvent>:
+  match keep:
+    case True{}: event <> rest
+    case False{}: rest
+
+def events_inherited(events: List<&2, ScanEvent>,
+    +globals: List<&2, SpecItem>) -> List<&2, ScanEvent>:
+  match events:
+    case Nil{}: Nil{}
+    case +event <> tail:
+      events_kept(event_inherited(event_id(event), globals), event,
+        events_inherited(tail, globals))
+
 def scan_descend(state: ScanState, sub: SubKey) -> ScanState:
   match state:
     case ScanState{scope, events, resting, positional_count,
@@ -2478,10 +2525,11 @@ def scan_descend(state: ScanState, sub: SubKey) -> ScanState:
         case Scope{path, spec}:
           match sub:
             case SubKey{+name, aliases, children}:
+              +globals = spec_inherit(spec)
               ScanState{Scope{
                 List.append(&2, String, path, [name]),
-                spec_node(children, spec_inherit(spec))},
-                Enter{name} <> events, resting, 0n,
+                spec_node(children, globals)},
+                Enter{name} <> events_inherited(events, globals), resting, 0n,
                 external, issue}
 
 def scan_external(state: ScanState, name: String,
@@ -3335,13 +3383,6 @@ def scope_missing(scope: Scope,
   +items = scope_arg_items(scope)
   missing_items(items, items, fields)
 
-def event_id(event: ScanEvent) -> Maybe<&2, String>:
-  match event:
-    case FlagHit{id, value}: Some{id}
-    case CountHit{id}: Some{id}
-    case ValueHit{id, value}: Some{id}
-    case _: None{}
-
 def append_unique(+ids: List<&2, String>, +id: String) ->
     List<&2, String>:
   Bool.pick(List<&2, String>,
@@ -3397,22 +3438,6 @@ def find_arg_go(items: List<&2, Item>, +id: String,
 def find_arg_info(items: List<&2, Item>, +id: String) ->
     Maybe<&2, ArgInfo>:
   find_arg_go(items, id, None{})
-
-def spec_info_found(item: SpecItem, id: String) -> Maybe<&2, ArgInfo>:
-  match item:
-    case SpecArg{+info}:
-      own = info_id(info)
-      Bool.pick(Maybe<&2, ArgInfo>, same_text(own, id), Some{info}, None{})
-    case SpecOther{other}: None{}
-
-# find_arg_info over parsed items; after a hit it only walks the rest.
-def find_spec_info(items: List<&2, SpecItem>, +id: String,
-    found: Maybe<&2, ArgInfo>) -> Maybe<&2, ArgInfo>:
-  match items found:
-    case Nil{} hit: hit
-    case item <> tail Some{hit}: Some{hit}
-    case item <> tail None{}:
-      find_spec_info(tail, id, spec_info_found(item, id))
 
 def exclusive_groups(items: List<&2, SpecItem>) -> List<&2, String>:
   match items:
