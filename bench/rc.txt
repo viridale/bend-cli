@@ -216,3 +216,18 @@
 #   a take in FID_CLI_PROBLEM_LINES 0 14 6 -> 0 15 6; and the new sentence in
 #   FID_CLI_PROBLEM_LINE 0 0 112 -> 0 0 124. tools/bench.sh: threads=1
 #   231.0 -> 232.1 ms, all cores 48.1 -> 45.3 ms, peak RSS 10.7 MB both.
+#
+# A repeated option's values gathered newest first, against main's build
+# (0b4e487); bench/main.bend and main.bend give the same per-def diff, and
+# the static total 5937 -> 5940 (main.bend 6030 -> 6033) is the reverse:
+# FID_CLI_GATHER_EVENT 1 3 20 -> 2 4 30: gather_value now conses each value
+#   where it copied the list with List.append, so it is inlined here and its
+#   FID_CLI_GATHER_VALUE 1 1 10 (gone) moved with it; gather_event ran it on
+#   every value hit before as well, so no executed count rises.
+# FID_CLI_RESOLVE_OPTION 10 2 5 -> 10 3 7: resolve_argv_gather, inlined
+#   here, reverses a seen arg's values into argv order, once per arg the
+#   argv names. Executed ops on bench --threads 1: keeps 4506898 both,
+#   takes 11871264 -> 11871204, seals 21309614 -> 21309494; on 4000 pairs
+#   of `-I dK`, takes 8.57M -> 0.57M and seals 17.1M -> 1.12M.
+#   tools/bench.sh: threads=1 231.4 -> 231.3 ms, all cores 45.7 -> 45.1 ms,
+#   peak RSS 10.7 MB both.

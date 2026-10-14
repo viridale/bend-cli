@@ -1958,6 +1958,8 @@ type Early is Data:
   EarlyHelp{long: Bool}
   EarlyVersion{}
 
+# An arg's hits so far: values holds a repeated option's newest first, so
+# each hit conses, and resolve_argv_gather puts them back in argv order.
 type Gather is Data:
   Gather{seen: Bool, values: List<&2, String>, count: Nat}
 
@@ -3053,7 +3055,7 @@ def gather_value(gather: Gather, +value: String,
   match gather:
     case Gather{seen, values, +count}:
       Bool.pick(Gather, many,
-        Gather{True{}, List.append(&2, String, values, [value]), count},
+        Gather{True{}, value <> values, count},
         Gather{True{}, [value], count})
 
 def gather_flag(gather: Gather, value: Bool) -> Gather:
@@ -3180,8 +3182,8 @@ def resolve_argv_gather(gather: Gather, +info: ArgInfo,
     case Gather{True{}, values, count}:
       match info:
         case ArgInfo{id, usage, short, long, kind, attrs}:
-          Built{[Field{id, apply_delim(find_delim(attrs), values),
-            Argv{}}]}
+          Built{[Field{id, apply_delim(find_delim(attrs),
+            List.reverse(&2, String, values)), Argv{}}]}
     case Gather{False{}, values, count}:
       resolve_env_default(host_env(info_env(info), h), info)
 

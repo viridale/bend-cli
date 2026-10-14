@@ -7962,21 +7962,6 @@ def evs_ok(events: List<&2, Cli.ScanEvent>, +kind: Cli.UsageKind,
     case Nil{}: True{}
     case e <> t: Bool.and(ev_ok(e, kind, attrs, id), evs_ok(t, kind, attrs, id))
 
-def allv_snoc(vs: List<&2, String>, +v: String, +found: Maybe<&2, Char>,
-    +attrs: List<&2, Cli.Item>, +ea: {allv(vs, found, attrs) == True{} : Bool},
-    nb: {no_bad(Cli.split_bad(found, attrs, v)) == True{} : Bool}) ->
-    {allv(List.append(&2, String, vs, [v]), found, attrs) == True{} : Bool}:
-  match vs:
-    case Nil{}:
-      and_true(no_bad(Cli.split_bad(found, attrs, v)), True{}, nb, {==})
-    case +h <> +t:
-      and_true(no_bad(Cli.split_bad(found, attrs, h)),
-        allv(List.append(&2, String, t, [v]), found, attrs),
-        and_left(no_bad(Cli.split_bad(found, attrs, h)), allv(t, found, attrs),
-          ea),
-        allv_snoc(t, v, found, attrs, and_right(no_bad(Cli.split_bad(found,
-          attrs, h)), allv(t, found, attrs), ea), nb))
-
 def many_step(g: Cli.Gather, many: Bool, +attrs: List<&2, Cli.Item>,
     +v: String, nb: {no_bad(Cli.value_bad(attrs, v)) == True{} : Bool},
     ok: {g_many(g, many, attrs) == True{} : Bool}) ->
@@ -7985,11 +7970,11 @@ def many_step(g: Cli.Gather, many: Bool, +attrs: List<&2, Cli.Item>,
     case Cli.Gather{seen, +values, count}:
       match many:
         case True{}:
-          and_true(allv(List.append(&2, String, values, [v]),
-            Cli.find_delim(attrs), attrs), True{},
-            allv_snoc(values, v, Cli.find_delim(attrs), attrs,
+          and_true(allv(v <> values, Cli.find_delim(attrs), attrs), True{},
+            and_true(no_bad(Cli.split_bad(Cli.find_delim(attrs), attrs, v)),
+              allv(values, Cli.find_delim(attrs), attrs), nb,
               and_left(allv(values, Cli.find_delim(attrs), attrs),
-                Bool.or(Bool.not(seen), True{}), ok), nb), {==})
+                Bool.or(Bool.not(seen), True{}), ok)), {==})
         case False{}:
           and_true(Bool.and(no_bad(Cli.value_bad(attrs, v)), True{}), True{},
             and_true(no_bad(Cli.value_bad(attrs, v)), True{}, nb, {==}), {==})
@@ -8297,6 +8282,83 @@ def seen_good(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
       Empty.absurd({fgood(Cli.PosKind{required, many}, attrs,
         Cli.apply_delim(Cli.find_delim(attrs), values)) == True{} : Bool},
         true_false_absurd(np))
+
+# allv holds of xs reversed onto acc when it holds of both.
+def allv_rev(xs: List<&2, String>, +acc: List<&2, String>,
+    +found: Maybe<&2, Char>, +attrs: List<&2, Cli.Item>,
+    +e: {allv(xs, found, attrs) == True{} : Bool},
+    ea: {allv(acc, found, attrs) == True{} : Bool}) ->
+    {allv(List.reverse.go(&2, String, xs, acc), found, attrs) == True{}
+      : Bool}:
+  match xs:
+    case Nil{}: ea
+    case +h <> +t:
+      allv_rev(t, h <> acc, found, attrs,
+        and_right(no_bad(Cli.split_bad(found, attrs, h)),
+          allv(t, found, attrs), e),
+        and_true(no_bad(Cli.split_bad(found, attrs, h)),
+          allv(acc, found, attrs),
+          and_left(no_bad(Cli.split_bad(found, attrs, h)),
+            allv(t, found, attrs), e), ea))
+
+# A single value is its own reversal.
+def one_rev(xs: List<&2, String>, e: {Laws.read_one(xs) == True{} : Bool}) ->
+    {xs == List.reverse(&2, String, xs) : List<&2, String>}:
+  match xs:
+    case Nil{}: {==}
+    case v <> t:
+      match t:
+        case Nil{}: {==}
+        case h <> u:
+          Empty.absurd({v <> h <> u == List.reverse(&2, String, v <> h <> u)
+            : List<&2, String>}, false_true_absurd(e))
+
+def many_rev(many: Bool, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>, -count: Nat,
+    +ok: {g_many(Cli.Gather{True{}, values, count}, many, attrs) == True{}
+      : Bool}) ->
+    {g_many(Cli.Gather{True{}, List.reverse(&2, String, values), count},
+      many, attrs) == True{} : Bool}:
+  match many:
+    case True{}:
+      and_true(allv(List.reverse(&2, String, values), Cli.find_delim(attrs),
+        attrs), True{}, allv_rev(values, [], Cli.find_delim(attrs), attrs,
+          and_left(allv(values, Cli.find_delim(attrs), attrs), True{}, ok),
+          {==}), {==})
+    case False{}:
+      %one_rev(values, and_right(allv(values, Cli.find_delim(attrs), attrs),
+        Laws.read_one(values), ok)) :
+        {g_many(Cli.Gather{True{}, _, count}, False{}, attrs) == True{}
+          : Bool}
+      ok
+
+# gib holds of a seen gather's values in argv order: a repeated option's
+# values are each good in any order, and any other arg's are one value.
+def rev_gib(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +values: List<&2, String>, -count: Nat,
+    +ok: {gib(kind, attrs, Cli.Gather{True{}, values, count}) == True{}
+      : Bool}) ->
+    {gib(kind, attrs, Cli.Gather{True{}, List.reverse(&2, String, values),
+      count}) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}:
+      %one_rev(values, and_right(Laws.read_flags(values),
+        Laws.read_one(values), ok)) :
+        {g_flag(Cli.Gather{True{}, _, count}) == True{} : Bool}
+      ok
+    case Cli.CountKind{}:
+      %one_rev(values, and_right(Laws.read_counts(values),
+        Laws.read_one(values), ok)) :
+        {g_count(Cli.Gather{True{}, _, count}) == True{} : Bool}
+      ok
+    case Cli.NegatableKind{}:
+      %one_rev(values, and_right(Laws.read_flags(values),
+        Laws.read_one(values), ok)) :
+        {g_flag(Cli.Gather{True{}, _, count}) == True{} : Bool}
+      ok
+    case Cli.OptionKind{many}: many_rev(many, attrs, values, count, ok)
+    case Cli.BareOptionKind{}: many_rev(False{}, attrs, values, count, ok)
+    case Cli.PosKind{required, many}: {==}
 
 # P21 lists: the args of a scope that have id, and the hits each accepts.
 
@@ -12301,8 +12363,8 @@ def rag_nk_seen(seen: Bool, -values: List<&2, String>, -count: Nat,
     case True{}:
       match info:
         case Cli.ArgInfo{k, u, s, l, kind, attrs}:
-          one_nk(k, Cli.apply_delim(Cli.find_delim(attrs), values),
-            Cli.Argv{}, id, ec)
+          one_nk(k, Cli.apply_delim(Cli.find_delim(attrs),
+            List.reverse(&2, String, values)), Cli.Argv{}, id, ec)
     case False{}: red_nk(Cli.host_env(Cli.info_env(info), h), info, id, ec)
 
 def rag_nk(g: Cli.Gather, +info: Cli.ArgInfo, h: Cli.Host, +id: String,
@@ -12393,8 +12455,10 @@ def rag_seen(seen: Bool, +values: List<&2, String>, -count: Nat, +id: String,
       Cli.ArgInfo{id, u, s, l, kind, attrs}, h), id, kind, attrs):
   match seen:
     case True{}:
-      one_ow(id, Cli.apply_delim(Cli.find_delim(attrs), values), Cli.Argv{},
-        kind, attrs, seen_good(kind, attrs, values, count, ok, okl, np))
+      one_ow(id, Cli.apply_delim(Cli.find_delim(attrs),
+        List.reverse(&2, String, values)), Cli.Argv{}, kind, attrs,
+        seen_good(kind, attrs, List.reverse(&2, String, values), count,
+          rev_gib(kind, attrs, values, count, ok), okl, np))
     case False{}:
       red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l, kind, attrs,
         okd, okl)
