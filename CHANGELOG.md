@@ -11,6 +11,8 @@
 - Bash, zsh, and fish completions and man pages.
 - IO shell for native and compiled-JavaScript applications.
 - Example applications, laws, end-to-end cases, and a benchmark.
+- A benchmark against clap, cobra, argparse, and commander: the same command
+  in each, checked against a Bend example and timed by `tools/peerbench.sh`.
 
 ### Output changes
 

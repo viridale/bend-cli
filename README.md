@@ -62,6 +62,10 @@ to stderr and exit 2. Invalid command definitions and decoder bugs exit 70.
 [`examples/hello`](examples/hello) is this quickstart with its laws and
 proofs. [`examples/grep`](examples/grep) adds options, an environment
 fallback, color, and file reads, with laws for its parsing and output.
+[`examples/argbench`](examples/argbench) prints the line its argv decodes
+to. [`bench/peers`](bench/peers) declares the same command in clap, cobra,
+argparse, and commander; `tools/peerbench.sh` checks that each prints what
+the Bend app prints, then times them all.
 
 ## Define commands
 

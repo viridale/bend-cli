@@ -109,7 +109,7 @@ jobs:
           bend main.bend -o build/pkg.js
           bend tests/f32.bend -o build/f32
           bend tests/f32.bend -o build/f32.js
-          for app in hello grep; do
+          for app in hello grep argbench; do
             bend "examples/$app/main.bend" -o "build/$app"
             bend "examples/$app/main.bend" -o "build/$app.js"
           done
@@ -127,8 +127,8 @@ jobs:
           fi
           LC_ALL=C grep -q $'\033\\[' /tmp/tty.txt
       # The examples' laws cover their parsing and each file's output; this
-      # covers their IO: a greeting, and grep over two files that match and
-      # one that cannot be opened.
+      # covers their IO: a greeting, grep over two files that match and one
+      # that cannot be opened, and argbench's line.
       - name: Example apps
         shell: bash
         run: |
@@ -153,6 +153,8 @@ jobs:
             want "$out" $'build/a.txt:one x\nbuild/b.txt:X three'
             want "$(cat build/err.txt)" 'grep: build/c.txt: No such file or directory'
             want "$status" 2
+            want "$(app argbench build -vvq -oout.bin --include=src -Ilib a.c)" \
+              'build verbose=2 quiet=true output=out.bin include=src,lib jobs=1 format=text inputs=a.c'
           done
       # G6: stdout must not depend on the thread count. The times on stderr
       # are reported, not checked, until the targets are set (SPEC §14.4).

@@ -1,2 +1,4 @@
 tmp/
 build/
+bench/peers/clap/target/
+bench/peers/commander/node_modules/
