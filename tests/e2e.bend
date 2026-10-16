@@ -1,7 +1,7 @@
 # Purpose: end-to-end runner: each case in tests/cases.bend through env(1)
 # in the native, js and dev modes, comparing status, stdout and stderr
 # exactly (§13). Run it from the repository root after building build/pkg,
-# build/pkg.js, build/f32 and build/f32.js (G4).
+# build/pkg.js, build/f32, build/f32.js, build/host and build/host.js (G4).
 # Expected output: `e2e: N runs passed`, exit 0; otherwise a FAIL block per
 # failing run and exit 1. `--check-only` prints ALL PROOFS CHECK.
 # Run: bend tests/e2e.bend
@@ -68,6 +68,8 @@ def jobs(+path: String) -> List<&2, Job>:
     all_jobs(canary_modes(), Cases.canaries(), path),
     all_jobs(modes("build/f32", "build/f32.js", "tests/f32.bend"),
       Cases.f32_cases(), path),
+    all_jobs(modes("build/host", "build/host.js", "tests/host.bend"),
+      Cases.host_cases(), path),
   ])
 
 def strict(xs: List<&2, String>) -> List<String>:

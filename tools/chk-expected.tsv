@@ -54,3 +54,14 @@ tests/f32.bend	../run.ended
 tests/f32.bend	../run.stepped
 tests/f32.bend	../run.main
 tests/f32.bend	main
+tests/host.bend	../run.Sys.isatty
+tests/host.bend	../run.Sys.columns
+tests/host.bend	../run.Sys.exit
+tests/host.bend	../run.exit_when
+tests/host.bend	../run.exit
+tests/host.bend	../run.finish
+tests/host.bend	../run.host
+tests/host.bend	../run.ended
+tests/host.bend	../run.stepped
+tests/host.bend	../run.main
+tests/host.bend	main

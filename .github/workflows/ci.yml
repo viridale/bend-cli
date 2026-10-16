@@ -58,7 +58,8 @@ jobs:
             case "$file" in
               ./run.bend) want="$(foreign '')" code=1 ;;
               ./main.bend) want="$(foreign run. main)" code=1 ;;
-              ./tests/f32.bend) want="$(foreign ../run. main)" code=1 ;;
+              ./tests/f32.bend | ./tests/host.bend)
+                want="$(foreign ../run. main)" code=1 ;;
               ./examples/*/main.bend) want="$(foreign ../../run. main)" code=1 ;;
               *) want=$'ALL PROOFS CHECK\nUse --verdict for mathematical validity.'
                  code=0 ;;
@@ -109,6 +110,8 @@ jobs:
           bend main.bend -o build/pkg.js
           bend tests/f32.bend -o build/f32
           bend tests/f32.bend -o build/f32.js
+          bend tests/host.bend -o build/host
+          bend tests/host.bend -o build/host.js
           for app in hello grep argbench; do
             bend "examples/$app/main.bend" -o "build/$app"
             bend "examples/$app/main.bend" -o "build/$app.js"

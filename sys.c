@@ -23,8 +23,16 @@ Term sys_exit_run(Env e, Term* f, IoWork* w) {
   exit((int)(u32)f[0]);
 }
 
+// A def the program never reaches has no id (bend guide effects), as
+// Sys.exit in an app that exits without Run.exit (tests/host.bend).
 static void __attribute__((constructor)) sys_use(void) {
+#ifdef CID(Sys.isatty)
   io_eff(CID(Sys.isatty), sys_isatty_run);
+#endif
+#ifdef CID(Sys.columns)
   io_eff(CID(Sys.columns), sys_columns_run);
+#endif
+#ifdef CID(Sys.exit)
   io_eff(CID(Sys.exit), sys_exit_run);
+#endif
 }

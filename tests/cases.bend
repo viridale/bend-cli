@@ -366,3 +366,39 @@ def f32_cases() -> List<&2, Case>:
       "For more information, try '--help'.",
     ])},
   ]
+
+# tests/host.bend in every mode: an app that never reaches Sys.exit reads
+# its width through Run.host and exits with Quit's code.
+def host_cases() -> List<&2, Case>:
+  [
+  Case{"host reads COLUMNS", ["COLUMNS=100"], ["Ada"], 0,
+    "Ada 100\n",
+    ""},
+  Case{"host keeps 80 off a terminal", [], [], 0,
+    "world 80\n",
+    ""},
+  Case{"host prints help and exits 0", [], ["-h"], 0,
+    page([
+      "Print a name and the help width",
+      "",
+      "Usage: host [NAME]",
+      "",
+      "Arguments:",
+      "  [NAME]      The name [default: world]",
+      "",
+      "Options:",
+      "  -h, --help  Print help",
+    ]),
+    ""},
+  Case{"host exits 2 on a usage error", [], ["-x"], 2,
+    "",
+    page([
+      "error: unexpected argument '-x' found",
+      "",
+      "  tip: to pass '-x' as a value, use '-- -x'",
+      "",
+      "Usage: host [NAME]",
+      "",
+      "For more information, try '--help'.",
+    ])},
+  ]
