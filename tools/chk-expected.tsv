@@ -43,6 +43,17 @@ examples/grep/main.bend	../../run.ended
 examples/grep/main.bend	../../run.stepped
 examples/grep/main.bend	../../run.main
 examples/grep/main.bend	main
+examples/argbench/main.bend	../../run.Sys.isatty
+examples/argbench/main.bend	../../run.Sys.columns
+examples/argbench/main.bend	../../run.Sys.exit
+examples/argbench/main.bend	../../run.exit_when
+examples/argbench/main.bend	../../run.exit
+examples/argbench/main.bend	../../run.finish
+examples/argbench/main.bend	../../run.host
+examples/argbench/main.bend	../../run.ended
+examples/argbench/main.bend	../../run.stepped
+examples/argbench/main.bend	../../run.main
+examples/argbench/main.bend	main
 tests/f32.bend	../run.Sys.isatty
 tests/f32.bend	../run.Sys.columns
 tests/f32.bend	../run.Sys.exit
