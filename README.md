@@ -200,10 +200,6 @@ stdout and usage errors to stderr.
 - Display width counts Unicode code points. Emoji joined with U+200D and
   flags can align imperfectly. Invalid UTF-8 in argv becomes U+FFFD, so
   raw-byte filenames cannot be passed unchanged.
-- Until a Bend release includes
-  [bendlang/bend#1470](https://github.com/bendlang/bend/pull/1470), a closed
-  stdout pipe (`hello | head -1`) produces Bend's short-write diagnostic and
-  exits 1. With that fix, the program ends by SIGPIPE.
 
 CI runs on macOS arm64 and Ubuntu 24.04 x86-64. Native builds need clang;
 compiled JavaScript uses Bun 1.1 or newer. Windows is outside the 1.x support
