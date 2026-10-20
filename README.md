@@ -8,6 +8,12 @@ functions, so applications can state their CLI behavior as Bend laws.
 The BendHub package is `cli`. Import `cli.bend` in application code and laws;
 import `run.bend` only in the executable shell. Bend 2.0.37 or newer is required.
 
+`bend-cli` will not stabilize at 1.0 until Bend's runtime stops taking its
+own options out of a program's argv
+([bendlang/bend#1466](https://github.com/bendlang/bend/issues/1466)). Until
+then, apps cannot use those options or the first `--` as their own; see
+[Platform notes](#platform-notes).
+
 ## Quickstart
 
 Create `app.bend` with the command definition, decoder, and action:
