@@ -96,6 +96,55 @@ law g_text_wrap:
   {Cli.wrap("a  b", 80n) == "a b" : String} &
   {Cli.wrap("x\n   \ny", 80n) == "x\n\ny" : String}
 
+# G-TEXT: an emoji sequence is one wide cell, as Rust's unicode-width 0.2
+# counts it: a pictograph that a ZWJ joins, a skin tone after a base that
+# takes one, and tag characters add nothing; VS16 widens a narrow emoji to 2.
+law g_text_width_emoji:
+  {Cli.width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}") == 2n : Nat} &
+  {Cli.width("\u{1F469}\u{1F3FD}\u{200D}\u{1F4BB}") == 2n : Nat} &
+  {Cli.width("\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}") == 2n : Nat} &
+  {Cli.width("\u{1F441}\u{FE0F}\u{200D}\u{1F5E8}\u{FE0F}") == 2n : Nat} &
+  {Cli.width("\u{2764}\u{FE0F}\u{200D}\u{1F525}") == 2n : Nat} &
+  {Cli.width("\u{1F469}\u{1F3FD}\u{200D}\u{1F91D}\u{200D}\u{1F468}\u{1F3FF}")
+    == 2n : Nat} &
+  {Cli.width("\u{1F468}\u{200D}\u{1F469}\u{1F3FD}") == 2n : Nat} &
+  {Cli.width("\u{1F44D}\u{1F3FD}") == 2n : Nat} &
+  {Cli.width("\u{261D}\u{1F3FD}") == 2n : Nat} &
+  {Cli.width("\u{2764}\u{FE0F}") == 2n : Nat} &
+  {Cli.width("1\u{FE0F}\u{20E3}") == 2n : Nat} &
+  {Cli.width("\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}")
+    == 2n : Nat} &
+  {Cli.width("\u{1F1FA}\u{1F1F8}") == 2n : Nat}
+
+# G-TEXT: outside a sequence each code point keeps its own width. A ZWJ joins
+# only two pictographs, a skin tone only follows a base that takes one, and a
+# later VS16 or skin tone in the same emoji adds as if alone.
+law g_text_width_emoji_edges:
+  {Cli.width("a\u{200D}\u{1F469}") == 3n : Nat} &
+  {Cli.width("\u{1F468}\u{200D}a") == 3n : Nat} &
+  {Cli.width("1\u{200D}\u{1F525}") == 3n : Nat} &
+  {Cli.width("\u{1F468} \u{200D}\u{1F469}") == 5n : Nat} &
+  {Cli.width("\u{1F44D}\u{200D}\u{1F3FD}") == 4n : Nat} &
+  {Cli.width("a\u{1F3FD}") == 3n : Nat} &
+  {Cli.width("\u{1F600}\u{1F3FD}") == 4n : Nat} &
+  {Cli.width("\u{1F44D}\u{1F3FD}\u{1F3FD}") == 4n : Nat} &
+  {Cli.width("\u{1F3FD}") == 2n : Nat} &
+  {Cli.width("\u{1F600}\u{FE0F}") == 2n : Nat} &
+  {Cli.width("a\u{FE0F}") == 1n : Nat} &
+  {Cli.width("\u{2605}\u{FE0F}") == 1n : Nat} &
+  {Cli.width("\u{2764}\u{FE0F}\u{FE0F}") == 2n : Nat} &
+  {Cli.width("\u{2764}\u{FE0F}\u{2764}") == 3n : Nat} &
+  {Cli.width("\u{1F441}") == 1n : Nat} &
+  {Cli.width("\u{1F1FA}") == 1n : Nat} &
+  {Cli.width("a\u{E0062}") == 1n : Nat}
+
+# G-TEXT: wrapping counts an emoji sequence as its width.
+law g_text_wrap_emoji:
+  {Cli.wrap("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} ab", 5n)
+    == "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} ab" : String} &
+  {Cli.wrap("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} ab", 4n)
+    == "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\nab" : String}
+
 # G-TEXT: styles reset after a span; an empty style list paints no bytes.
 law g_text_paint:
   {Cli.paint(True{}, [Cli.Bold{}, Cli.Red{}], "x")
@@ -232,6 +281,47 @@ law g_lint_misplaced:
     Cli.arg("[FILE]", "Input file", [Cli.global()]),
   ])) == [Cli.Misplaced{"tool", "global"}]
     : List<&2, Cli.Problem>}
+
+# G-LINT Misplaced: a command that needs a subcommand drops its own
+# non-global options' values on descent, so their required() can never be
+# met. It is reported with the command's own problems, once per required(),
+# and a flag's required() only once; global(), sub_optional() and external()
+# keep it.
+def parent_required(attrs: List<&2, Cli.Item>,
+    items: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("tool", "Tool description", List.append(&2, Cli.Item, [
+    Cli.arg("--out <X>", "Output", attrs),
+    Cli.sub("run", "Run it", []),
+  ], items))
+
+law g_lint_required_sub:
+  {Cli.problems(parent_required([Cli.required()], []))
+    == [Cli.Misplaced{"tool", "required"}] : List<&2, Cli.Problem>} &
+  {Cli.problems(parent_required([Cli.required(), Cli.required()], []))
+    == [Cli.Misplaced{"tool", "required"}, Cli.Misplaced{"tool", "required"}]
+    : List<&2, Cli.Problem>} &
+  {Cli.problems(parent_required([Cli.required(), Cli.global()], []))
+    == [] : List<&2, Cli.Problem>} &
+  {Cli.problems(parent_required([Cli.required()], [Cli.sub_optional()]))
+    == [] : List<&2, Cli.Problem>} &
+  {Cli.problems(parent_required([Cli.required()], [Cli.external()]))
+    == [] : List<&2, Cli.Problem>} &
+  {Cli.problems(parent_required([], [
+    Cli.arg("--a <A>", "", [Cli.required()]),
+    Cli.arg("--quiet", "Quiet", [Cli.required()]),
+  ])) == [
+    Cli.Misplaced{"tool", "required"},
+    Cli.NoHelp{"tool", "--a <A>"},
+    Cli.Misplaced{"tool", "required"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool description", [
+    Cli.sub("remote", "Remotes", [
+      Cli.arg("--name <N>", "Name", [Cli.required()]),
+      Cli.sub("add", "Add one", [
+        Cli.arg("--url <U>", "URL", [Cli.required()]),
+      ]),
+    ]),
+  ])) == [Cli.Misplaced{"tool remote", "required"}] : List<&2, Cli.Problem>}
 
 # G-LINT NoHelp: what keeps the full usage string as written.
 law g_lint_no_help:
@@ -994,6 +1084,48 @@ law g_src_invalid:
   ]), Cli.host_var(host(), "TOOL_FLAG", "maybe"), []) ==
     Cli.Rejected{[], Cli.E11{"--flag", "maybe", "TOOL_FLAG",
       "expected true or false"}} : Cli.ParseResult}
+
+# §8.6: an arg may name several variables; the first that is set and not
+# empty supplies it, and a later one is never read.
+def env_chain() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--out <X>", "Output", [
+      Cli.env("TOOL_OUT"), Cli.env("LEGACY_OUT"), Cli.default("d")]),
+    Cli.arg("--n <N>", "Count", [
+      Cli.as_nat(), Cli.env("TOOL_N"), Cli.env("LEGACY_N")]),
+  ])
+
+# G-SRC: the first variable that is set and not empty wins, after argv and
+# before the default; an invalid value is E11 with that variable's name.
+law g_src_env_names:
+  {Cli.parse(env_chain(),
+    Cli.host_var(Cli.host_var(host(), "TOOL_OUT", "new"), "LEGACY_OUT", "old"),
+    []) == ok([field("out", ["new"], Cli.Env{})]) : Cli.ParseResult} &
+  {Cli.parse(env_chain(), Cli.host_var(host(), "LEGACY_OUT", "old"), []) ==
+    ok([field("out", ["old"], Cli.Env{})]) : Cli.ParseResult} &
+  {Cli.parse(env_chain(),
+    Cli.host_var(Cli.host_var(host(), "TOOL_OUT", ""), "LEGACY_OUT", "old"),
+    []) == ok([field("out", ["old"], Cli.Env{})]) : Cli.ParseResult} &
+  {Cli.parse(env_chain(), Cli.host_var(host(), "LEGACY_OUT", ""), []) ==
+    ok([field("out", ["d"], Cli.Default{})]) : Cli.ParseResult} &
+  {Cli.parse(env_chain(), Cli.host_var(host(), "LEGACY_OUT", "old"),
+    ["--out", "argv"]) == ok([field("out", ["argv"], Cli.Argv{})])
+    : Cli.ParseResult} &
+  {Cli.parse(env_chain(),
+    Cli.host_var(Cli.host_var(host(), "TOOL_N", "7"), "LEGACY_N", "nope"),
+    []) == ok([
+      field("out", ["d"], Cli.Default{}),
+      field("n", ["7"], Cli.Env{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(env_chain(),
+    Cli.host_var(Cli.host_var(host(), "TOOL_N", "nope"), "LEGACY_N", "5"),
+    []) == Cli.Rejected{[], Cli.E11{"--n <N>", "nope", "TOOL_N",
+      "expected a whole number from 0 to 281474976710655"}}
+    : Cli.ParseResult} &
+  {Cli.parse(env_chain(), Cli.host_var(host(), "LEGACY_N", "nope"), []) ==
+    Cli.Rejected{[], Cli.E11{"--n <N>", "nope", "LEGACY_N",
+      "expected a whole number from 0 to 281474976710655"}}
+    : Cli.ParseResult}
 
 # G-REL: C3 lists every missing required item in declaration order.
 law g_rel_required:
@@ -2391,6 +2523,19 @@ law g_help_sections:
   {Cli.help(feat(), [], False{}, host()) == feat_page() : String} &
   {Cli.help(feat(), [], True{}, host()) == feat_page() : String}
 
+# G-HELP: the env tag lists every name in order.
+law g_help_env_names:
+  {Cli.help(env_chain(), [], False{}, host()) == page([
+    "Tool",
+    "",
+    "Usage: tool [OPTIONS]",
+    "",
+    "Options:",
+    "      --out <X>  Output [env: TOOL_OUT, LEGACY_OUT] [default: d]",
+    "      --n <N>    Count [env: TOOL_N, LEGACY_N]",
+    "  -h, --help     Print help",
+  ]) : String}
+
 def up() -> Cli.Cmd:
   Cli.cmd("up", "Upload", [
     Cli.need_one("src"),
@@ -3536,6 +3681,16 @@ law g_src_invalid_eval:
       "invalid value 'maybe' for '--flag' from environment variable TOOL_FLAG: expected true or false",
       [], "tool [OPTIONS]") : Cli.Step<Parsed>}
 
+law g_src_env_names_eval:
+  {ran(env_chain(), Cli.host_var(host(), "LEGACY_OUT", "old"), []) ==
+    went([
+      field("out", ["old"], Cli.Env{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(env_chain(), Cli.host_var(host(), "LEGACY_N", "nope"), []) ==
+    failed(Parsed,
+      "invalid value 'nope' for '--n <N>' from environment variable LEGACY_N: expected a whole number from 0 to 281474976710655",
+      [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
 law g_rel_required_eval:
   {ran(Cli.cmd("tool", "Tool", [
     Cli.arg("--out <O>", "Output", [Cli.required()]),
@@ -3745,6 +3900,22 @@ law g_lint_exit:
   {ran(broken(), host(), []) == broken_exit() : Cli.Step<Parsed>} &
   {ran(broken(), tty(), ["run", "-v"]) == broken_exit() : Cli.Step<Parsed>}
 
+# G-LINT: a required() that descent drops stops eval before any rule, with
+# or without the subcommand or the option in argv.
+def dead_required_exit() -> Cli.Step<Parsed>:
+  Cli.Quit{70, "", page([
+    "bug: invalid command-line definition",
+    "  tool: 'required' is not allowed here",
+  ])}
+
+law g_lint_required_sub_eval:
+  {ran(parent_required([Cli.required()], []), host(), ["run"])
+    == dead_required_exit() : Cli.Step<Parsed>} &
+  {ran(parent_required([Cli.required()], []), host(), ["--out", "x", "run"])
+    == dead_required_exit() : Cli.Step<Parsed>} &
+  {ran(parent_required([Cli.required()], []), host(), [])
+    == dead_required_exit() : Cli.Step<Parsed>}
+
 # §6.7: the variables Run.host reads: each arg's env name in pre-order,
 # then the color and width names, keeping only the first of any repeat.
 def envs() -> Cli.Cmd:
@@ -3763,6 +3934,17 @@ law g_vars:
   {Cli.vars(envs()) == ["B_VAR", "A_VAR", "TERM", "NO_COLOR", "CLICOLOR",
     "CLICOLOR_FORCE", "COLUMNS"] : List<&2, String>} &
   {Cli.vars(flags()) == ["NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "TERM",
+    "COLUMNS"] : List<&2, String>}
+
+# §6.7: every name an arg lists, in order; a repeat is kept once.
+law g_vars_env_names:
+  {Cli.vars(env_chain()) == ["TOOL_OUT", "LEGACY_OUT", "TOOL_N", "LEGACY_N",
+    "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "TERM", "COLUMNS"]
+    : List<&2, String>} &
+  {Cli.vars(Cli.cmd("tool", "Tool", [
+    Cli.arg("--a <A>", "A", [Cli.env("A_VAR"), Cli.env("TERM"),
+      Cli.env("A_VAR")]),
+  ])) == ["A_VAR", "TERM", "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE",
     "COLUMNS"] : List<&2, String>}
 
 # §7.3: the host from what Run.host reads: variables, then whether stdout
@@ -5262,6 +5444,49 @@ law g_man_quirks:
 # -V in OPTIONS.
 law g_man_launch:
   {Cli.roff(launch(), []) == launch_man() : String}
+
+# G-MAN: an arg with several variables has one ENVIRONMENT entry naming them
+# all, which says the first that is set wins.
+law g_man_env_names:
+  {Cli.roff(env_chain(), []) == page([
+    ".TH \"TOOL\" \"1\" \"\" \"tool\" \"User Commands\"",
+    ".SH NAME",
+    "tool \\- Tool",
+    ".SH SYNOPSIS",
+    "\\fBtool\\fR [OPTIONS]",
+    ".SH DESCRIPTION",
+    "Tool",
+    ".SH OPTIONS",
+    ".TP",
+    "\\fB\\-\\-out\\fR \\fI<X>\\fR",
+    "Output [env: TOOL_OUT, LEGACY_OUT] [default: d]",
+    ".TP",
+    "\\fB\\-\\-n\\fR \\fI<N>\\fR",
+    "Count [env: TOOL_N, LEGACY_N]",
+    ".TP",
+    "\\fB\\-h\\fR, \\fB\\-\\-help\\fR",
+    "Print help",
+    ".SH ENVIRONMENT",
+    ".TP",
+    "\\fBTOOL_OUT\\fR, \\fBLEGACY_OUT\\fR",
+    "Used for \\fB\\-\\-out\\fR \\fI<X>\\fR when it is not given; the first that is set wins",
+    ".TP",
+    "\\fBTOOL_N\\fR, \\fBLEGACY_N\\fR",
+    "Used for \\fB\\-\\-n\\fR \\fI<N>\\fR when it is not given; the first that is set wins",
+    ".SH EXIT STATUS",
+    ".TP",
+    "\\fB0\\fR",
+    "Success",
+    ".TP",
+    "\\fB1\\fR",
+    "Failure",
+    ".TP",
+    "\\fB2\\fR",
+    "Usage error",
+    ".TP",
+    "\\fB70\\fR",
+    "Internal software error",
+  ]) : String}
 
 def pkg_run(h: Cli.Host, argv: List<&2, String>) -> Cli.Step<Demo.Action>:
   Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), h, argv)

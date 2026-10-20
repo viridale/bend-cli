@@ -13,6 +13,17 @@ def Laws.g_text_width():
 def Laws.g_text_wrap():
   ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
 
+def Laws.g_text_width_emoji():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    ({==}, ({==}, {==}))))))))))))
+
+def Laws.g_text_width_emoji_edges():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))))))))))
+
+def Laws.g_text_wrap_emoji():
+  ({==}, {==})
+
 def Laws.g_text_paint():
   ({==}, {==})
 
@@ -60,6 +71,9 @@ def Laws.g_lint_reserved_sub():
 
 def Laws.g_lint_misplaced():
   {==}
+
+def Laws.g_lint_required_sub():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
 
 def Laws.g_lint_no_help():
   {==}
@@ -2747,6 +2761,9 @@ def Laws.g_src_precedence():
 
 def Laws.g_src_invalid():
   ({==}, {==})
+
+def Laws.g_src_env_names():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))
 
 def Laws.g_rel_required():
   ({==}, {==})
@@ -12365,7 +12382,7 @@ def rag_nk_seen(seen: Bool, -values: List<&2, String>, -count: Nat,
         case Cli.ArgInfo{k, u, s, l, kind, attrs}:
           one_nk(k, Cli.apply_delim(Cli.find_delim(attrs),
             List.reverse(&2, String, values)), Cli.Argv{}, id, ec)
-    case False{}: red_nk(Cli.host_env(Cli.info_env(info), h), info, id, ec)
+    case False{}: red_nk(Cli.host_env(h, Cli.info_envs(info)), info, id, ec)
 
 def rag_nk(g: Cli.Gather, +info: Cli.ArgInfo, h: Cli.Host, +id: String,
     ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
@@ -12394,7 +12411,7 @@ def rp_nk(+info: Cli.ArgInfo, values: List<&2, String>, h: Cli.Host,
     +id: String, ec: {String.eq(Cli.info_id(info), id) == False{} : Bool}) ->
     NK(Cli.resolve_pos(info, values, h), id):
   match values:
-    case Nil{}: red_nk(Cli.host_env(Cli.info_env(info), h), info, id, ec)
+    case Nil{}: red_nk(Cli.host_env(h, Cli.info_envs(info)), info, id, ec)
     case +v <> +vs:
       pvr_nk(Cli.first_bad(Cli.apply_delim(Cli.find_delim(
         Cli.info_attrs(info)), v <> vs), Cli.info_attrs(info)), info,
@@ -12460,7 +12477,7 @@ def rag_seen(seen: Bool, +values: List<&2, String>, -count: Nat, +id: String,
         seen_good(kind, attrs, List.reverse(&2, String, values), count,
           rev_gib(kind, attrs, values, count, ok), okl, np))
     case False{}:
-      red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l, kind, attrs,
+      red_pg(Cli.host_env(h, Cli.find_envs(attrs)), id, u, s, l, kind, attrs,
         okd, okl)
 
 def rag_pg(g: Cli.Gather, +id: String, -u: String, -s: String, -l: String,
@@ -12535,7 +12552,7 @@ def pos_vals(values: List<&2, String>, +id: String, -u: String, -s: String,
       attrs}, values, h), id, Cli.PosKind{req, True{}}, attrs):
   match values:
     case Nil{}:
-      red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l,
+      red_pg(Cli.host_env(h, Cli.find_envs(attrs)), id, u, s, l,
         Cli.PosKind{req, True{}}, attrs, okd, okl)
     case +v <> +vs:
       pvr_pg(Cli.first_bad(Cli.apply_delim(Cli.find_delim(attrs), v <> vs),
@@ -12573,7 +12590,7 @@ def pos_one(toks: List<&2, String>, +id: String, -u: String, -s: String,
       Cli.PosKind{req, False{}}, attrs):
   match toks:
     case Nil{}:
-      red_pg(Cli.host_env(Cli.find_env(attrs), h), id, u, s, l,
+      red_pg(Cli.host_env(h, Cli.find_envs(attrs)), id, u, s, l,
         Cli.PosKind{req, False{}}, attrs, okd, okl)
     case t <> ts: sp_pg(Cli.find_delim(attrs), id, u, s, l, req, attrs, t, ts, okl)
 
@@ -14415,6 +14432,9 @@ def Laws.g_help_paragraphs():
 def Laws.g_help_sections():
   ({==}, {==})
 
+def Laws.g_help_env_names():
+  {==}
+
 def Laws.g_help_usage():
   ({==}, {==})
 
@@ -14747,6 +14767,9 @@ def Laws.g_src_precedence_eval():
 def Laws.g_src_invalid_eval():
   ({==}, {==})
 
+def Laws.g_src_env_names_eval():
+  ({==}, {==})
+
 def Laws.g_rel_required_eval():
   ({==}, {==})
 
@@ -14772,8 +14795,14 @@ def Laws.g_err_decode():
 def Laws.g_lint_exit():
   ({==}, ({==}, ({==}, {==})))
 
+def Laws.g_lint_required_sub_eval():
+  ({==}, ({==}, {==}))
+
 def Laws.g_vars():
   ({==}, ({==}, {==}))
+
+def Laws.g_vars_env_names():
+  ({==}, {==})
 
 # A COLUMNS value as_nat accepts and that is not all zeroes sets the width
 # to Nat.read's answer, whatever the TTYs say; s stays abstract, so the
@@ -14935,6 +14964,9 @@ def Laws.g_man_quirks():
 
 def Laws.g_man_launch():
   pieces_eq(Cli.roff(Laws.launch(), []), Laws.launch_man(), {==})
+
+def Laws.g_man_env_names():
+  {==}
 
 def Laws.g_eval_builtins():
   (step_eq(Demo.Action, Laws.pkg_run(Laws.host(), ["completions", "bash"]),

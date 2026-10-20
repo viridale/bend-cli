@@ -597,6 +597,259 @@ def unicode_is_zero_mark(code: U32) -> Bool:
     CodeRange{917760, 917999},
   ], code)
 
+# Unicode 15.1 Extended_Pictographic ranges, including reserved ranges.
+# Source: https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-data.txt
+def unicode_is_pictographic(code: U32) -> Bool:
+  contains_range([
+    CodeRange{169, 169},
+    CodeRange{174, 174},
+    CodeRange{8252, 8252},
+    CodeRange{8265, 8265},
+    CodeRange{8482, 8482},
+    CodeRange{8505, 8505},
+    CodeRange{8596, 8601},
+    CodeRange{8617, 8618},
+    CodeRange{8986, 8987},
+    CodeRange{9000, 9000},
+    CodeRange{9096, 9096},
+    CodeRange{9167, 9167},
+    CodeRange{9193, 9203},
+    CodeRange{9208, 9210},
+    CodeRange{9410, 9410},
+    CodeRange{9642, 9643},
+    CodeRange{9654, 9654},
+    CodeRange{9664, 9664},
+    CodeRange{9723, 9726},
+    CodeRange{9728, 9733},
+    CodeRange{9735, 9746},
+    CodeRange{9748, 9861},
+    CodeRange{9872, 9989},
+    CodeRange{9992, 10002},
+    CodeRange{10004, 10004},
+    CodeRange{10006, 10006},
+    CodeRange{10013, 10013},
+    CodeRange{10017, 10017},
+    CodeRange{10024, 10024},
+    CodeRange{10035, 10036},
+    CodeRange{10052, 10052},
+    CodeRange{10055, 10055},
+    CodeRange{10060, 10060},
+    CodeRange{10062, 10062},
+    CodeRange{10067, 10069},
+    CodeRange{10071, 10071},
+    CodeRange{10083, 10087},
+    CodeRange{10133, 10135},
+    CodeRange{10145, 10145},
+    CodeRange{10160, 10160},
+    CodeRange{10175, 10175},
+    CodeRange{10548, 10549},
+    CodeRange{11013, 11015},
+    CodeRange{11035, 11036},
+    CodeRange{11088, 11088},
+    CodeRange{11093, 11093},
+    CodeRange{12336, 12336},
+    CodeRange{12349, 12349},
+    CodeRange{12951, 12951},
+    CodeRange{12953, 12953},
+    CodeRange{126976, 127231},
+    CodeRange{127245, 127247},
+    CodeRange{127279, 127279},
+    CodeRange{127340, 127345},
+    CodeRange{127358, 127359},
+    CodeRange{127374, 127374},
+    CodeRange{127377, 127386},
+    CodeRange{127405, 127461},
+    CodeRange{127489, 127503},
+    CodeRange{127514, 127514},
+    CodeRange{127535, 127535},
+    CodeRange{127538, 127546},
+    CodeRange{127548, 127551},
+    CodeRange{127561, 127994},
+    CodeRange{128000, 128317},
+    CodeRange{128326, 128591},
+    CodeRange{128640, 128767},
+    CodeRange{128884, 128895},
+    CodeRange{128981, 129023},
+    CodeRange{129036, 129039},
+    CodeRange{129096, 129103},
+    CodeRange{129114, 129119},
+    CodeRange{129160, 129167},
+    CodeRange{129198, 129279},
+    CodeRange{129292, 129338},
+    CodeRange{129340, 129349},
+    CodeRange{129351, 129791},
+    CodeRange{130048, 131069},
+  ], code)
+
+# Unicode 15.1 Emoji_Modifier_Base ranges: the emoji a skin tone modifies.
+# Source: https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-data.txt
+def unicode_takes_tone(code: U32) -> Bool:
+  contains_range([
+    CodeRange{9757, 9757},
+    CodeRange{9977, 9977},
+    CodeRange{9994, 9997},
+    CodeRange{127877, 127877},
+    CodeRange{127938, 127940},
+    CodeRange{127943, 127943},
+    CodeRange{127946, 127948},
+    CodeRange{128066, 128067},
+    CodeRange{128070, 128080},
+    CodeRange{128102, 128120},
+    CodeRange{128124, 128124},
+    CodeRange{128129, 128131},
+    CodeRange{128133, 128135},
+    CodeRange{128143, 128143},
+    CodeRange{128145, 128145},
+    CodeRange{128170, 128170},
+    CodeRange{128372, 128373},
+    CodeRange{128378, 128378},
+    CodeRange{128400, 128400},
+    CodeRange{128405, 128406},
+    CodeRange{128581, 128583},
+    CodeRange{128587, 128591},
+    CodeRange{128675, 128675},
+    CodeRange{128692, 128694},
+    CodeRange{128704, 128704},
+    CodeRange{128716, 128716},
+    CodeRange{129292, 129292},
+    CodeRange{129295, 129295},
+    CodeRange{129304, 129311},
+    CodeRange{129318, 129318},
+    CodeRange{129328, 129337},
+    CodeRange{129340, 129342},
+    CodeRange{129399, 129399},
+    CodeRange{129461, 129462},
+    CodeRange{129464, 129465},
+    CodeRange{129467, 129467},
+    CodeRange{129485, 129487},
+    CodeRange{129489, 129501},
+    CodeRange{129731, 129733},
+    CodeRange{129776, 129784},
+  ], code)
+
+# Unicode 15.1 code points with an emoji presentation sequence (VS16) that
+# are not East Asian Wide or Fullwidth, so VS16 widens them to 2.
+# Sources: https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-variation-sequences.txt
+# and https://www.unicode.org/Public/15.1.0/ucd/EastAsianWidth.txt
+def unicode_widens_with_vs16(code: U32) -> Bool:
+  contains_range([
+    CodeRange{35, 35},
+    CodeRange{42, 42},
+    CodeRange{48, 57},
+    CodeRange{169, 169},
+    CodeRange{174, 174},
+    CodeRange{8252, 8252},
+    CodeRange{8265, 8265},
+    CodeRange{8482, 8482},
+    CodeRange{8505, 8505},
+    CodeRange{8596, 8601},
+    CodeRange{8617, 8618},
+    CodeRange{9000, 9000},
+    CodeRange{9167, 9167},
+    CodeRange{9197, 9199},
+    CodeRange{9201, 9202},
+    CodeRange{9208, 9210},
+    CodeRange{9410, 9410},
+    CodeRange{9642, 9643},
+    CodeRange{9654, 9654},
+    CodeRange{9664, 9664},
+    CodeRange{9723, 9724},
+    CodeRange{9728, 9732},
+    CodeRange{9742, 9742},
+    CodeRange{9745, 9745},
+    CodeRange{9752, 9752},
+    CodeRange{9757, 9757},
+    CodeRange{9760, 9760},
+    CodeRange{9762, 9763},
+    CodeRange{9766, 9766},
+    CodeRange{9770, 9770},
+    CodeRange{9774, 9775},
+    CodeRange{9784, 9786},
+    CodeRange{9792, 9792},
+    CodeRange{9794, 9794},
+    CodeRange{9823, 9824},
+    CodeRange{9827, 9827},
+    CodeRange{9829, 9830},
+    CodeRange{9832, 9832},
+    CodeRange{9851, 9851},
+    CodeRange{9854, 9854},
+    CodeRange{9874, 9874},
+    CodeRange{9876, 9879},
+    CodeRange{9881, 9881},
+    CodeRange{9883, 9884},
+    CodeRange{9888, 9888},
+    CodeRange{9895, 9895},
+    CodeRange{9904, 9905},
+    CodeRange{9928, 9928},
+    CodeRange{9935, 9935},
+    CodeRange{9937, 9937},
+    CodeRange{9939, 9939},
+    CodeRange{9961, 9961},
+    CodeRange{9968, 9969},
+    CodeRange{9972, 9972},
+    CodeRange{9975, 9977},
+    CodeRange{9986, 9986},
+    CodeRange{9992, 9993},
+    CodeRange{9996, 9997},
+    CodeRange{9999, 9999},
+    CodeRange{10002, 10002},
+    CodeRange{10004, 10004},
+    CodeRange{10006, 10006},
+    CodeRange{10013, 10013},
+    CodeRange{10017, 10017},
+    CodeRange{10035, 10036},
+    CodeRange{10052, 10052},
+    CodeRange{10055, 10055},
+    CodeRange{10083, 10084},
+    CodeRange{10145, 10145},
+    CodeRange{10548, 10549},
+    CodeRange{11013, 11015},
+    CodeRange{127344, 127345},
+    CodeRange{127358, 127359},
+    CodeRange{127777, 127777},
+    CodeRange{127780, 127788},
+    CodeRange{127798, 127798},
+    CodeRange{127869, 127869},
+    CodeRange{127894, 127895},
+    CodeRange{127897, 127899},
+    CodeRange{127902, 127903},
+    CodeRange{127947, 127950},
+    CodeRange{127956, 127967},
+    CodeRange{127987, 127987},
+    CodeRange{127989, 127989},
+    CodeRange{127991, 127991},
+    CodeRange{128063, 128063},
+    CodeRange{128065, 128065},
+    CodeRange{128253, 128253},
+    CodeRange{128329, 128330},
+    CodeRange{128367, 128368},
+    CodeRange{128371, 128377},
+    CodeRange{128391, 128391},
+    CodeRange{128394, 128397},
+    CodeRange{128400, 128400},
+    CodeRange{128421, 128421},
+    CodeRange{128424, 128424},
+    CodeRange{128433, 128434},
+    CodeRange{128444, 128444},
+    CodeRange{128450, 128452},
+    CodeRange{128465, 128467},
+    CodeRange{128476, 128478},
+    CodeRange{128481, 128481},
+    CodeRange{128483, 128483},
+    CodeRange{128488, 128488},
+    CodeRange{128495, 128495},
+    CodeRange{128499, 128499},
+    CodeRange{128506, 128506},
+    CodeRange{128715, 128715},
+    CodeRange{128717, 128719},
+    CodeRange{128736, 128741},
+    CodeRange{128745, 128745},
+    CodeRange{128752, 128752},
+    CodeRange{128755, 128755},
+  ], code)
+
+# A code point's own width: controls, marks, 200B-200F and tag characters
+# (E0000-E007F) are 0, East Asian Wide and Fullwidth are 2, the rest 1.
 def code_width_by(small: Bool, +code: U32) -> Nat:
   match small:
     case True{}:
@@ -604,18 +857,152 @@ def code_width_by(small: Bool, +code: U32) -> Nat:
         Bool.and(U32.is_ge(code, 127), U32.is_le(code, 159))), 0n, 1n)
     case False{}:
       Bool.pick(Nat, Bool.or(unicode_is_zero_mark(code),
-        Bool.and(U32.is_ge(code, 8203), U32.is_le(code, 8207))), 0n,
+        Bool.or(Bool.and(U32.is_ge(code, 8203), U32.is_le(code, 8207)),
+          Bool.and(U32.is_ge(code, 917504), U32.is_le(code, 917631)))), 0n,
         Bool.pick(Nat, unicode_is_wide(code), 2n, 1n))
 
 def code_width(+code: U32) -> Nat:
   code_width_by(U32.is_lt(code, 768), code)
 
+# What a code point can do in an emoji sequence (UTS #51): start a keycap
+# (#, * and 0-9), be a pictograph, a skin tone, a ZWJ or VS16, or none.
+type CodeClass is Data:
+  PlainCode{}
+  KeycapCode{}
+  PictoCode{}
+  ToneCode{}
+  JoinerCode{}
+  Vs16Code{}
+
+# Where width stands in an emoji sequence: outside one; after an emoji, with
+# the code a skin tone or VS16 applies to, whether it counts 1 so far, and
+# whether a ZWJ may join it; after such a ZWJ; or after a pictograph that a
+# ZWJ joined, which adds nothing.
+type EmojiRun is Data:
+  EmojiNone{}
+  EmojiBase{code: U32, narrow: Bool, join: Bool}
+  EmojiJoiner{}
+  EmojiJoined{code: U32}
+
+type WidthStep is Data:
+  WidthStep{width: Nat, run: EmojiRun}
+
+def keycap_base(+code: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(code, 35), U32.is_eq(code, 42)),
+    Bool.and(U32.is_ge(code, 48), U32.is_le(code, 57)))
+
+# may: whether code is in 203C-3299 or from 1F000, which hold every
+# pictograph from 768 on.
+def picto_class(may: Bool, +code: U32) -> CodeClass:
+  match may:
+    case True{}:
+      Bool.pick(CodeClass, unicode_is_pictographic(code), PictoCode{},
+        PlainCode{})
+    case False{}: PlainCode{}
+
+def code_class_by(small: Bool, +code: U32) -> CodeClass:
+  match small:
+    case True{}:
+      Bool.pick(CodeClass, keycap_base(code), KeycapCode{},
+        Bool.pick(CodeClass, Bool.or(U32.is_eq(code, 169),
+          U32.is_eq(code, 174)), PictoCode{}, PlainCode{}))
+    case False{}:
+      Bool.pick(CodeClass, U32.is_eq(code, 65039), Vs16Code{},
+        Bool.pick(CodeClass, U32.is_eq(code, 8205), JoinerCode{},
+          Bool.pick(CodeClass, Bool.and(U32.is_ge(code, 127995),
+            U32.is_le(code, 127999)), ToneCode{},
+            picto_class(Bool.or(Bool.and(U32.is_ge(code, 8252),
+              U32.is_le(code, 12953)), U32.is_ge(code, 126976)), code))))
+
+def code_class(+code: U32) -> CodeClass:
+  code_class_by(U32.is_lt(code, 768), code)
+
+def picto_alone(+wide: Bool, code: U32) -> WidthStep:
+  WidthStep{Bool.pick(Nat, wide, 2n, 1n),
+    EmojiBase{code, Bool.not(wide), True{}}}
+
+# A pictograph after a ZWJ joins the sequence; any other starts an emoji.
+def picto_step(run: EmojiRun, +code: U32) -> WidthStep:
+  match run:
+    case EmojiNone{}: picto_alone(unicode_is_wide(code), code)
+    case EmojiBase{base, narrow, join}:
+      picto_alone(unicode_is_wide(code), code)
+    case EmojiJoiner{}: WidthStep{0n, EmojiJoined{code}}
+    case EmojiJoined{base}: picto_alone(unicode_is_wide(code), code)
+
+# A skin tone after an emoji that takes one widens it to 2; any other is
+# 2 wide alone, as East Asian Wide.
+def tone_on(takes: Bool, narrow: Bool, join: Bool, code: U32) ->
+    WidthStep:
+  match takes:
+    case True{}:
+      WidthStep{Bool.pick(Nat, narrow, 1n, 0n), EmojiBase{code, False{}, join}}
+    case False{}: WidthStep{2n, EmojiNone{}}
+
+def tone_on_joined(takes: Bool, code: U32) -> WidthStep:
+  match takes:
+    case True{}: WidthStep{0n, EmojiJoined{code}}
+    case False{}: WidthStep{2n, EmojiNone{}}
+
+def tone_step(run: EmojiRun, code: U32) -> WidthStep:
+  match run:
+    case EmojiNone{}: WidthStep{2n, EmojiNone{}}
+    case EmojiBase{base, narrow, join}:
+      tone_on(unicode_takes_tone(base), narrow, join, code)
+    case EmojiJoiner{}: WidthStep{2n, EmojiNone{}}
+    case EmojiJoined{base}: tone_on_joined(unicode_takes_tone(base), code)
+
+# A ZWJ after an emoji that may join, or after a joined pictograph, waits
+# for the next pictograph.
+def joiner_run(run: EmojiRun) -> EmojiRun:
+  match run:
+    case EmojiNone{}: EmojiNone{}
+    case EmojiBase{code, narrow, join}:
+      Bool.pick(EmojiRun, join, EmojiJoiner{}, EmojiNone{})
+    case EmojiJoiner{}: EmojiNone{}
+    case EmojiJoined{code}: EmojiJoiner{}
+
+def vs16_widen(widens: Bool, code: U32, join: Bool) -> WidthStep:
+  match widens:
+    case True{}: WidthStep{1n, EmojiBase{code, False{}, join}}
+    case False{}: WidthStep{0n, EmojiBase{code, True{}, join}}
+
+def vs16_on(narrow: Bool, +code: U32, join: Bool) -> WidthStep:
+  match narrow:
+    case True{}: vs16_widen(unicode_widens_with_vs16(code), code, join)
+    case False{}: WidthStep{0n, EmojiBase{code, False{}, join}}
+
+# VS16 widens a 1-wide emoji with an emoji presentation to 2, once.
+def vs16_step(run: EmojiRun) -> WidthStep:
+  match run:
+    case EmojiNone{}: WidthStep{0n, EmojiNone{}}
+    case EmojiBase{code, narrow, join}: vs16_on(narrow, code, join)
+    case EmojiJoiner{}: WidthStep{0n, EmojiNone{}}
+    case EmojiJoined{code}: WidthStep{0n, EmojiJoined{code}}
+
+def code_step(cls: CodeClass, run: EmojiRun, code: U32) -> WidthStep:
+  match cls:
+    case PlainCode{}: WidthStep{code_width(code), EmojiNone{}}
+    case KeycapCode{}: WidthStep{1n, EmojiBase{code, True{}, False{}}}
+    case PictoCode{}: picto_step(run, code)
+    case ToneCode{}: tone_step(run, code)
+    case JoinerCode{}: WidthStep{0n, joiner_run(run)}
+    case Vs16Code{}: vs16_step(run)
+
+# acc, plus the width of step, the last code point's, and of s after it.
+def width_go(s: String, step: WidthStep, acc: Nat) -> Nat:
+  match s step:
+    case SNil{} WidthStep{w, run}: Nat.add(w, acc)
+    case SCon{head, tail} WidthStep{w, run}:
+      +code = Char.to_u32(head)
+      width_go(tail, code_step(code_class(code), run, code), Nat.add(w, acc))
+
+# Display columns, as Rust's unicode-width 0.2 counts them: each code point's
+# own width, except that an emoji sequence is one cell 2 wide. A pictograph
+# that a ZWJ joins, a skin tone after an emoji that takes one, and tag
+# characters add nothing; VS16 widens a 1-wide emoji to 2.
 def width(s: String) -> Nat:
-  match s:
-    case SNil{}:
-      0n
-    case SCon{head, tail}:
-      Nat.add(code_width(Char.to_u32(head)), width(tail))
+  width_go(s, WidthStep{0n, EmojiNone{}}, 0n)
 
 def leading_indent(s: String) -> String:
   match s:
@@ -1833,6 +2220,73 @@ def arg_problems(parsed: Usage, +usage: String, help: String,
         arg_alias_issues(aliases, at, SeenArg{id, short, long} <> seen,
           version))
 
+def has_external(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case External{} <> tail: True{}
+    case head <> tail: has_external(tail)
+
+def has_sub_optional(items: List<&2, Item>) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case SubOptional{} <> tail: True{}
+    case head <> tail: has_sub_optional(tail)
+
+# A command that cannot complete without a subcommand (§8.4).
+def needs_sub(+items: List<&2, Item>) -> Bool:
+  Bool.and(has_sub_item(items),
+    Bool.and(Bool.not(has_sub_optional(items)),
+      Bool.not(has_external(items))))
+
+# Each required() among attrs, as Misplaced at at.
+def required_misplaced(attrs: List<&2, Item>, +at: String) ->
+    List<&2, Problem>:
+  match attrs:
+    case Nil{}: Nil{}
+    case Required{} <> tail:
+      Misplaced{at, "required"} <> required_misplaced(tail, at)
+    case head <> tail: required_misplaced(tail, at)
+
+def dead_required_option(option: Bool, attrs: List<&2, Item>, +at: String) ->
+    List<&2, Problem>:
+  match option:
+    case True{}: required_misplaced(attrs, at)
+    case False{}: Nil{}
+
+# An option's required() that descent drops; a flag's or a positional's is
+# already misplaced by its kind.
+def dead_required_kind(parsed: Usage, attrs: List<&2, Item>, +at: String) ->
+    List<&2, Problem>:
+  match parsed:
+    case Parsed{derived, short, long, kind}:
+      dead_required_option(kind_required_allowed(kind), attrs, at)
+    case Invalid{col}: Nil{}
+
+def dead_required_arg(kept: Bool, usage: String, attrs: List<&2, Item>,
+    +at: String) -> List<&2, Problem>:
+  match kept:
+    case True{}: Nil{}
+    case False{}: dead_required_kind(parse_usage(usage), attrs, at)
+
+def dead_required_items(items: List<&2, Item>, +at: String) ->
+    List<&2, Problem>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, +attrs} <> tail:
+      List.append(&2, Problem,
+        dead_required_arg(Bool.or(has_global(attrs),
+          Bool.not(has_required(attrs))), usage, attrs, at),
+        dead_required_items(tail, at))
+    case head <> tail: dead_required_items(tail, at)
+
+# A command that needs a subcommand passes down only its global options'
+# values (§8.4), so another option's required() can never be met.
+def dead_required(dead: Bool, items: List<&2, Item>, +at: String) ->
+    List<&2, Problem>:
+  match dead:
+    case True{}: dead_required_items(items, at)
+    case False{}: Nil{}
+
 # has_pos: whether items has a positional.
 def command_body_issues(+at: String, name: String, about: String,
     +items: List<&2, Item>, has_pos: Bool) -> List<&2, Problem>:
@@ -1842,6 +2296,7 @@ def command_body_issues(+at: String, name: String, about: String,
     when_problem(Bool.and(has_pos, has_sub_item(items)), Mixed{at}),
     missing_refs(scope_group_rules(items), scope_groups(items), at),
     missing_refs(scope_groups(items), scope_group_rules(items), at),
+    dead_required(needs_sub(items), items, at),
   ])
 
 def sub_name_issues(+at: String, +name: String,
@@ -2189,18 +2644,6 @@ def find_sub(items: List<&2, Item>, +query: String) ->
     Maybe<&2, SubFound>:
   find_sub_go(items, query, None{})
 
-def has_external(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case External{} <> tail: True{}
-    case head <> tail: has_external(tail)
-
-def has_sub_optional(items: List<&2, Item>) -> Bool:
-  match items:
-    case Nil{}: False{}
-    case SubOptional{} <> tail: True{}
-    case head <> tail: has_sub_optional(tail)
-
 def positional_items(items: List<&2, Item>) -> List<&2, Item>:
   match items:
     case Nil{}: Nil{}
@@ -2238,12 +2681,6 @@ def scope_next_slot(scope: Scope, count: Nat) -> Maybe<&2, ArgInfo>:
     case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
         external, needs_sub, version, digit_short, inherit}}:
       next_slot(slots, count)
-
-# A command that cannot complete without a subcommand (§8.4).
-def needs_sub(+items: List<&2, Item>) -> Bool:
-  Bool.and(has_sub_item(items),
-    Bool.and(Bool.not(has_sub_optional(items)),
-      Bool.not(has_external(items))))
 
 # name as a key of info; only info's --no- long clears the flag, as in
 # option_matches.
@@ -3102,11 +3539,12 @@ def gather_arg(events: List<&2, ScanEvent>, info: ArgInfo) -> Gather:
     case ArgInfo{id, usage, short, long, kind, attrs}:
       gather_events(events, id, kind, Gather{False{}, [], 0n})
 
-def find_env(attrs: List<&2, Item>) -> Maybe<&2, String>:
+# Each env() name, in order.
+def find_envs(attrs: List<&2, Item>) -> List<&2, String>:
   match attrs:
-    case Nil{}: None{}
-    case AttrEnv{name} <> tail: Some{name}
-    case head <> tail: find_env(tail)
+    case Nil{}: Nil{}
+    case AttrEnv{name} <> tail: name <> find_envs(tail)
+    case head <> tail: find_envs(tail)
 
 def env_present(name: String, found: Maybe<&2, String>) ->
     Maybe<&2, EnvValue>:
@@ -3116,12 +3554,24 @@ def env_present(name: String, found: Maybe<&2, String>) ->
       Bool.pick(Maybe<&2, EnvValue>, String.is_empty(value),
         None{}, Some{EnvValue{name, value}})
 
-def host_env(found: Maybe<&2, String>, h: Host) ->
-    Maybe<&2, EnvValue>:
+# found, or else name's value in vars if it is set and not empty.
+def env_next(found: Maybe<&2, EnvValue>, +name: String,
+    vars: List<&2, Var>) -> Maybe<&2, EnvValue>:
   match found:
-    case None{}: None{}
-    case Some{+name}:
-      env_present(name, host_value(h, name))
+    case Some{env}: Some{env}
+    case None{}: env_present(name, var_value(vars, name))
+
+# found, or else the first of names that is set and not empty in vars.
+def env_first(names: List<&2, String>, found: Maybe<&2, EnvValue>,
+    +vars: List<&2, Var>) -> Maybe<&2, EnvValue>:
+  match names:
+    case Nil{}: found
+    case name <> tail: env_first(tail, env_next(found, name, vars), vars)
+
+def host_env(h: Host, names: List<&2, String>) -> Maybe<&2, EnvValue>:
+  match h:
+    case Host{width, vars, out_tty, err_tty}:
+      env_first(names, None{}, vars)
 
 def env_bool_true(value: String) -> Bool:
   List.contains(~String, ~String.eq,
@@ -3171,10 +3621,10 @@ def resolve_env_default(found: Maybe<&2, EnvValue>,
     case Some{env}: resolve_env(info, env)
     case None{}: resolve_default(info_default(info), info)
 
-def info_env(info: ArgInfo) -> Maybe<&2, String>:
+def info_envs(info: ArgInfo) -> List<&2, String>:
   match info:
     case ArgInfo{id, usage, short, long, kind, attrs}:
-      find_env(attrs)
+      find_envs(attrs)
 
 def resolve_argv_gather(gather: Gather, +info: ArgInfo,
     h: Host) -> FieldBuild:
@@ -3185,7 +3635,7 @@ def resolve_argv_gather(gather: Gather, +info: ArgInfo,
           Built{[Field{id, apply_delim(find_delim(attrs),
             List.reverse(&2, String, values)), Argv{}}]}
     case Gather{False{}, values, count}:
-      resolve_env_default(host_env(info_env(info), h), info)
+      resolve_env_default(host_env(h, info_envs(info)), info)
 
 def resolve_option(+info: ArgInfo,
     events: List<&2, ScanEvent>, h: Host) -> FieldBuild:
@@ -3255,7 +3705,7 @@ def resolve_pos(+info: ArgInfo,
     +values: List<&2, String>, h: Host) -> FieldBuild:
   match values:
     case Nil{}:
-      resolve_env_default(host_env(info_env(info), h), info)
+      resolve_env_default(host_env(h, info_envs(info)), info)
     case head <> tail:
       +attrs = info_attrs(info)
       +split = apply_delim(find_delim(attrs), values)
@@ -4633,7 +5083,7 @@ def list_or_none(found: Maybe<&2, List<&2, String>>) -> List<&2, String>:
 def right_text(long: Bool, help: String, +attrs: List<&2, Item>) -> String:
   join_filled([
     shown_text(long, help),
-    tag("env", maybe_list(find_env(attrs))),
+    tag("env", find_envs(attrs)),
     tag("default", maybe_list(find_default(attrs))),
     tag("possible values", list_or_none(find_one_of(attrs))),
     tag("aliases", find_aliases(attrs)),
@@ -6780,12 +7230,24 @@ def roff_arg(pos: Bool, +usage: String, attrs: List<&2, Item>) -> String:
     case True{}: roff_positional(usage)
     case False{}: roff_option(arg_display(arg_info(usage, attrs)))
 
-def roff_env(hidden: Bool, found: Maybe<&2, String>, +usage: String,
+def roff_env_names(names: List<&2, String>) -> List<&2, String>:
+  match names:
+    case Nil{}: Nil{}
+    case name <> tail: roff_bold(name) <> roff_env_names(tail)
+
+# How a variable after the first is read, if there is one.
+def roff_env_order(rest: List<&2, String>) -> String:
+  match rest:
+    case Nil{}: ""
+    case head <> tail: "; the first that is set wins"
+
+def roff_env(hidden: Bool, names: List<&2, String>, +usage: String,
     attrs: List<&2, Item>) -> List<&2, String>:
-  match hidden found:
-    case False{} Some{name}:
-      [".TP", roff_bold(name), String.concat(["Used for ",
-        roff_arg(arg_pos(usage), usage, attrs), " when it is not given"])]
+  match hidden names:
+    case False{} name <> +tail:
+      [".TP", String.join(roff_env_names(name <> tail), ", "),
+        String.concat(["Used for ", roff_arg(arg_pos(usage), usage, attrs),
+          " when it is not given", roff_env_order(tail)])]
     case _ _: []
 
 def roff_envs(items: List<&2, Item>) -> List<&2, String>:
@@ -6793,7 +7255,7 @@ def roff_envs(items: List<&2, Item>) -> List<&2, String>:
     case Nil{}: Nil{}
     case Arg{usage, help, +attrs} <> tail:
       List.append(&2, String,
-        roff_env(has_hidden(attrs), find_env(attrs), usage, attrs),
+        roff_env(has_hidden(attrs), find_envs(attrs), usage, attrs),
         roff_envs(tail))
     case head <> tail: roff_envs(tail)
 
@@ -7062,7 +7524,7 @@ def env_names(items: List<&2, Item>) -> List<&2, String>:
   match items:
     case Nil{}: Nil{}
     case Arg{usage, help, attrs} <> tail:
-      List.append(&2, String, maybe_list(find_env(attrs)), env_names(tail))
+      List.append(&2, String, find_envs(attrs), env_names(tail))
     case Sub{name, about, children} <> tail:
       List.append(&2, String, env_names(children), env_names(tail))
     case head <> tail: env_names(tail)

@@ -94,15 +94,19 @@ Use argument attributes to add types, sources, and constraints. For example,
 `Cli.as_u32()` checks a value while parsing; `Cli.env("PORT")` supplies an
 environment fallback; `Cli.default("8080")` supplies a default; and
 `Cli.one_of(["text", "json"])` limits accepted values. Argument values come
-from argv first, then a nonempty environment value, then a default. Relations
-such as `Cli.conflicts`, `Cli.requires`, `Cli.exclusive`, and
-`Cli.need_one` apply to values supplied by argv or the environment.
+from argv first, then a nonempty environment value, then a default. Repeat
+`Cli.env` to name several variables: the first that is set and not empty
+supplies the value. Relations such as `Cli.conflicts`, `Cli.requires`,
+`Cli.exclusive`, and `Cli.need_one` apply to values supplied by argv or the
+environment.
 
 Options may appear between operands. Short flags cluster (`-abc`), options
 accept attached values (`-ofile`, `--output=file`), and a repeated
 single-value option uses its last occurrence. Names match exactly;
 misspellings receive suggestions. Add `Cli.global()` to recognize an option
 in descendant commands. Commands with subcommands do not also take positionals.
+A command that needs a subcommand passes only its global options down, so
+lint rejects `Cli.required()` on its other options.
 
 Read values by id in a `do Cli.Dec<A>:` block. Use `Cli.flag` for flags,
 `Cli.count` for count flags, and `Cli.str`, `Cli.nat`, `Cli.u32`,
@@ -203,9 +207,12 @@ stdout and usage errors to stderr.
   these as app options or values on those targets.
 - The app module can be imported by laws. Keep the executable shell out of
   their import graph: terminal probing and exit are host effects.
-- Display width counts Unicode code points. Emoji joined with U+200D and
-  flags can align imperfectly. Invalid UTF-8 in argv becomes U+FFFD, so
-  raw-byte filenames cannot be passed unchanged.
+- Display width adds each code point's East Asian Width, except that an
+  emoji sequence (joined with U+200D, with a skin tone or VS16, a keycap, a
+  flag or a tag sequence) counts as 2 columns, as Rust's unicode-width 0.2
+  counts it. A terminal that draws a sequence differently can still
+  misalign it. Invalid UTF-8 in argv becomes U+FFFD, so raw-byte filenames
+  cannot be passed unchanged.
 
 CI runs on macOS arm64 and Ubuntu 24.04 x86-64. Native builds need clang;
 compiled JavaScript uses Bun 1.1 or newer. Windows is outside the 1.x support
