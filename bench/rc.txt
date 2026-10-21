@@ -288,3 +288,20 @@
 #   174.6 ms, all cores 41.8 -> 42.6 ms, peak RSS 10.7 -> 10.9 MB, stdout
 #   identical; on argbench's build with 10000 -I pairs and 10000 inputs,
 #   threads=1 59.9 -> 43.9 ms, all cores 60.7 -> 43.6 ms.
+#
+# The next positional slot read for its traits instead of copied, against
+# main's build (404323d); bench/main.bend and main.bend give the same
+# per-def diff, and the static total 5672 -> 5637 (main.bend 5785 ->
+# 5750), with no def rising:
+# FID_CLI_SCAN_HYPHEN_CANDIDATE 13 0 0 -> 1 0 0 and FID_CLI_SCAN_OPEN
+#   89 15 20 -> 76 15 20: the slot's rest(), hyphen() and as_f32() come
+#   from a walk that only reads the scope, so the scope is lent to it, not
+#   kept; the gone FID_CLI_NEXT_SLOT 0 2 0 and FID_CLI_SCOPE_NEXT_SLOT
+#   0 0 0 built a copy of the slot's ArgInfo. They run once per operand and
+#   once per token that starts with "-". FID_CLI_SCOPE_ANY_OPTION_KNOWN
+#   7 0 0 -> 1 0 0 and FID_CLI_SCOPE_OPTION_KNOWN 0 2 0 -> 0 0 0: a key's
+#   rank answers whether the scope knows an option, without copying the
+#   key. tools/bench.sh: threads=1 175.2 -> 173.6 ms, all cores 41.9 ->
+#   41.8 ms, peak RSS 10.8 -> 10.7 MB, stdout identical; on argbench's
+#   build with 10000 -I pairs and 10000 inputs, threads=1 43.5 -> 42.6 ms,
+#   all cores 43.6 -> 42.8 ms.

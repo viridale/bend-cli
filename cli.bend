@@ -2663,6 +2663,11 @@ def key_lookup(+keys: List<&2, OptKey>, +query: String) ->
   rank = key_rank(keys, query, 0n, hit)
   key_at(rank, keys)
 
+# Whether keys hold one named query, read without copying the key.
+def key_known(+keys: List<&2, OptKey>, +query: String) -> Bool:
+  hit = head_named(keys, query)
+  Maybe.is_some(&2, Nat, key_rank(keys, query, 0n, hit))
+
 # A scope's own args answer before its globals, as in find_option.
 def find_option_scope(scope: Scope, query: String) ->
     Maybe<&2, OptFound>:
@@ -2733,21 +2738,6 @@ def positional_can_take(items: List<&2, Item>, count: Nat) -> Bool:
   +slots = positional_items(items)
   Bool.or(Nat.is_lt(count, List.length(&2, Item, slots)),
     has_variadic_pos(slots))
-
-def next_slot(slots: List<&2, ArgInfo>, +count: Nat) ->
-    Maybe<&2, ArgInfo>:
-  match slots:
-    case Nil{}: None{}
-    case +info <> tail:
-      Bool.pick(Maybe<&2, ArgInfo>,
-        Bool.or(Nat.is_eq(count, 0n), kind_variadic_pos(info_kind(info))),
-        Some{info}, next_slot(tail, Nat.sub(count, 1n)))
-
-def scope_next_slot(scope: Scope, count: Nat) -> Maybe<&2, ArgInfo>:
-  match scope:
-    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
-        external, needs_sub, version, digit_short, inherit}}:
-      next_slot(slots, count)
 
 # name as a key of info; only info's --no- long clears the flag, as in
 # option_matches.
@@ -2894,29 +2884,48 @@ def has_hyphen(items: List<&2, Item>) -> Bool:
     case Hyphen{} <> tail: True{}
     case head <> tail: has_hyphen(tail)
 
-def slot_rest(found: Maybe<&2, ArgInfo>) -> Bool:
-  match found:
-    case None{}: False{}
-    case Some{ArgInfo{id, usage, short, long, kind, attrs}}:
-      has_rest(attrs)
-
-def slot_hyphen(found: Maybe<&2, ArgInfo>) -> Bool:
-  match found:
-    case None{}: False{}
-    case Some{ArgInfo{id, usage, short, long, kind, attrs}}:
-      has_hyphen(attrs)
-
 def has_as_f32(items: List<&2, Item>) -> Bool:
   match items:
     case Nil{}: False{}
     case As{TF32{}} <> tail: True{}
     case head <> tail: has_as_f32(tail)
 
-def slot_f32(found: Maybe<&2, ArgInfo>) -> Bool:
-  match found:
-    case None{}: False{}
-    case Some{ArgInfo{id, usage, short, long, kind, attrs}}:
-      has_as_f32(attrs)
+# What the slot that takes the next operand allows: rest(), values that
+# start with "-", and as_f32().
+type SlotTraits is Data:
+  SlotTraits{rest: Bool, hyphen: Bool, f32: Bool}
+
+# Whether slots' first slot takes the operand after count others: it is
+# the count'th, or variadic.
+def slot_here(slots: List<&2, ArgInfo>, count: Nat) -> Bool:
+  match slots:
+    case Nil{}: False{}
+    case ArgInfo{id, usage, short, long, kind, attrs} <> tail:
+      Bool.or(Nat.is_eq(count, 0n), kind_variadic_pos(kind))
+
+# The traits of the first of slots that takes the operand after count
+# others, where here says whether slots' head does. It only reads slots:
+# a walk that returned the slot would copy each of its fields.
+def slot_traits_go(slots: List<&2, ArgInfo>, count: Nat, here: Bool) ->
+    SlotTraits:
+  match slots here:
+    case Nil{} _: SlotTraits{False{}, False{}, False{}}
+    case ArgInfo{id, usage, short, long, kind, +attrs} <> tail True{}:
+      SlotTraits{has_rest(attrs), has_hyphen(attrs), has_as_f32(attrs)}
+    case info <> +tail False{}:
+      +rest = Nat.sub(count, 1n)
+      next = slot_here(tail, rest)
+      slot_traits_go(tail, rest, next)
+
+def scope_slot_traits(scope: Scope, +count: Nat) -> SlotTraits:
+  match scope:
+    case Scope{path, Spec{keys, args, +slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      slot_traits_go(slots, count, slot_here(slots, count))
+
+def traits_rest(traits: SlotTraits) -> Bool:
+  match traits:
+    case SlotTraits{rest, hyphen, f32}: rest
 
 def is_negative_number(+s: String) -> Bool:
   Bool.and(String.starts_with(s, "-"), valid_f32(s))
@@ -2938,8 +2947,10 @@ def first_option_name(+token: String) -> String:
     before_equal(token), String.take(token, 2n))
 
 def scope_option_known(scope: Scope, token: String) -> Bool:
-  Maybe.is_some(&2, OptFound,
-    find_option_scope(scope, first_option_name(token)))
+  match scope:
+    case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
+        external, needs_sub, version, digit_short, inherit}}:
+      key_known(keys, first_option_name(token))
 
 def scope_builtin_known(scope: Scope, +token: String) -> Bool:
   match scope:
@@ -2963,7 +2974,7 @@ def scan_operand_ok(state: ScanState, token: String) -> ScanState:
         external, issue}:
       ScanState{scope, Operand{token} <> events,
         Bool.or(resting,
-          slot_rest(scope_next_slot(scope, positional_count))),
+          traits_rest(scope_slot_traits(scope, positional_count))),
         Nat.add(positional_count, 1n), external, issue}
 
 def scan_operand_case(allowed: Bool, state: ScanState,
@@ -3485,13 +3496,18 @@ def f32_operand(f32: Bool, scope: Scope, token: String) -> Bool:
       Bool.and(is_negative_number(token), Bool.not(scope_digit_short(scope)))
     case False{}: False{}
 
+def slot_candidate(traits: SlotTraits, +scope: Scope, +token: String) ->
+    Bool:
+  match traits:
+    case SlotTraits{rest, hyphen, f32}:
+      Bool.or(hyphen_operand(hyphen, scope, token),
+        f32_operand(f32, scope, token))
+
 def scan_hyphen_candidate(state: ScanState, +token: String) -> Bool:
   match state:
     case ScanState{+scope, events, resting, positional_count,
         external, issue}:
-      +slot = scope_next_slot(scope, positional_count)
-      Bool.or(hyphen_operand(slot_hyphen(slot), scope, token),
-        f32_operand(slot_f32(slot), scope, token))
+      slot_candidate(scope_slot_traits(scope, positional_count), scope, token)
 
 def scan_dash_case(operand: Bool, token: String, state: ScanState) -> Mode:
   match operand:
