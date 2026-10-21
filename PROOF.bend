@@ -2701,6 +2701,9 @@ def Laws.g_pos_variadic():
 def Laws.g_pos_cases():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))
 
+def Laws.g_pos_variadic_dash():
+  ({==}, ({==}, {==}))
+
 def Laws.g_sub_descent():
   ({==}, ({==}, {==}))
 
@@ -15000,6 +15003,9 @@ def Laws.g_pos_variadic_eval():
 
 def Laws.g_pos_cases_eval():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))
+
+def Laws.g_pos_variadic_dash_eval():
+  ({==}, ({==}, {==}))
 
 def Laws.g_sub_descent_eval():
   ({==}, ({==}, {==}))

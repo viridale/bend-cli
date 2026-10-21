@@ -693,6 +693,31 @@ law g_pos_cases:
   ]), host(), ["-h"]) ==
     Cli.HelpRequested{[], False{}} : Cli.ParseResult}
 
+def dash_operands() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("-v", "Verbose", []),
+    Cli.arg("<X>...", "Operands", [Cli.hyphen()]),
+  ])
+
+def f32_operands() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("<N>...", "Numbers", [Cli.as_f32()]),
+  ])
+
+# G-POS: a variadic slot's later values take hyphen() and as_f32() as its
+# first does; an option the scope knows stays an option, and an f32 slot
+# takes no other dash token.
+law g_pos_variadic_dash:
+  {Cli.parse(dash_operands(), host(), ["a", "-x", "-v", "-y"]) == ok([
+    field("v", ["true"], Cli.Argv{}),
+    field("x", ["a", "-x", "-y"], Cli.Argv{}),
+  ]) : Cli.ParseResult} &
+  {Cli.parse(f32_operands(), host(), ["1", "-5", "-6.5"]) == ok([
+    field("n", ["1", "-5", "-6.5"], Cli.Argv{}),
+  ]) : Cli.ParseResult} &
+  {Cli.parse(f32_operands(), host(), ["1", "-5", "-x"]) ==
+    Cli.Rejected{[], Cli.E01{"-x"}} : Cli.ParseResult}
+
 def sub_tool() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
     Cli.arg("--root", "Root only", []),
@@ -3466,6 +3491,21 @@ law g_pos_cases_eval:
       "Options:",
       "  -h, --help  Print help",
     ]), ""} : Cli.Step<Parsed>}
+
+law g_pos_variadic_dash_eval:
+  {ran(dash_operands(), host(), ["a", "-x", "-v", "-y"]) ==
+    went([
+      field("v", ["true"], Cli.Argv{}),
+      field("x", ["a", "-x", "-y"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(f32_operands(), host(), ["1", "-5", "-6.5"]) ==
+    went([
+      field("n", ["1", "-5", "-6.5"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(f32_operands(), host(), ["1", "-5", "-x"]) ==
+    failed(Parsed, "unexpected argument '-x' found",
+      ["to pass '-x' as a value, use '-- -x'"], "tool <N>...")
+    : Cli.Step<Parsed>}
 
 law g_sub_descent_eval:
   {ran(sub_tool(), host(), ["-g", "alpha", "-g", "--child"]) ==
