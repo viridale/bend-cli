@@ -1221,6 +1221,103 @@ law g_rel_defaults:
     Cli.Rejected{[], Cli.E08{"--a", "--b <B>"}}
     : Cli.ParseResult}
 
+# Global --json and --yaml form fmt, which the root makes exclusive and needs
+# one of before it declares the global --out. run and deep below it declare
+# no rules; conv adds --toml to fmt and needs one of fmt itself.
+def fmt_tool() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--json", "JSON output", [Cli.global(), Cli.group("fmt")]),
+    Cli.arg("--yaml", "YAML output", [Cli.global(), Cli.group("fmt")]),
+    Cli.exclusive("fmt"),
+    Cli.need_one("fmt"),
+    Cli.arg("--out <X>", "Output", [Cli.global(), Cli.required()]),
+    Cli.sub("run", "Run it", [
+      Cli.sub("deep", "Go deeper", []),
+      Cli.sub_optional(),
+    ]),
+    Cli.sub("conv", "Convert", [
+      Cli.arg("--toml", "TOML output", [Cli.group("fmt")]),
+      Cli.need_one("fmt"),
+    ]),
+    Cli.sub_optional(),
+  ])
+
+# G-REL: a command's exclusive(g) and need_one(g) hold in every subcommand
+# below it when every arg the command puts in g is global(), over g's
+# members in that subcommand's scope, as E06 and E07 report them there. E06
+# lists what the command passes down in the order the command declares it,
+# before the subcommand's own items, and a group once.
+law g_rel_global_groups:
+  {Cli.parse(fmt_tool(), host(), ["--out", "x", "--json", "--yaml", "run"]) ==
+    Cli.Rejected{["run"], Cli.E07{"--yaml", "--json"}} : Cli.ParseResult} &
+  {Cli.parse(fmt_tool(), host(), ["--out", "x", "run"]) ==
+    Cli.Rejected{["run"], Cli.E06{["<--json|--yaml>"]}} : Cli.ParseResult} &
+  {Cli.parse(fmt_tool(), host(), ["run", "deep"]) ==
+    Cli.Rejected{["run", "deep"], Cli.E06{["<--json|--yaml>", "--out <X>"]}}
+    : Cli.ParseResult} &
+  {Cli.parse(fmt_tool(), host(),
+    ["--json", "run", "deep", "--yaml", "--out", "x"]) ==
+    Cli.Rejected{["run", "deep"], Cli.E07{"--yaml", "--json"}}
+    : Cli.ParseResult} &
+  {Cli.parse(fmt_tool(), host(), ["run", "--yaml", "--out", "x"]) ==
+    Cli.Accepted{["run"], [
+      field("yaml", ["true"], Cli.Argv{}),
+      field("out", ["x"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult} &
+  {Cli.parse(fmt_tool(), host(), ["--out", "x", "conv"]) ==
+    Cli.Rejected{["conv"], Cli.E06{["<--json|--yaml|--toml>"]}}
+    : Cli.ParseResult} &
+  {Cli.parse(fmt_tool(), host(), ["--out", "x", "--json", "conv", "--toml"])
+    == Cli.Rejected{["conv"], Cli.E07{"--toml", "--json"}}
+    : Cli.ParseResult}
+
+# pick has only the root's own args, and run reuses the name for its own;
+# mix has a global member and a local one; glob has only a global one, and
+# run adds a local one and needs one of glob after pick.
+def group_scopes() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--a", "A", [Cli.group("pick")]),
+    Cli.arg("--b", "B", [Cli.group("pick")]),
+    Cli.arg("--g", "G", [Cli.global(), Cli.group("mix")]),
+    Cli.arg("--l", "L", [Cli.group("mix")]),
+    Cli.arg("--q", "Q", [Cli.global(), Cli.group("glob")]),
+    Cli.exclusive("pick"),
+    Cli.need_one("pick"),
+    Cli.need_one("mix"),
+    Cli.need_one("glob"),
+    Cli.sub("run", "Run it", [
+      Cli.arg("--c", "C", [Cli.group("pick")]),
+      Cli.arg("--d", "D", [Cli.group("pick")]),
+      Cli.arg("--r", "R", [Cli.group("glob")]),
+      Cli.need_one("pick"),
+      Cli.need_one("glob"),
+    ]),
+    Cli.sub("other", "Other", []),
+    Cli.sub_optional(),
+  ])
+
+# G-REL: a rule stays at its command when the command puts a non-global arg
+# in its group: a group of local args, even where a subcommand reuses its
+# name, and a group that mixes global and local args. A carried group that a
+# subcommand also needs one of stays where the command declares it.
+law g_rel_global_groups_scope:
+  {Cli.parse(group_scopes(), host(), ["--q", "run", "--c", "--d"]) ==
+    Cli.Accepted{["run"], [
+      field("q", ["true"], Cli.Argv{}),
+      field("c", ["true"], Cli.Argv{}),
+      field("d", ["true"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult} &
+  {Cli.parse(group_scopes(), host(), ["other"]) ==
+    Cli.Rejected{["other"], Cli.E06{["<--q>"]}} : Cli.ParseResult} &
+  {Cli.parse(group_scopes(), host(), ["run"]) ==
+    Cli.Rejected{["run"], Cli.E06{["<--q|--r>", "<--c|--d>"]}}
+    : Cli.ParseResult} &
+  {Cli.parse(group_scopes(), host(), ["--l", "--q", "run", "--c"]) ==
+    Cli.Accepted{["run"], [
+      field("q", ["true"], Cli.Argv{}),
+      field("c", ["true"], Cli.Argv{}),
+    ], None{}} : Cli.ParseResult}
+
 # A decoder's Bug message, if it raises one.
 def bug_of(-A: Type, d: Cli.Dec(A)) -> Maybe<&2, String>:
   match d:
@@ -2569,6 +2666,36 @@ law g_help_usage:
     "  -h, --help  Print help",
   ]) : String}
 
+# G-HELP: a subcommand's usage shows each need_one group it inherits, before
+# its own, as E06 writes them, and a group it also needs one of once, among
+# those it inherits; the rules list no options of their own.
+law g_help_global_groups:
+  {Cli.usage(fmt_tool(), ["run"])
+    == "tool run [OPTIONS] --out <X> <--json|--yaml> [COMMAND]" : String} &
+  {Cli.usage(fmt_tool(), ["run", "deep"])
+    == "tool run deep [OPTIONS] --out <X> <--json|--yaml>" : String} &
+  {Cli.usage(fmt_tool(), ["conv"])
+    == "tool conv [OPTIONS] --out <X> <--json|--yaml|--toml>" : String} &
+  {Cli.usage(group_scopes(), ["run"])
+    == "tool run [OPTIONS] <--q|--r> <--c|--d>" : String} &
+  {Cli.usage(group_scopes(), ["other"])
+    == "tool other [OPTIONS] <--q>" : String} &
+  {Cli.help(fmt_tool(), ["run"], False{}, host()) == page([
+    "Run it",
+    "",
+    "Usage: tool run [OPTIONS] --out <X> <--json|--yaml> [COMMAND]",
+    "",
+    "Commands:",
+    "  deep           Go deeper",
+    "  help           Print this message or the help of the given subcommand(s)",
+    "",
+    "Options:",
+    "      --json     JSON output",
+    "      --yaml     YAML output",
+    "      --out <X>  Output",
+    "  -h, --help     Print help",
+  ]) : String}
+
 # G-HELP: help and version go to stdout with exit 0: -h the summary page,
 # --help and `help add` the full page, and the first of help and version wins
 # (V1, V2). Empty argv that the root rejects shows the summary page on stderr
@@ -3794,6 +3921,27 @@ law g_rel_defaults_eval:
   ]), host(), ["--a"]) ==
     failed(Parsed, "the argument '--a' requires '--b <B>'",
       [], "tool [OPTIONS]") : Cli.Step<Parsed>}
+
+law g_rel_global_groups_eval:
+  {ran(fmt_tool(), host(), ["--out", "x", "run"]) ==
+    failed(Parsed,
+      "the following required arguments were not provided:\n  <--json|--yaml>",
+      [], "tool run [OPTIONS] --out <X> <--json|--yaml> [COMMAND]")
+    : Cli.Step<Parsed>} &
+  {ran(fmt_tool(), host(), ["--out", "x", "--json", "run", "--yaml"]) ==
+    failed(Parsed, "the argument '--yaml' cannot be used with '--json'",
+      [], "tool run [OPTIONS] --out <X> <--json|--yaml> [COMMAND]")
+    : Cli.Step<Parsed>} &
+  {ran(fmt_tool(), host(), ["--out", "x", "conv"]) ==
+    failed(Parsed,
+      "the following required arguments were not provided:\n  <--json|--yaml|--toml>",
+      [], "tool conv [OPTIONS] --out <X> <--json|--yaml|--toml>")
+    : Cli.Step<Parsed>} &
+  {ran(fmt_tool(), host(), ["run", "deep", "--yaml", "--out", "x"]) ==
+    went_to(["run", "deep"], [
+      field("yaml", ["true"], Cli.Argv{}),
+      field("out", ["x"], Cli.Argv{}),
+    ], None{}) : Cli.Step<Parsed>}
 
 # G-ERR E12: a decoder's Usage fault is an error at the matched scope, exit
 # 2, colored by stderr's decision; Bug prints `bug: <msg>` uncolored, exit

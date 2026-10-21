@@ -251,3 +251,25 @@
 #   0 1 0 takes only on a ZWJ after an emoji (joiner_run), not per code
 #   point. tools/bench.sh: threads=1 231.1 -> 231.6 ms, all cores 48.2 ->
 #   48.4 ms, peak RSS 10.7 MB both, stdout identical.
+#
+# A command's exclusive and need_one rules over global args carried into its
+# subcommands, against main's build (616b077), the first both built and
+# counted with Bend 2.0.38; bench/main.bend and main.bend give the same
+# per-def diff, and the static total 5657 -> 5703 (main.bend 5770 -> 5816).
+# bench's spec declares no such rule, so the new arms below do not run there:
+# FID_CLI_GLOBAL_GO 7 4 11 (new) is global_items' walk, which leaves
+#   FID_CLI_GLOBAL_ITEMS 1 2 5 -> 1 0 0; its Arg arm counts as that walk
+#   did, and each of its Exclusive and NeedOne arms keeps the name, the
+#   command's items and the rest and rebuilds the rule it keeps (3 1 3).
+#   The new FID_CLI_GROUP_GLOBAL 2 2 0 walks the items once per rule.
+# FID_CLI_GLOBAL_SPEC 6 3 10 -> 12 5 18: the same two arms over parsed
+#   items (3 1 4 each, one seal more for SpecOther), once per scope the scan
+#   enters; FID_CLI_SPEC_NODE 7 0 0 -> 8 0 0 keeps items for them.
+# FID_CLI_MISSING_ITEMS 3 4 0 -> 6 4 2 and the new FID_CLI_MISSING_ONCE
+#   2 0 2, into which the gone FID_CLI_MISSING_GROUP 2 0 2 is inlined: the
+#   NeedOne arm keeps the group's name and the names listed so far and
+#   conses the name onto them, so E06 lists a group once; the SpecArg arm
+#   is unchanged. FID_CLI_GROUP_ELEMS 1 2 4 -> 4 2 2 and the new
+#   FID_CLI_GROUP_ELEM 0 0 4 do the same for the usage line, once per
+#   need_one rule in scope. tools/bench.sh: threads=1 177.3 -> 178.1 ms,
+#   all cores 43.0 -> 42.8 ms, peak RSS 10.7 -> 10.8 MB, stdout identical.

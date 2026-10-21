@@ -107,11 +107,15 @@ options accept attached values (`-ofile`, `--output=file`), and a repeated
 single-value option retains its last occurrence. Option and subcommand names
 match exactly; close misspellings receive suggestions.
 
-Add `Cli.global()` to propagate an option to descendant subcommands. A command
-cannot declare both subcommands and positionals. When a command requires a
-subcommand (the default unless `Cli.sub_optional()` is set), only its
-`Cli.global()` options remain in scope for the subcommand, so lint rejects
-`Cli.required()` on its local options.
+Add `Cli.global()` to propagate an option to descendant subcommands. A
+command's `Cli.exclusive` and `Cli.need_one` rules propagate as well when every
+argument the command places in the group is global; in a subcommand, they also
+cover that subcommand's own arguments in the group. A rule over a group with a
+local argument applies only to its own command. A command cannot declare both
+subcommands and positionals. When a command requires a subcommand (the default
+unless `Cli.sub_optional()` is set), only its `Cli.global()` options remain in
+scope for the subcommand, so lint rejects `Cli.required()` on its local
+options.
 
 Decode matched arguments by ID inside a `do Cli.Dec<A>:` block. Use `Cli.flag`
 for boolean and negatable flags, `Cli.count` for occurrence counts, and

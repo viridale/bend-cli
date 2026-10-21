@@ -2788,6 +2788,12 @@ def Laws.g_rel_requires():
 def Laws.g_rel_defaults():
   ({==}, {==})
 
+def Laws.g_rel_global_groups():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
+def Laws.g_rel_global_groups_scope():
+  ({==}, ({==}, ({==}, {==})))
+
 def check_same(~T: Data, ~get: Cli.Field -> T, v: Maybe<&2, String>,
     f1: List<&2, Cli.Field>, f2: List<&2, Cli.Field>, id: String) ->
     {Laws.bug_of(T, Cli.read_check(~T, ~get, v, f1, id)) ==
@@ -3646,6 +3652,26 @@ def attrs_parsed(parsed: Cli.Usage, usage: String,
     case Cli.Parsed{derived, short, long, kind}: {==}
     case Cli.Invalid{col}: {==}
 
+# P holds for each list c may pick.
+def item_pick(c: Bool, -P: List<&2, Cli.Item> -> Type, -a: List<&2, Cli.Item>,
+    -b: List<&2, Cli.Item>, pa: P(a), pb: P(b)) ->
+    P(Bool.pick(List<&2, Cli.Item>, c, a, b)):
+  match c:
+    case True{}: pa
+    case False{}: pb
+
+# A rule global_go may keep parses to one item, sr.
+def spec_rule_pick(c: Bool, -r: Cli.Item, -rest: List<&2, Cli.Item>,
+    -sr: Cli.SpecItem,
+    e: {Cli.spec_items(r <> rest) == sr <> Cli.spec_items(rest)
+      : List<&2, Cli.SpecItem>}) ->
+    {Cli.spec_items(Bool.pick(List<&2, Cli.Item>, c, r <> rest, rest))
+      == Bool.pick(List<&2, Cli.SpecItem>, c, sr <> Cli.spec_items(rest),
+        Cli.spec_items(rest)) : List<&2, Cli.SpecItem>}:
+  match c:
+    case True{}: e
+    case False{}: {==}
+
 def global_pick(g: Bool, +usage: String, -help: String,
     +attrs: List<&2, Cli.Item>, +rest: List<&2, Cli.Item>) ->
     {Cli.spec_items(Bool.pick(List<&2, Cli.Item>, g,
@@ -3657,58 +3683,83 @@ def global_pick(g: Bool, +usage: String, -help: String,
     case True{}: {==}
     case False{}: {==}
 
-# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg cli.bend Item '$P <> tail' 'global_comm(tail)'
-def global_comm(items: List<&2, Cli.Item>) ->
-    {Cli.spec_items(Cli.global_items(items))
-      == Cli.global_spec(Cli.spec_items(items)) : List<&2, Cli.SpecItem>}:
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg --skip Exclusive --skip NeedOne cli.bend Item '$P <> tail' 'global_comm_go(tail, all)'
+def global_comm_go(items: List<&2, Cli.Item>, +all: List<&2, Cli.Item>) ->
+    {Cli.spec_items(Cli.global_go(items, all))
+      == Cli.global_spec(Cli.spec_items(items), all)
+      : List<&2, Cli.SpecItem>}:
   match items:
     case Nil{}: {==}
     case Cli.Arg{+usage, +help, +attrs} <> +tail:
-      %global_comm(tail) :
+      %global_comm_go(tail, all) :
         {Cli.spec_items(Bool.pick(List<&2, Cli.Item>, Cli.has_global(attrs),
-          Cli.Arg{usage, help, attrs} <> Cli.global_items(tail),
-          Cli.global_items(tail)))
+          Cli.Arg{usage, help, attrs} <> Cli.global_go(tail, all),
+          Cli.global_go(tail, all)))
           == Bool.pick(List<&2, Cli.SpecItem>,
             Cli.has_global(Cli.info_attrs(Cli.arg_info(usage, attrs))),
             Cli.SpecArg{Cli.arg_info(usage, attrs)} <> _, _)
           : List<&2, Cli.SpecItem>}
       %attrs_parsed(Cli.parse_usage(usage), usage, attrs) :
         {Cli.spec_items(Bool.pick(List<&2, Cli.Item>, Cli.has_global(attrs),
-          Cli.Arg{usage, help, attrs} <> Cli.global_items(tail),
-          Cli.global_items(tail)))
+          Cli.Arg{usage, help, attrs} <> Cli.global_go(tail, all),
+          Cli.global_go(tail, all)))
           == Bool.pick(List<&2, Cli.SpecItem>, Cli.has_global(_),
             Cli.SpecArg{Cli.arg_info(usage, attrs)}
-              <> Cli.spec_items(Cli.global_items(tail)),
-            Cli.spec_items(Cli.global_items(tail)))
+              <> Cli.spec_items(Cli.global_go(tail, all)),
+            Cli.spec_items(Cli.global_go(tail, all)))
           : List<&2, Cli.SpecItem>}
       global_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail))
-    case Cli.Sub{x0, x1, x2} <> tail: global_comm(tail)
-    case Cli.Version{x0} <> tail: global_comm(tail)
-    case Cli.Alias{x0} <> tail: global_comm(tail)
-    case Cli.Hidden{} <> tail: global_comm(tail)
-    case Cli.Example{x0, x1} <> tail: global_comm(tail)
-    case Cli.After{x0} <> tail: global_comm(tail)
-    case Cli.SubOptional{} <> tail: global_comm(tail)
-    case Cli.External{} <> tail: global_comm(tail)
-    case Cli.Exclusive{x0} <> tail: global_comm(tail)
-    case Cli.NeedOne{x0} <> tail: global_comm(tail)
-    case Cli.Id{x0} <> tail: global_comm(tail)
-    case Cli.Required{} <> tail: global_comm(tail)
-    case Cli.AttrDefault{x0} <> tail: global_comm(tail)
-    case Cli.AttrEnv{x0} <> tail: global_comm(tail)
-    case Cli.Global{} <> tail: global_comm(tail)
-    case Cli.Heading{x0} <> tail: global_comm(tail)
-    case Cli.As{x0} <> tail: global_comm(tail)
-    case Cli.OneOf{x0} <> tail: global_comm(tail)
-    case Cli.Delim{x0} <> tail: global_comm(tail)
-    case Cli.Hyphen{} <> tail: global_comm(tail)
-    case Cli.Rest{} <> tail: global_comm(tail)
-    case Cli.Bare{x0} <> tail: global_comm(tail)
-    case Cli.Conflicts{x0} <> tail: global_comm(tail)
-    case Cli.Requires{x0} <> tail: global_comm(tail)
-    case Cli.Group{x0} <> tail: global_comm(tail)
-    case Cli.Builtin{} <> tail: global_comm(tail)
+        Cli.global_go(tail, all))
+    case Cli.Sub{x0, x1, x2} <> tail: global_comm_go(tail, all)
+    case Cli.Version{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Alias{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Hidden{} <> tail: global_comm_go(tail, all)
+    case Cli.Example{x0, x1} <> tail: global_comm_go(tail, all)
+    case Cli.After{x0} <> tail: global_comm_go(tail, all)
+    case Cli.SubOptional{} <> tail: global_comm_go(tail, all)
+    case Cli.External{} <> tail: global_comm_go(tail, all)
+    case Cli.Exclusive{+x0} <> +tail:
+      %global_comm_go(tail, all) :
+        {Cli.spec_items(Bool.pick(List<&2, Cli.Item>,
+          Cli.group_global(all, x0),
+          Cli.Exclusive{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all)))
+          == Bool.pick(List<&2, Cli.SpecItem>,
+            Cli.group_global(all, x0), Cli.SpecOther{Cli.Exclusive{x0}} <> _, _)
+          : List<&2, Cli.SpecItem>}
+      spec_rule_pick(Cli.group_global(all, x0), Cli.Exclusive{x0},
+        Cli.global_go(tail, all), Cli.SpecOther{Cli.Exclusive{x0}}, {==})
+    case Cli.NeedOne{+x0} <> +tail:
+      %global_comm_go(tail, all) :
+        {Cli.spec_items(Bool.pick(List<&2, Cli.Item>,
+          Cli.group_global(all, x0),
+          Cli.NeedOne{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all)))
+          == Bool.pick(List<&2, Cli.SpecItem>,
+            Cli.group_global(all, x0), Cli.SpecOther{Cli.NeedOne{x0}} <> _, _)
+          : List<&2, Cli.SpecItem>}
+      spec_rule_pick(Cli.group_global(all, x0), Cli.NeedOne{x0},
+        Cli.global_go(tail, all), Cli.SpecOther{Cli.NeedOne{x0}}, {==})
+    case Cli.Id{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Required{} <> tail: global_comm_go(tail, all)
+    case Cli.AttrDefault{x0} <> tail: global_comm_go(tail, all)
+    case Cli.AttrEnv{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Global{} <> tail: global_comm_go(tail, all)
+    case Cli.Heading{x0} <> tail: global_comm_go(tail, all)
+    case Cli.As{x0} <> tail: global_comm_go(tail, all)
+    case Cli.OneOf{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Delim{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Hyphen{} <> tail: global_comm_go(tail, all)
+    case Cli.Rest{} <> tail: global_comm_go(tail, all)
+    case Cli.Bare{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Conflicts{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Requires{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Group{x0} <> tail: global_comm_go(tail, all)
+    case Cli.Builtin{} <> tail: global_comm_go(tail, all)
+
+def global_comm(+items: List<&2, Cli.Item>) ->
+    {Cli.spec_items(Cli.global_items(items))
+      == Cli.global_spec(Cli.spec_items(items), items)
+      : List<&2, Cli.SpecItem>}:
+  global_comm_go(items, items)
 
 # Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub --skip Arg cli.bend Item '$P <> tail' '%spec_append(tail, ys) :\n  {Cli.SpecOther{$H}\n    <> List.append(&2, Cli.SpecItem, Cli.spec_items(tail),\n      Cli.spec_items(ys))\n    == Cli.SpecOther{$H} <> _ : List<&2, Cli.SpecItem>}\n{==}'
 def spec_append(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>) ->
@@ -6877,6 +6928,14 @@ def deep_append(a: List<&2, Cli.Item>, +b: List<&2, Cli.Item>,
     case Cli.Group{x0} <> +tail: deep_append(tail, b, da, db)
     case Cli.Builtin{} <> +tail: deep_append(tail, b, da, db)
 
+# A rule global_go may keep adds no arg.
+def deep_rule_pick(c: Bool, -r: Cli.Item, -rest: List<&2, Cli.Item>,
+    d: DeepClean(rest), k: DeepClean(rest) -> DeepClean(r <> rest)) ->
+    DeepClean(Bool.pick(List<&2, Cli.Item>, c, r <> rest, rest)):
+  match c:
+    case True{}: k(d)
+    case False{}: d
+
 def glob_pick(b: Bool, +usage: String, +help: String,
     +attrs: List<&2, Cli.Item>, -rest: List<&2, Cli.Item>,
     ic: InfoClean(Cli.arg_info(usage, attrs)), dr: DeepClean(rest)) ->
@@ -6886,42 +6945,50 @@ def glob_pick(b: Bool, +usage: String, +help: String,
     case True{}: (ic, dr)
     case False{}: dr
 
-def deep_globals(items: List<&2, Cli.Item>, di: DeepClean(items)) ->
-    DeepClean(Cli.global_items(items)):
+def deep_globals_go(items: List<&2, Cli.Item>, +all: List<&2, Cli.Item>,
+    di: DeepClean(items)) -> DeepClean(Cli.global_go(items, all)):
   match items:
     case Nil{}: Unit{}
     case Cli.Arg{+usage, +help, +attrs} <> +tail:
       (ic, dt) = di
       glob_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail), ic, deep_globals(tail, dt))
+        Cli.global_go(tail, all), ic, deep_globals_go(tail, all, dt))
     case Cli.Sub{name, about, children} <> +tail:
       (dc, dt) = di
-      deep_globals(tail, dt)
-    case Cli.Version{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Alias{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Hidden{} <> +tail: deep_globals(tail, di)
-    case Cli.Example{x0, x1} <> +tail: deep_globals(tail, di)
-    case Cli.After{x0} <> +tail: deep_globals(tail, di)
-    case Cli.SubOptional{} <> +tail: deep_globals(tail, di)
-    case Cli.External{} <> +tail: deep_globals(tail, di)
-    case Cli.Exclusive{x0} <> +tail: deep_globals(tail, di)
-    case Cli.NeedOne{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Id{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Required{} <> +tail: deep_globals(tail, di)
-    case Cli.AttrDefault{x0} <> +tail: deep_globals(tail, di)
-    case Cli.AttrEnv{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Global{} <> +tail: deep_globals(tail, di)
-    case Cli.Heading{x0} <> +tail: deep_globals(tail, di)
-    case Cli.As{x0} <> +tail: deep_globals(tail, di)
-    case Cli.OneOf{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Delim{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Hyphen{} <> +tail: deep_globals(tail, di)
-    case Cli.Rest{} <> +tail: deep_globals(tail, di)
-    case Cli.Bare{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Conflicts{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Requires{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Group{x0} <> +tail: deep_globals(tail, di)
-    case Cli.Builtin{} <> +tail: deep_globals(tail, di)
+      deep_globals_go(tail, all, dt)
+    case Cli.Version{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Alias{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Hidden{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Example{x0, x1} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.After{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.SubOptional{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.External{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Exclusive{+x0} <> +tail:
+      deep_rule_pick(Cli.group_global(all, x0), Cli.Exclusive{x0},
+        Cli.global_go(tail, all), deep_globals_go(tail, all, di), d => d)
+    case Cli.NeedOne{+x0} <> +tail:
+      deep_rule_pick(Cli.group_global(all, x0), Cli.NeedOne{x0},
+        Cli.global_go(tail, all), deep_globals_go(tail, all, di), d => d)
+    case Cli.Id{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Required{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.AttrDefault{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.AttrEnv{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Global{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Heading{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.As{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.OneOf{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Delim{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Hyphen{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Rest{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Bare{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Conflicts{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Requires{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Group{x0} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.Builtin{} <> +tail: deep_globals_go(tail, all, di)
+
+def deep_globals(+items: List<&2, Cli.Item>, di: DeepClean(items)) ->
+    DeepClean(Cli.global_items(items)):
+  deep_globals_go(items, items, di)
 
 def SubClean(found: Maybe<&2, Cli.SubFound>) -> Type:
   match found:
@@ -8828,45 +8895,58 @@ def has_glob_pick(g: Bool, +usage: String, -help: String,
     case False{}: ih
 
 # A list's globals have no arg of id when the list has none.
-def has_glob(L: List<&2, Cli.Item>, +id: String,
+def has_glob_go(L: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +id: String,
     +e: {has(L, id) == False{} : Bool}) ->
-    {has(Cli.global_items(L), id) == False{} : Bool}:
+    {has(Cli.global_go(L, all), id) == False{} : Bool}:
   match L:
     case Nil{}: {==}
     case Cli.Arg{+usage, help, +attrs} <> +tail:
       has_glob_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail), id,
+        Cli.global_go(tail, all), id,
         b_orf_l(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
           has(tail, id), e),
-        has_glob(tail, id,
+        has_glob_go(tail, all, id,
           b_orf_r(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
             has(tail, id), e)))
-    case Cli.Sub{x0, x1, x2} <> tail: has_glob(tail, id, e)
-    case Cli.Version{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Alias{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Hidden{} <> tail: has_glob(tail, id, e)
-    case Cli.Example{x0, x1} <> tail: has_glob(tail, id, e)
-    case Cli.After{x0} <> tail: has_glob(tail, id, e)
-    case Cli.SubOptional{} <> tail: has_glob(tail, id, e)
-    case Cli.External{} <> tail: has_glob(tail, id, e)
-    case Cli.Exclusive{x0} <> tail: has_glob(tail, id, e)
-    case Cli.NeedOne{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Id{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Required{} <> tail: has_glob(tail, id, e)
-    case Cli.AttrDefault{x0} <> tail: has_glob(tail, id, e)
-    case Cli.AttrEnv{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Global{} <> tail: has_glob(tail, id, e)
-    case Cli.Heading{x0} <> tail: has_glob(tail, id, e)
-    case Cli.As{x0} <> tail: has_glob(tail, id, e)
-    case Cli.OneOf{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Delim{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Hyphen{} <> tail: has_glob(tail, id, e)
-    case Cli.Rest{} <> tail: has_glob(tail, id, e)
-    case Cli.Bare{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Conflicts{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Requires{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Group{x0} <> tail: has_glob(tail, id, e)
-    case Cli.Builtin{} <> tail: has_glob(tail, id, e)
+    case Cli.Sub{x0, x1, x2} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Version{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Alias{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Hidden{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Example{x0, x1} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.After{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.SubOptional{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.External{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Exclusive{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {has(G, id) == False{} : Bool},
+        Cli.Exclusive{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        has_glob_go(tail, all, id, e), has_glob_go(tail, all, id, e))
+    case Cli.NeedOne{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {has(G, id) == False{} : Bool},
+        Cli.NeedOne{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        has_glob_go(tail, all, id, e), has_glob_go(tail, all, id, e))
+    case Cli.Id{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Required{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.AttrDefault{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.AttrEnv{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Global{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Heading{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.As{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.OneOf{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Delim{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Hyphen{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Rest{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Bare{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Conflicts{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Requires{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Group{x0} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.Builtin{} <> tail: has_glob_go(tail, all, id, e)
+
+def has_glob(+L: List<&2, Cli.Item>, +id: String,
+    +e: {has(L, id) == False{} : Bool}) ->
+    {has(Cli.global_items(L), id) == False{} : Bool}:
+  has_glob_go(L, L, id, e)
 
 def am1_glob_c(c: Bool, ht: Bool, hg: Bool,
     p: {Bool.or(Bool.not(c), Bool.not(ht)) == True{} : Bool},
@@ -8894,48 +8974,61 @@ def am1_glob_pick(g: Bool, +usage: String, -help: String,
         attrs)), id)), Bool.not(has(gt, id))), am1(gt, id), p, ih)
     case False{}: ih
 
-def am1_glob(L: List<&2, Cli.Item>, +id: String,
+def am1_glob_go(L: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +id: String,
     +a: {am1(L, id) == True{} : Bool}) ->
-    {am1(Cli.global_items(L), id) == True{} : Bool}:
+    {am1(Cli.global_go(L, all), id) == True{} : Bool}:
   match L:
     case Nil{}: {==}
     case Cli.Arg{+usage, help, +attrs} <> +tail:
       am1_glob_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail), id,
+        Cli.global_go(tail, all), id,
         am1_glob_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
-          has(tail, id), has(Cli.global_items(tail), id),
+          has(tail, id), has(Cli.global_go(tail, all), id),
           and_left(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(usage,
             attrs)), id)), Bool.not(has(tail, id))), am1(tail, id), a),
-          ht => has_glob(tail, id, ht)),
-        am1_glob(tail, id,
+          ht => has_glob_go(tail, all, id, ht)),
+        am1_glob_go(tail, all, id,
           and_right(Bool.or(Bool.not(String.eq(Cli.info_id(Cli.arg_info(
             usage, attrs)), id)), Bool.not(has(tail, id))), am1(tail, id), a)))
-    case Cli.Sub{x0, x1, x2} <> tail: am1_glob(tail, id, a)
-    case Cli.Version{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Alias{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Hidden{} <> tail: am1_glob(tail, id, a)
-    case Cli.Example{x0, x1} <> tail: am1_glob(tail, id, a)
-    case Cli.After{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.SubOptional{} <> tail: am1_glob(tail, id, a)
-    case Cli.External{} <> tail: am1_glob(tail, id, a)
-    case Cli.Exclusive{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.NeedOne{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Id{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Required{} <> tail: am1_glob(tail, id, a)
-    case Cli.AttrDefault{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.AttrEnv{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Global{} <> tail: am1_glob(tail, id, a)
-    case Cli.Heading{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.As{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.OneOf{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Delim{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Hyphen{} <> tail: am1_glob(tail, id, a)
-    case Cli.Rest{} <> tail: am1_glob(tail, id, a)
-    case Cli.Bare{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Conflicts{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Requires{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Group{x0} <> tail: am1_glob(tail, id, a)
-    case Cli.Builtin{} <> tail: am1_glob(tail, id, a)
+    case Cli.Sub{x0, x1, x2} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Version{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Alias{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Hidden{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Example{x0, x1} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.After{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.SubOptional{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.External{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Exclusive{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {am1(G, id) == True{} : Bool},
+        Cli.Exclusive{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        am1_glob_go(tail, all, id, a), am1_glob_go(tail, all, id, a))
+    case Cli.NeedOne{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {am1(G, id) == True{} : Bool},
+        Cli.NeedOne{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        am1_glob_go(tail, all, id, a), am1_glob_go(tail, all, id, a))
+    case Cli.Id{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Required{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.AttrDefault{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.AttrEnv{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Global{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Heading{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.As{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.OneOf{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Delim{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Hyphen{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Rest{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Bare{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Conflicts{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Requires{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Group{x0} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.Builtin{} <> tail: am1_glob_go(tail, all, id, a)
+
+def am1_glob(+L: List<&2, Cli.Item>, +id: String,
+    +a: {am1(L, id) == True{} : Bool}) ->
+    {am1(Cli.global_items(L), id) == True{} : Bool}:
+  am1_glob_go(L, L, id, a)
 
 def nonpos_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>,
     +nx: {nonpos(xs) == True{} : Bool}, ny: {nonpos(ys) == True{} : Bool}) ->
@@ -9028,44 +9121,57 @@ def acc_glob_pick(g: Bool, +usage: String, -help: String,
         ih)
     case False{}: ih
 
-def acc_glob(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
-    +a: {acc(L, e, id) == True{} : Bool}) ->
-    {acc(Cli.global_items(L), e, id) == True{} : Bool}:
+def acc_glob_go(L: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +e: Cli.ScanEvent,
+    +id: String, +a: {acc(L, e, id) == True{} : Bool}) ->
+    {acc(Cli.global_go(L, all), e, id) == True{} : Bool}:
   match L:
     case Nil{}: {==}
     case Cli.Arg{+usage, help, +attrs} <> +tail:
       acc_glob_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail), e, id,
+        Cli.global_go(tail, all), e, id,
         and_left(ok_at(Cli.arg_info(usage, attrs), e, id), acc(tail, e, id),
           a),
-        acc_glob(tail, e, id, and_right(ok_at(Cli.arg_info(usage, attrs), e,
+        acc_glob_go(tail, all, e, id, and_right(ok_at(Cli.arg_info(usage, attrs), e,
           id), acc(tail, e, id), a)))
-    case Cli.Sub{x0, x1, x2} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Version{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Alias{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Hidden{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Example{x0, x1} <> tail: acc_glob(tail, e, id, a)
-    case Cli.After{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.SubOptional{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.External{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Exclusive{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.NeedOne{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Id{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Required{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.AttrDefault{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.AttrEnv{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Global{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Heading{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.As{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.OneOf{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Delim{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Hyphen{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Rest{} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Bare{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Conflicts{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Requires{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Group{x0} <> tail: acc_glob(tail, e, id, a)
-    case Cli.Builtin{} <> tail: acc_glob(tail, e, id, a)
+    case Cli.Sub{x0, x1, x2} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Version{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Alias{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Hidden{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Example{x0, x1} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.After{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.SubOptional{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.External{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Exclusive{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {acc(G, e, id) == True{} : Bool},
+        Cli.Exclusive{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        acc_glob_go(tail, all, e, id, a), acc_glob_go(tail, all, e, id, a))
+    case Cli.NeedOne{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {acc(G, e, id) == True{} : Bool},
+        Cli.NeedOne{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        acc_glob_go(tail, all, e, id, a), acc_glob_go(tail, all, e, id, a))
+    case Cli.Id{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Required{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.AttrDefault{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.AttrEnv{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Global{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Heading{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.As{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.OneOf{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Delim{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Hyphen{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Rest{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Bare{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Conflicts{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Requires{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Group{x0} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.Builtin{} <> tail: acc_glob_go(tail, all, e, id, a)
+
+def acc_glob(+L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
+    +a: {acc(L, e, id) == True{} : Bool}) ->
+    {acc(Cli.global_items(L), e, id) == True{} : Bool}:
+  acc_glob_go(L, L, e, id, a)
 
 def ev_app(events: List<&2, Cli.ScanEvent>, +xs: List<&2, Cli.Item>,
     +ys: List<&2, Cli.Item>, +id: String,
@@ -10031,22 +10137,22 @@ def gc_pick(g: Bool, +usage: String, -help: String,
           attrs), get), id), sh(get, id), l1, ih, up)
     case False{}: ih
 
-def gcov(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+def gcov_go(I: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
     +H: List<&2, Cli.Seen>, +id: String,
     +q: {qt(I, S, H) == True{} : Bool}) ->
-    {Bool.or(Bool.not(has(Cli.global_items(I), id)),
+    {Bool.or(Bool.not(has(Cli.global_go(I, all), id)),
       sh(Cli.global_entries(Cli.lint_items(I)), id)) == True{} : Bool}:
   match I:
     case Nil{}: {==}
     case Cli.Arg{+usage, help, +attrs} <> +tail:
       gc_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail), Cli.global_entries(Cli.lint_items(tail)), id,
+        Cli.global_go(tail, all), Cli.global_entries(Cli.lint_items(tail)), id,
         ent_sh(Cli.parse_usage(usage), usage, attrs, S, id,
           Cli.global_entries(Cli.lint_items(tail)),
           and_left(argq(Cli.parse_usage(usage), attrs, S),
             qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
               Cli.parse_usage(usage), attrs), S), H), q)),
-        gcov(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+        gcov_go(tail, all, List.append(&2, Cli.Seen, Cli.arg_entries(
           Cli.parse_usage(usage), attrs), S), H, id,
           and_right(argq(Cli.parse_usage(usage), attrs, S),
             qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
@@ -10054,7 +10160,7 @@ def gcov(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
         sh_up(Cli.arg_entries(Cli.parse_usage(usage), attrs),
           Cli.global_entries(Cli.lint_items(tail)), id))
     case Cli.Sub{+name, about, +children} <> +tail:
-      gcov(tail, List.append(&2, Cli.Seen,
+      gcov_go(tail, all, List.append(&2, Cli.Seen,
         Cli.sub_alias_entries(Cli.find_aliases(children)),
         Cli.SeenSub{name} <> S), H, id,
         and_right(qt(children, H, List.append(&2, Cli.Seen,
@@ -10068,31 +10174,48 @@ def gcov(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
               qt(tail, List.append(&2, Cli.Seen,
                 Cli.sub_alias_entries(Cli.find_aliases(children)),
                 Cli.SeenSub{name} <> S), H)), q)))
-    case Cli.Version{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Alias{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Hidden{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Example{x0, x1} <> tail: gcov(tail, S, H, id, q)
-    case Cli.After{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.SubOptional{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.External{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Exclusive{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.NeedOne{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Id{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Required{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.AttrDefault{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.AttrEnv{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Global{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Heading{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.As{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.OneOf{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Delim{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Hyphen{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Rest{} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Bare{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Conflicts{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Requires{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Group{x0} <> tail: gcov(tail, S, H, id, q)
-    case Cli.Builtin{} <> tail: gcov(tail, S, H, id, q)
+    case Cli.Version{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Alias{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Hidden{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Example{x0, x1} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.After{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.SubOptional{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.External{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Exclusive{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {Bool.or(Bool.not(has(G, id)),
+          sh(Cli.global_entries(Cli.lint_items(tail)), id)) == True{} : Bool},
+        Cli.Exclusive{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        gcov_go(tail, all, S, H, id, q), gcov_go(tail, all, S, H, id, q))
+    case Cli.NeedOne{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {Bool.or(Bool.not(has(G, id)),
+          sh(Cli.global_entries(Cli.lint_items(tail)), id)) == True{} : Bool},
+        Cli.NeedOne{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        gcov_go(tail, all, S, H, id, q), gcov_go(tail, all, S, H, id, q))
+    case Cli.Id{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Required{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.AttrDefault{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.AttrEnv{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Global{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Heading{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.As{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.OneOf{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Delim{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Hyphen{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Rest{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Bare{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Conflicts{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Requires{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Group{x0} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.Builtin{} <> tail: gcov_go(tail, all, S, H, id, q)
+
+def gcov(+I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +id: String,
+    +q: {qt(I, S, H) == True{} : Bool}) ->
+    {Bool.or(Bool.not(has(Cli.global_items(I), id)),
+      sh(Cli.global_entries(Cli.lint_items(I)), id)) == True{} : Bool}:
+  gcov_go(I, I, S, H, id, q)
 
 def gn_parsed(parsed: Cli.Usage, -usage: String, +attrs: List<&2, Cli.Item>,
     +S: List<&2, Cli.Seen>, a: {argq(parsed, attrs, S) == True{} : Bool}) ->
@@ -10121,25 +10244,25 @@ def gn_pick(g: Bool, +usage: String, -help: String, +attrs: List<&2, Cli.Item>,
         attrs)))), nonpos(gt), l1, ih)
     case False{}: ih
 
-def gnonpos(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+def gnonpos_go(I: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
     +H: List<&2, Cli.Seen>, +q: {qt(I, S, H) == True{} : Bool}) ->
-    {nonpos(Cli.global_items(I)) == True{} : Bool}:
+    {nonpos(Cli.global_go(I, all)) == True{} : Bool}:
   match I:
     case Nil{}: {==}
     case Cli.Arg{+usage, help, +attrs} <> +tail:
       gn_pick(Cli.has_global(attrs), usage, help, attrs,
-        Cli.global_items(tail),
+        Cli.global_go(tail, all),
         gn_parsed(Cli.parse_usage(usage), usage, attrs, S,
           and_left(argq(Cli.parse_usage(usage), attrs, S),
             qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
               Cli.parse_usage(usage), attrs), S), H), q)),
-        gnonpos(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
+        gnonpos_go(tail, all, List.append(&2, Cli.Seen, Cli.arg_entries(
           Cli.parse_usage(usage), attrs), S), H,
           and_right(argq(Cli.parse_usage(usage), attrs, S),
             qt(tail, List.append(&2, Cli.Seen, Cli.arg_entries(
               Cli.parse_usage(usage), attrs), S), H), q)))
     case Cli.Sub{+name, about, +children} <> +tail:
-      gnonpos(tail, List.append(&2, Cli.Seen,
+      gnonpos_go(tail, all, List.append(&2, Cli.Seen,
         Cli.sub_alias_entries(Cli.find_aliases(children)),
         Cli.SeenSub{name} <> S), H,
         and_right(qt(children, H, List.append(&2, Cli.Seen,
@@ -10153,31 +10276,44 @@ def gnonpos(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
               qt(tail, List.append(&2, Cli.Seen,
                 Cli.sub_alias_entries(Cli.find_aliases(children)),
                 Cli.SeenSub{name} <> S), H)), q)))
-    case Cli.Version{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Alias{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Hidden{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Example{x0, x1} <> tail: gnonpos(tail, S, H, q)
-    case Cli.After{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.SubOptional{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.External{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Exclusive{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.NeedOne{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Id{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Required{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.AttrDefault{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.AttrEnv{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Global{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Heading{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.As{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.OneOf{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Delim{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Hyphen{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Rest{} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Bare{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Conflicts{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Requires{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Group{x0} <> tail: gnonpos(tail, S, H, q)
-    case Cli.Builtin{} <> tail: gnonpos(tail, S, H, q)
+    case Cli.Version{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Alias{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Hidden{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Example{x0, x1} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.After{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.SubOptional{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.External{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Exclusive{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {nonpos(G) == True{} : Bool},
+        Cli.Exclusive{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        gnonpos_go(tail, all, S, H, q), gnonpos_go(tail, all, S, H, q))
+    case Cli.NeedOne{+x0} <> +tail:
+      item_pick(Cli.group_global(all, x0),
+        G => {nonpos(G) == True{} : Bool},
+        Cli.NeedOne{x0} <> Cli.global_go(tail, all), Cli.global_go(tail, all),
+        gnonpos_go(tail, all, S, H, q), gnonpos_go(tail, all, S, H, q))
+    case Cli.Id{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Required{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.AttrDefault{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.AttrEnv{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Global{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Heading{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.As{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.OneOf{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Delim{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Hyphen{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Rest{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Bare{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Conflicts{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Requires{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Group{x0} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.Builtin{} <> tail: gnonpos_go(tail, all, S, H, q)
+
+def gnonpos(+I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
+    +H: List<&2, Cli.Seen>, +q: {qt(I, S, H) == True{} : Bool}) ->
+    {nonpos(Cli.global_items(I)) == True{} : Bool}:
+  gnonpos_go(I, I, S, H, q)
 
 def sfn(o: Maybe<&2, Cli.SubFound>, +d: String) -> String:
   match o:
@@ -13252,15 +13388,15 @@ def ma_off(arm: Bool, -d: String,
     case False{}: {==}
 
 def mi_c(c: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
-    +all: List<&2, Cli.SpecItem>, +fields: List<&2, Cli.Field>, +id: String,
-    -r: Cli.ArgInfo,
+    +all: List<&2, Cli.SpecItem>, +fields: List<&2, Cli.Field>,
+    -done: List<&2, String>, +id: String, -r: Cli.ArgInfo,
     er: {Bool.pick(Maybe<&2, Cli.ArgInfo>, c, Some{info},
       Laws.arg_ref(tail, id)) == Some{r} : Maybe<&2, Cli.ArgInfo>},
     em: {List.append(&2, String, Cli.missing_arg(info, fields),
-      Cli.missing_items(Cli.spec_items(tail), all, fields)) == Nil{}
+      Cli.missing_items(Cli.spec_items(tail), all, fields, done)) == Nil{}
       : List<&2, String>},
     ih: {Laws.arg_ref(tail, id) == Some{r} : Maybe<&2, Cli.ArgInfo>} ->
-      {Cli.missing_items(Cli.spec_items(tail), all, fields) == Nil{}
+      {Cli.missing_items(Cli.spec_items(tail), all, fields, done) == Nil{}
         : List<&2, String>} ->
       {Cli.arg_required_missing(r, fields) == False{} : Bool}) ->
     {Cli.arg_required_missing(r, fields) == False{} : Bool}:
@@ -13270,16 +13406,17 @@ def mi_c(c: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
         {Cli.arg_required_missing(_, fields) == False{} : Bool}
       ma_off(Cli.arg_required_missing(info, fields), Cli.arg_display(info),
         sapp_nil_left(Cli.missing_arg(info, fields),
-          Cli.missing_items(Cli.spec_items(tail), all, fields), em))
+          Cli.missing_items(Cli.spec_items(tail), all, fields, done), em))
     case False{}:
       ih(er, sapp_nil_right(Cli.missing_arg(info, fields),
-        Cli.missing_items(Cli.spec_items(tail), all, fields), em))
+        Cli.missing_items(Cli.spec_items(tail), all, fields, done), em))
 
 # Nothing missing leaves the arg of id, which arg_ref finds, not missing.
 def mi_go(X: List<&2, Cli.Item>, +all: List<&2, Cli.SpecItem>,
-    +fields: List<&2, Cli.Field>, +id: String, -r: Cli.ArgInfo,
+    +fields: List<&2, Cli.Field>, +done: List<&2, String>, +id: String,
+    -r: Cli.ArgInfo,
     er: {Laws.arg_ref(X, id) == Some{r} : Maybe<&2, Cli.ArgInfo>},
-    em: {Cli.missing_items(Cli.spec_items(X), all, fields) == Nil{}
+    em: {Cli.missing_items(Cli.spec_items(X), all, fields, done) == Nil{}
       : List<&2, String>}) ->
     {Cli.arg_required_missing(r, fields) == False{} : Bool}:
   match X:
@@ -13288,37 +13425,39 @@ def mi_go(X: List<&2, Cli.Item>, +all: List<&2, Cli.SpecItem>,
         arg_none_some(r, er))
     case Cli.Arg{+usage, help, +attrs} <> +tail:
       mi_c(String.eq(Cli.info_id(Cli.arg_info(usage, attrs)), id),
-        Cli.arg_info(usage, attrs), tail, all, fields, id, r, er, em,
-        et => ef => mi_go(tail, all, fields, id, r, et, ef))
-    case Cli.NeedOne{name} <> +tail:
-      mi_go(tail, all, fields, id, r, er, sapp_nil_right(
-        Cli.missing_group(all, fields, name),
-        Cli.missing_items(Cli.spec_items(tail), all, fields), em))
-    case Cli.Sub{x0, x1, x2} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Version{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Alias{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Hidden{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Example{x0, x1} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.After{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.SubOptional{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.External{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Exclusive{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Id{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Required{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.AttrDefault{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.AttrEnv{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Global{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Heading{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.As{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.OneOf{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Delim{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Hyphen{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Rest{} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Bare{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Conflicts{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Requires{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Group{x0} <> tail: mi_go(tail, all, fields, id, r, er, em)
-    case Cli.Builtin{} <> tail: mi_go(tail, all, fields, id, r, er, em)
+        Cli.arg_info(usage, attrs), tail, all, fields, done, id, r, er, em,
+        et => ef => mi_go(tail, all, fields, done, id, r, et, ef))
+    case Cli.NeedOne{+name} <> +tail:
+      mi_go(tail, all, fields, name <> done, id, r, er, sapp_nil_right(
+        Cli.missing_once(List.contains(~String, ~String.eq, done, name), all,
+          fields, name),
+        Cli.missing_items(Cli.spec_items(tail), all, fields, name <> done),
+        em))
+    case Cli.Sub{x0, x1, x2} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Version{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Alias{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Hidden{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Example{x0, x1} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.After{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.SubOptional{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.External{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Exclusive{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Id{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Required{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.AttrDefault{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.AttrEnv{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Global{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Heading{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.As{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.OneOf{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Delim{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Hyphen{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Rest{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Bare{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Conflicts{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Requires{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Group{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.Builtin{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
 
 def ap_off(m: Bool, hr: Bool, d: Bool, -kp: Bool,
     ehr: {hr == False{} : Bool}, ed: {d == False{} : Bool},
@@ -13631,10 +13770,10 @@ def core_r(k: String, +u: String, +s: String, +l: String,
       am1_app(G, I, id, b0_am(I, G, S, id, b), am1I, d), am1I),
     fs => em => mi_go(List.append(&2, Cli.Item, G, I),
       List.append(&2, Cli.SpecItem, Cli.spec_items(G), Cli.spec_items(I)), fs,
-      id, Cli.ArgInfo{id, u, s, l, kind, attrs}, er2,
+      [], id, Cli.ArgInfo{id, u, s, l, kind, attrs}, er2,
       (%spec_append(G, I) : {Cli.missing_items(_, List.append(&2,
-        Cli.SpecItem, Cli.spec_items(G), Cli.spec_items(I)), fs) == Nil{}
-        : List<&2, String>}
+        Cli.SpecItem, Cli.spec_items(G), Cli.spec_items(I)), fs, [])
+        == Nil{} : List<&2, String>}
       em)))
 
 def core_m(m: Maybe<&2, Cli.ArgInfo>, +p: List<&2, String>,
@@ -14470,6 +14609,9 @@ def Laws.g_help_env_names():
 def Laws.g_help_usage():
   ({==}, {==})
 
+def Laws.g_help_global_groups():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
 def Laws.g_help_outcome():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
 
@@ -14819,6 +14961,9 @@ def Laws.g_rel_requires_eval():
 
 def Laws.g_rel_defaults_eval():
   ({==}, {==})
+
+def Laws.g_rel_global_groups_eval():
+  ({==}, ({==}, ({==}, {==})))
 
 def Laws.g_err_decode():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},

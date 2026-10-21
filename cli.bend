@@ -2538,14 +2538,42 @@ def scope_path(scope: Scope) -> List<&2, String>:
   match scope:
     case Scope{path, spec}: path
 
-def global_items(items: List<&2, Item>) -> List<&2, Item>:
+def arg_in_group(attrs: List<&2, Item>, name: String) -> Bool:
+  List.contains(~String, ~String.eq,
+    find_group_attrs(attrs), name)
+
+# Whether each arg items put in group name is global().
+def group_global(items: List<&2, Item>, +name: String) -> Bool:
+  match items:
+    case Nil{}: True{}
+    case Arg{usage, help, +attrs} <> tail:
+      Bool.and(Bool.or(Bool.not(arg_in_group(attrs, name)), has_global(attrs)),
+        group_global(tail, name))
+    case head <> tail: group_global(tail, name)
+
+# What items pass down to their subcommands, in their order: each global()
+# arg, and each exclusive or need_one rule over a group whose args in all are
+# each global(), so that it holds in every subcommand below.
+def global_go(items: List<&2, Item>, +all: List<&2, Item>) ->
+    List<&2, Item>:
   match items:
     case Nil{}: Nil{}
     case Arg{usage, help, +attrs} <> tail:
-      +rest = global_items(tail)
+      +rest = global_go(tail, all)
       Bool.pick(List<&2, Item>, has_global(attrs),
         Arg{usage, help, attrs} <> rest, rest)
-    case head <> tail: global_items(tail)
+    case Exclusive{+name} <> tail:
+      +rest = global_go(tail, all)
+      Bool.pick(List<&2, Item>, group_global(all, name),
+        Exclusive{name} <> rest, rest)
+    case NeedOne{+name} <> tail:
+      +rest = global_go(tail, all)
+      Bool.pick(List<&2, Item>, group_global(all, name),
+        NeedOne{name} <> rest, rest)
+    case head <> tail: global_go(tail, all)
+
+def global_items(+items: List<&2, Item>) -> List<&2, Item>:
+  global_go(items, items)
 
 def kind_negatable(kind: UsageKind) -> Bool:
   match kind:
@@ -2729,15 +2757,25 @@ def spec_items(items: List<&2, Item>) -> List<&2, SpecItem>:
     case Sub{name, about, children} <> tail: spec_items(tail)
     case head <> tail: SpecOther{head} <> spec_items(tail)
 
-def global_spec(items: List<&2, SpecItem>) -> List<&2, SpecItem>:
+# global_go over items parsed, with all as written.
+def global_spec(items: List<&2, SpecItem>, +all: List<&2, Item>) ->
+    List<&2, SpecItem>:
   match items:
     case Nil{}: Nil{}
     case SpecArg{+info} <> tail:
-      +rest = global_spec(tail)
+      +rest = global_spec(tail, all)
       attrs = info_attrs(info)
       Bool.pick(List<&2, SpecItem>, has_global(attrs),
         SpecArg{info} <> rest, rest)
-    case head <> tail: global_spec(tail)
+    case SpecOther{Exclusive{+name}} <> tail:
+      +rest = global_spec(tail, all)
+      Bool.pick(List<&2, SpecItem>, group_global(all, name),
+        SpecOther{Exclusive{name}} <> rest, rest)
+    case SpecOther{NeedOne{+name}} <> tail:
+      +rest = global_spec(tail, all)
+      Bool.pick(List<&2, SpecItem>, group_global(all, name),
+        SpecOther{NeedOne{name}} <> rest, rest)
+    case head <> tail: global_spec(tail, all)
 
 def spec_slots(items: List<&2, SpecItem>) -> List<&2, ArgInfo>:
   match items:
@@ -2783,7 +2821,7 @@ def spec_node(+items: List<&2, Item>, +globals: List<&2, SpecItem>) ->
     args, slots, slots_variadic(slots), raw_subs(items),
     has_sub_item(items), has_external(items), needs_sub(items),
     has_version_item(items), spec_digit_short(args),
-    List.append(&2, SpecItem, global_spec(own), globals)}
+    List.append(&2, SpecItem, global_spec(own, items), globals)}
 
 def scan_start(c: Cmd) -> ScanState:
   match c:
@@ -3758,10 +3796,6 @@ def source_present(source: Src) -> Bool:
 def field_present(fields: List<&2, Field>, id: String) -> Bool:
   source_present(field_source(fields, id))
 
-def arg_in_group(attrs: List<&2, Item>, name: String) -> Bool:
-  List.contains(~String, ~String.eq,
-    find_group_attrs(attrs), name)
-
 def group_usages(items: List<&2, Item>, +name: String) ->
     List<&2, String>:
   match items:
@@ -3819,26 +3853,37 @@ def missing_group(+items: List<&2, SpecItem>,
     group_given(items, fields, name), [],
     [spec_group_display(items, name)])
 
+# A group's display the first time a need_one rule names it.
+def missing_once(listed: Bool, items: List<&2, SpecItem>,
+    fields: List<&2, Field>, name: String) -> List<&2, String>:
+  match listed:
+    case True{}: []
+    case False{}: missing_group(items, fields, name)
+
+# What E06 lists, in items' order: each required arg not given, and each
+# need_one group with no arg given that done does not name yet.
 def missing_items(items: List<&2, SpecItem>,
     +all_items: List<&2, SpecItem>,
-    +fields: List<&2, Field>) -> List<&2, String>:
+    +fields: List<&2, Field>, +done: List<&2, String>) ->
+    List<&2, String>:
   match items:
     case Nil{}: Nil{}
     case SpecArg{info} <> tail:
       List.append(&2, String,
         missing_arg(info, fields),
-        missing_items(tail, all_items, fields))
-    case SpecOther{NeedOne{name}} <> tail:
+        missing_items(tail, all_items, fields, done))
+    case SpecOther{NeedOne{+name}} <> tail:
       List.append(&2, String,
-        missing_group(all_items, fields, name),
-        missing_items(tail, all_items, fields))
+        missing_once(List.contains(~String, ~String.eq, done, name),
+          all_items, fields, name),
+        missing_items(tail, all_items, fields, name <> done))
     case head <> tail:
-      missing_items(tail, all_items, fields)
+      missing_items(tail, all_items, fields, done)
 
 def scope_missing(scope: Scope,
     fields: List<&2, Field>) -> List<&2, String>:
   +items = scope_arg_items(scope)
-  missing_items(items, items, fields)
+  missing_items(items, items, fields, [])
 
 def append_unique(+ids: List<&2, String>, +id: String) ->
     List<&2, String>:
@@ -4983,13 +5028,23 @@ def required_options(items: List<&2, Item>) -> List<&2, Segment>:
         required_options(tail))
     case head <> tail: required_options(tail)
 
-def group_elems(items: List<&2, Item>, +args: List<&2, Item>) ->
+def group_elem(listed: Bool, args: List<&2, Item>, group: String) ->
     List<&2, Segment>:
+  match listed:
+    case True{}: []
+    case False{}: [plain(group_display(args, group))]
+
+# Each need_one group of items, over args, that done does not name yet.
+def group_elems(items: List<&2, Item>, +args: List<&2, Item>,
+    +done: List<&2, String>) -> List<&2, Segment>:
   match items:
     case Nil{}: Nil{}
-    case NeedOne{group} <> tail:
-      plain(group_display(args, group)) <> group_elems(tail, args)
-    case head <> tail: group_elems(tail, args)
+    case NeedOne{+group} <> tail:
+      List.append(&2, Segment,
+        group_elem(List.contains(~String, ~String.eq, done, group), args,
+          group),
+        group_elems(tail, args, group <> done))
+    case head <> tail: group_elems(tail, args, done)
 
 def positional_elems(items: List<&2, Item>) -> List<&2, Segment>:
   match items:
@@ -5015,11 +5070,12 @@ def options_elem(present: Bool) -> List<&2, Segment>:
 def usage_elems(path: String, +items: List<&2, Item>,
     +globals: List<&2, Item>) -> List<&2, Segment>:
   +args = List.append(&2, Item, items, globals)
+  +scope = List.append(&2, Item, globals, items)
   List.concat(&2, Segment, [
     [Segment{path, [Bold{}]}],
     options_elem(has_plain_option(args)),
     required_options(args),
-    group_elems(items, List.append(&2, Item, globals, items)),
+    group_elems(scope, scope, []),
     positional_elems(items),
     command_elems(has_sub_item(items), needs_sub(items)),
   ])
