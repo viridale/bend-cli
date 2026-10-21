@@ -1,8 +1,18 @@
 name: ci
 
+# A push or pull request that changes only docs runs nothing; start a run
+# by hand from the Actions tab when one should. A newer push to the same
+# ref cancels the run in progress.
 on:
   push:
+    paths-ignore: ['**.md', LICENSE]
   pull_request:
+    paths-ignore: ['**.md', LICENSE]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,6 +21,7 @@ jobs:
   source_checks:
     name: Bend source checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -139,10 +150,11 @@ jobs:
         shell: bash
         run: |
           for app in build/pkg "bun build/pkg.js --"; do
+            read -ra cmd <<< "$app"
             for sig in DEFAULT IGNORE; do
               perl -e '$SIG{PIPE} = shift; pipe(my $r, my $w) or die;
                 close $r; open STDOUT, ">&", $w or die; close $w;
-                exec @ARGV or die' "$sig" $app run exit 3 &&
+                exec @ARGV or die' "$sig" "${cmd[@]}" run exit 3 &&
                 status=0 || status=$?
               [ "$status" = 141 ] ||
                 { echo "$app, SIGPIPE $sig: want 141, got $status"; exit 1; }
@@ -208,6 +220,7 @@ jobs:
   completions:
     name: Completions and man pages (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
