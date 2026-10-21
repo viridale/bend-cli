@@ -18,15 +18,10 @@ def Sys.columns(fd: U32) -> IO(U32):
   import "./sys.c"
   import "./sys.js"
 
-# Flushes stdout and ends the process with code; it does not return.
-def Sys.exit(code: U32) -> IO(Unit):
-  import "./sys.c"
-  import "./sys.js"
-
 def exit_when(zero: Bool, code: U32) -> IO(Unit):
   match zero:
     case True{}: IO.pure(Unit, Unit{})
-    case False{}: Sys.exit(code)
+    case False{}: IO.exit(code)
 
 # 0 returns, so work started with IO.fork can finish; any other code
 # flushes stdout and ends the process at once.

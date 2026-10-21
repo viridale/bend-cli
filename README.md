@@ -202,7 +202,7 @@ stdout and usage errors to stderr.
 - Run compiled JavaScript under Bun as `bun hello.js -- args`: Bun removes a
   `--` right after the script path.
 - The app module can be imported by laws. Keep the executable shell out of
-  their import graph: terminal probing and exit are host effects.
+  their import graph: terminal probing is a host effect.
 - Display width adds each code point's East Asian Width, except that an
   emoji sequence (joined with U+200D, with a skin tone or VS16, a keycap, a
   flag or a tag sequence) counts as 2 columns, as Rust's unicode-width 0.2

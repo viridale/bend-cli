@@ -1,5 +1,5 @@
-// Purpose: JavaScript host effects for run.bend: Sys.isatty, Sys.columns and
-// Sys.exit (§7.3), for -o x.js builds and `bend x.bend`.
+// Purpose: JavaScript host effects for run.bend: Sys.isatty and Sys.columns
+// (§7.3), for -o x.js builds and `bend x.bend`.
 // Expected output: none; it registers effects.
 // Run: bend main.bend -o build/pkg.js
 
@@ -13,11 +13,5 @@ function sys_columns(fd) {
   return (stream && stream.columns) || 0;
 }
 
-// Output is written synchronously, so nothing is pending at exit.
-function sys_exit(code) {
-  process.exit(code);
-}
-
 io_eff(CID(Sys.isatty), sys_isatty);
 io_eff(CID(Sys.columns), sys_columns);
-io_eff(CID(Sys.exit), sys_exit);

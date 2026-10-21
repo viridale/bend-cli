@@ -1,7 +1,6 @@
 # Purpose: an app that calls Run.host and Cli.eval itself and exits by
-# IO.die, so it reaches Sys.isatty and Sys.columns but never Sys.exit; its
-# native build fails unless sys.c registers only the effects a program
-# reaches. It prints NAME and the width Run.host probed.
+# IO.die instead of through Run.main. It prints NAME and the width Run.host
+# probed.
 # Expected output: `COLUMNS=100 bend tests/host.bend -- Ada` prints
 # `Ada 100`. `--check-only` prints SOME PROOFS FAIL listing only defs that
 # rely on sys.c and sys.js (F1).

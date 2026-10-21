@@ -363,8 +363,8 @@ def f32_cases() -> List<&2, Case>:
     ])},
   ]
 
-# tests/host.bend in every mode: an app that never reaches Sys.exit reads
-# its width through Run.host and exits with Quit's code.
+# tests/host.bend in every mode: an app that reads its width through
+# Run.host and exits with Quit's code by IO.die.
 def host_cases() -> List<&2, Case>:
   [
   Case{"host reads COLUMNS", ["COLUMNS=100"], ["Ada"], 0,

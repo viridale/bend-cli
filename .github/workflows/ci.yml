@@ -46,8 +46,7 @@ jobs:
       - name: Check source modules
         shell: bash
         run: |
-          run_defs=(Sys.isatty Sys.columns Sys.exit exit_when exit finish host
-            ended stepped main)
+          run_defs=(Sys.isatty Sys.columns host main)
           foreign() {
             local names=("${run_defs[@]/#/$1}" "${@:2}") list
             printf -v list '%s, ' "${names[@]}"
@@ -130,6 +129,17 @@ jobs:
             script -qec "build/pkg --help" /tmp/tty.txt </dev/null >/dev/null
           fi
           LC_ALL=C grep -q $'\033\\[' /tmp/tty.txt
+      # `pkg run exit 3` prints a line, then exits 3 by IO.exit, which must
+      # flush stdout first: with stdout a closed pipe, the write ends the
+      # process by SIGPIPE (141), as any other output to it does (SPEC F3).
+      - name: Closed stdout
+        shell: bash
+        run: |
+          for app in build/pkg "bun build/pkg.js --"; do
+            (sleep 1; $app run exit 3) | true
+            status=${PIPESTATUS[0]}
+            [ "$status" = 141 ] || { echo "$app: want 141, got $status"; exit 1; }
+          done
       # The examples' laws cover their parsing and each file's output; this
       # covers their IO: a greeting, grep over two files that match and one
       # that cannot be opened, and argbench's line.
