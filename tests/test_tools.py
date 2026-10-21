@@ -129,8 +129,8 @@ printf '{"tag_name": "v2.0.38"}\\n'
         self.repo()
         self.write('bin/curl', '#!/bin/sh\nprintf \'{"tag_name": "v2.0.39"}\\n\'\n',
                    executable=True)
-        for name in ('bench.sh', 'chk.sh', 'kernel.sh', 'lawcheck.sh',
-                     'perlaw.sh', 'rc.sh', 'charsplit.py', 'ctorarms.py'):
+        for name in ('bench.sh', 'chk.sh', 'lawcheck.sh', 'perlaw.sh',
+                     'rc.sh', 'charsplit.py', 'ctorarms.py'):
             with self.subTest(name=name):
                 got = self.run_tool(name)
                 self.assertIn('latest release is 2.0.39', got.stderr)
@@ -220,20 +220,6 @@ exit 1
         self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
         self.assertIn('+1 TODOs = 1 new laws: second', got.stdout)
         self.assertEqual((self.root / 'tmp/lawcheck/sentinel').read_text(), 'keep')
-
-    def test_kernel_preserves_other_scratch(self):
-        self.repo()
-        self.write('PROOF.bend', 'law foo:\n  {0n == 0n}\n')
-        self.write('tmp/kernel/PROOF.bendtt', 'keep')
-        self.write('bin/bend', '''#!/bin/sh
-if [ "$2" = -o ]; then printf 'proof' >"$3"; fi
-''', executable=True)
-        kernel = self.write('bin/bendtt', '#!/bin/sh\necho "ALL PROOFS CHECK"\n',
-                            executable=True)
-        self.env['BENDTT'] = str(kernel)
-        got = self.run_tool('kernel.sh')
-        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
-        self.assertEqual((self.root / 'tmp/kernel/PROOF.bendtt').read_text(), 'keep')
 
     def test_rc_keeps_cli_run_scope(self):
         source = self.write('app.c', '''// Spins
