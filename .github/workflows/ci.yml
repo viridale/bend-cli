@@ -131,14 +131,22 @@ jobs:
           LC_ALL=C grep -q $'\033\\[' /tmp/tty.txt
       # `pkg run exit 3` prints a line, then exits 3 by IO.exit, which must
       # flush stdout first: with stdout a closed pipe, the write ends the
-      # process by SIGPIPE (141), as any other output to it does (SPEC F3).
+      # process by SIGPIPE (141), as any other output to it does (SPEC F3,
+      # F15). perl closes the pipe's read end before exec, so no reader can
+      # race the write, and runs pkg with SIGPIPE at its default and ignored:
+      # the runtime raises it itself, so the runner's setting can't matter.
       - name: Closed stdout
         shell: bash
         run: |
           for app in build/pkg "bun build/pkg.js --"; do
-            (sleep 1; $app run exit 3) | true
-            status=${PIPESTATUS[0]}
-            [ "$status" = 141 ] || { echo "$app: want 141, got $status"; exit 1; }
+            for sig in DEFAULT IGNORE; do
+              perl -e '$SIG{PIPE} = shift; pipe(my $r, my $w) or die;
+                close $r; open STDOUT, ">&", $w or die; close $w;
+                exec @ARGV or die' "$sig" $app run exit 3 &&
+                status=0 || status=$?
+              [ "$status" = 141 ] ||
+                { echo "$app, SIGPIPE $sig: want 141, got $status"; exit 1; }
+            done
           done
       # The examples' laws cover their parsing and each file's output; this
       # covers their IO: a greeting, grep over two files that match and one
