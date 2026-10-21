@@ -248,18 +248,18 @@ are `build` with 1,000 and 10,000 `-I dK` pairs and as many inputs.
 
 | | one input | typical | `build --help` | `--help` | typo | bad number | mid | large | RSS, typical | RSS, large |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| bend-cli, native | 5.9 | 6.0 | 6.0 | 5.6 | 5.8 | 5.8 | 11.0 | 59.8 | 2.7 MB | 9.1 MB |
-| bend-cli, native, 1 thread | 5.7 | 5.8 | 5.8 | 5.7 | 5.7 | 5.4 | 11.0 | 59.9 | 2.7 MB | 9.1 MB |
-| bend-cli, JS on Bun | 43.6 | 44.6 | 45.2 | 43.0 | 43.9 | 43.0 | 62.7 | 185.2 | 46.8 MB | 150.4 MB |
-| clap (Rust) | 5.6 | 5.6 | 5.6 | 5.5 | 5.4 | 5.6 | 8.5 | 34.9 | 1.9 MB | 13.1 MB |
-| cobra (Go) | 6.3 | 6.1 | 6.0 | 6.1 | 6.0 | 6.1 | 8.4 | 30.4 | 4.8 MB | 11.0 MB |
-| argparse (Python) | 36.9 | 37.0 | 36.9 | 36.9 | 36.5 | 36.2 | 45.7 | 277.1 | 21.8 MB | 39.8 MB |
-| commander (JS on Bun) | 31.5 | 31.7 | 32.3 | 31.7 | 31.5 | 31.1 | 35.3 | 60.3 | 38.7 MB | 57.0 MB |
-| `/usr/bin/true` | 4.9 | 4.8 | 5.0 | 4.9 | 4.9 | 4.9 | 6.9 | 25.5 | 1.2 MB | 1.6 MB |
+| bend-cli, native | 5.7 | 5.7 | 5.7 | 5.7 | 5.7 | 5.7 | 9.5 | 42.8 | 2.7 MB | 9.0 MB |
+| bend-cli, native, 1 thread | 5.7 | 5.7 | 5.6 | 5.7 | 5.7 | 5.7 | 9.5 | 43.0 | 2.7 MB | 9.0 MB |
+| bend-cli, JS on Bun | 43.8 | 44.8 | 44.9 | 42.0 | 44.5 | 43.3 | 57.4 | 141.0 | 47.0 MB | 137.0 MB |
+| clap (Rust) | 5.7 | 5.7 | 5.8 | 5.6 | 5.8 | 5.8 | 9.0 | 35.9 | 1.9 MB | 13.1 MB |
+| cobra (Go) | 6.3 | 6.4 | 6.3 | 6.3 | 6.4 | 6.3 | 8.9 | 30.6 | 4.9 MB | 11.1 MB |
+| argparse (Python) | 37.0 | 37.1 | 37.7 | 37.5 | 37.1 | 37.4 | 46.5 | 280.2 | 21.7 MB | 39.8 MB |
+| commander (JS on Bun) | 30.4 | 30.5 | 31.1 | 31.0 | 30.7 | 30.3 | 34.8 | 60.7 | 38.7 MB | 57.2 MB |
+| `/usr/bin/true` | 4.9 | 4.8 | 4.8 | 4.9 | 4.9 | 4.8 | 7.1 | 26.2 | 1.2 MB | 1.6 MB |
 
-bend-cli 0.1.0.0 on Bend 2.0.38, clap 4.6.7 on Rust 1.96, cobra 1.10.2 on Go
-1.26, argparse on Python 3.14, and commander 15.0.0 and bend-cli's JS on Bun
-1.2.23.
+bend-cli at aa4fb94, after 0.1.0.0, on Bend 2.0.38 (0.1.0.0 took 59.8 ms on
+the large argv), clap 4.6.7 on Rust 1.96, cobra 1.10.2 on Go 1.26, argparse on
+Python 3.14, and commander 15.0.0 and bend-cli's JS on Bun 1.2.23.
 
 ## Upgrading
 
