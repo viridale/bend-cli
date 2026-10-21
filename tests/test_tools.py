@@ -260,6 +260,27 @@ case WL_CASE(FID_CLI_SPEC):
         self.assertEqual(got.stdout.splitlines()[1:],
                          ['FID_CLI_FOO 2 0 0', 'FID_RUN_BAR 0 1 0'])
 
+    def test_rc_reads_lower_case_def_names(self):
+        source = self.write('bench.c', '''// Spins
+// =====
+// Segments
+// =====
+case WL_CASE(FID____cli_foo):
+  term_keep(x);
+case WL_CASE(FID____cli_foo_k1):
+  term_keep(x);
+case WL_CASE(FID____cli_foo_c2):
+  ctr_take(x);
+case WL_CASE(FID____run_bar):
+  ctr_take(x);
+case WL_CASE(FID_run_text):
+  rfc_seal(x);
+''')
+        got = self.run_tool('rc.sh', source)
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertEqual(got.stdout.splitlines()[1:],
+                         ['FID_CLI_FOO 2 1 0', 'FID_RUN_BAR 0 1 0'])
+
     def test_rc_folds_closures_and_continuations_into_their_def(self):
         def build(name, c, k1, k2, orphan):
             return self.write(name, f'''// Spins

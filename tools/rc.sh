@@ -17,9 +17,10 @@
 # inlined everywhere print under its name though it has no segment.
 #
 # Bend names an imported def after its file's path from the harness, with
-# "_" for each "." and "/" ("../cli.bend" gives FID____CLI_<DEF>), and the
-# harness's own defs after nothing. The CLI and RUN defs under the most
-# "../" steps are the repo root's and print as FID_CLI_<DEF> and
+# "_" for each "." and "/" ("../cli.bend" gives FID____cli_<def>), and the
+# harness's own defs after nothing; this prints each name in upper case
+# (FID____CLI_<DEF>), as older Bends emitted it. The CLI and RUN defs under
+# the most "../" steps are the repo root's and print as FID_CLI_<DEF> and
 # FID_RUN_<DEF>, so bench/main.bend's own run_text stays out. A harness in
 # the root can't tell its own cli_* or run_* defs from them.
 set -euo pipefail
@@ -74,8 +75,9 @@ counts=$(LC_ALL=C awk '
     match($0, /spin_[0-9]+/); unit = substr($0, RSTART, RLENGTH); spin[unit] = 1
   }
   sec == "Spins" && /^}/ { unit = "" }
-  sec == "Segments" && match($0, /WL_CASE\(FID_[A-Z0-9_]+\)/) {
-    f = substr($0, RSTART + 8, RLENGTH - 9); b = f; sub(/_[CK][0-9]+$/, "", b)
+  sec == "Segments" && match($0, /WL_CASE\(FID_[A-Za-z0-9_]+\)/) {
+    f = toupper(substr($0, RSTART + 8, RLENGTH - 9)); b = f
+    sub(/_[CK][0-9]+$/, "", b)
     if (b != def) def = b
     unit = def ~ /^FID_(___)*(CLI|RUN)_/ ? def : ""
     if (unit != "") own[unit] = 1
