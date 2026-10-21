@@ -191,7 +191,8 @@ jobs:
               'build verbose=2 quiet=true output=out.bin include=src,lib jobs=1 format=text inputs=a.c'
           done
       # G6: stdout must not depend on the thread count. The times on stderr
-      # are reported, not checked, until the targets are set (SPEC §14.4).
+      # are reported, not checked: hosted runners vary by about 40% between
+      # runs of one commit.
       - name: Benchmark
         shell: bash
         run: |

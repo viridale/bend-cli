@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Purpose: check the argbench peers in bench/peers against the Bend app
-#   (examples/argbench), then time every implementation on four argvs: a
-#   small one, build's help, a misspelt option and a large one.
+#   (examples/argbench), then time every implementation on eight argvs:
+#   one input, a typical build, build's help, the root's help, a misspelt
+#   option, a bad number, and a mid and a large argv.
 # Expected output: "peerbench: <impl> agrees on <n> argvs" per
-#   implementation, then a table of median wall time per argv and peak RSS;
-#   exit 0 only when every implementation agrees with the native Bend app on
+#   implementation, then a table of median wall time per argv and peak RSS
+#   on the typical and the large argv, with a last row for /usr/bin/true,
+#   the cost of starting a process; -m prints the table as Markdown. It
+#   exits 0 only when every implementation agrees with the native Bend app on
 #   every checked argv and every timed run exits as expected. A peer whose
 #   toolchain is missing is skipped with a note. Refuses to run (exit 3)
 #   while the 1-minute load average is above -L; after building, waits up
 #   to 2 minutes for the load its builds raised to fall below it.
-# Run: tools/peerbench.sh [-n 10] [-s 10000] [-L load] [-c]
+# Run: tools/peerbench.sh [-n 10] [-s 10000] [-L load] [-c] [-m]
 #
 # Implementations: the Bend app built native (all cores, and --threads 1)
 # and as JS under Bun; clap (cargo), cobra (go), argparse (python3) and
@@ -18,10 +21,10 @@
 # option after an input as the end of INPUT...); an error argv must exit 2
 # with nothing on stdout, and stderr is not compared, since each library
 # words its errors and help in its own way. -c stops after the check. The
-# large argv is build with -s pairs `-I dK` and -s inputs `fK`; macOS
-# limits argv to 1 MiB, about 25000 pairs. Each run is timed from the
-# shell, so a time includes process start; runs rotate which
-# implementation goes first.
+# large argv is build with -s pairs `-I dK` and -s inputs `fK`, and the mid
+# one has a tenth as many; macOS limits argv to 1 MiB, about 25000 pairs.
+# Each run is timed from the shell, so a time includes process start; runs
+# rotate which implementation goes first.
 set -euo pipefail
 BEND_TOOLS_PIN=2.0.38
 # shellcheck source=.bend-version.sh
@@ -29,17 +32,19 @@ source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
 
 usage() {
-  echo 'usage: tools/peerbench.sh [-n runs] [-s size] [-L max-load] [-c]' >&2
+  echo 'usage: tools/peerbench.sh [-n runs] [-s size] [-L max-load] [-c] [-m]' >&2
   exit 2
 }
 if [ "$(uname)" = Darwin ]; then ncpu=$(sysctl -n hw.ncpu); else ncpu=$(nproc); fi
 runs=10 size=10000 limit=$(awk -v n="$ncpu" 'BEGIN { print n / 4 }') check_only=0
-while getopts n:s:L:c opt; do
+markdown=0
+while getopts n:s:L:cm opt; do
   case $opt in
     n) runs=$OPTARG ;;
     s) size=$OPTARG ;;
     L) limit=$OPTARG ;;
     c) check_only=1 ;;
+    m) markdown=1 ;;
     *) usage ;;
   esac
 done
@@ -108,12 +113,22 @@ cmd() {
     cobra) c=("$out/cobra") ;;
     argparse) c=(python3 "$peers/argparse/argbench.py") ;;
     commander) c=(bun "$peers/commander/argbench.js") ;;
+    true) c=(/usr/bin/true) ;;
   esac
 }
 
-large=(build)
-for ((i = 0; i < size; i++)); do large+=(-I "d$i"); done
-for ((i = 0; i < size; i++)); do large+=("f$i"); done
+# big_argv <n>: sets big to build with n pairs `-I dK`, then n inputs `fK`.
+big_argv() {
+  local i
+  big=(build)
+  for ((i = 0; i < $1; i++)); do big+=(-I "d$i"); done
+  for ((i = 0; i < $1; i++)); do big+=("f$i"); done
+}
+mid_size=$((size / 10 > 0 ? size / 10 : 1))
+big_argv "$mid_size"
+mid=("${big[@]}")
+big_argv "$size"
+large=("${big[@]}")
 
 # ---- Check ----
 
@@ -183,9 +198,10 @@ for impl in "${impls[@]}"; do
     agree "$impl" "c$n" "$want" ${argv[@]+"${argv[@]}"} || ok=0
     n=$((n + 1))
   done <<<"$checks"
+  agree "$impl" mid 0 "${mid[@]}" || ok=0
   agree "$impl" large 0 "${large[@]}" || ok=0
   if [ "$ok" = 1 ]; then
-    echo "peerbench: $impl agrees on $((n + 1)) argvs"
+    echo "peerbench: $impl agrees on $((n + 2)) argvs"
   else
     status=1
   fi
@@ -207,13 +223,17 @@ if [ "$(uname)" = Darwin ]; then
 else
   timer=(/usr/bin/time -v) rss_re='^.*Maximum resident set size \(kbytes\): ([0-9]+)' rss_k=1024
 fi
-cases=(small help error large)
+cases=(one typical help roothelp typo badnum mid large)
 # argv_of <case>: sets argv to the case's argv and want to its exit code.
 argv_of() {
   case $1 in
-    small) argv=(build -vv -o out.bin -I src -I lib -j 4 -f json a.c b.c) want=0 ;;
+    one) argv=(build a.c) want=0 ;;
+    typical) argv=(build -vv -o out.bin -I src -I lib -j 4 -f json a.c b.c) want=0 ;;
     help) argv=(build --help) want=0 ;;
-    error) argv=(build --ouput x a.c) want=2 ;;
+    roothelp) argv=(--help) want=0 ;;
+    typo) argv=(build --ouput x a.c) want=2 ;;
+    badnum) argv=(build -j x a) want=2 ;;
+    mid) argv=("${mid[@]}") want=0 ;;
     large) argv=("${large[@]}") want=0 ;;
   esac
 }
@@ -224,6 +244,7 @@ run() {
   local t0 t1 rc rss
   cmd "$1"
   argv_of "$2"
+  [ "$1" != true ] || want=0
   t0=$EPOCHREALTIME
   "${timer[@]}" -o "$work/time" "${c[@]}" "${argv[@]}" >"$work/run.out" 2>"$work/run.err" \
     </dev/null && rc=0 || rc=$?
@@ -240,29 +261,57 @@ run() {
     'BEGIN { printf "%.3f %d\n", (b - a) * 1000, r * k }' >>"$work/$1.$2.t"
 }
 
-for impl in "${impls[@]}"; do
+# true runs only in the timing: it prints nothing, so it can't agree.
+timed=("${impls[@]}" true)
+for impl in "${timed[@]}"; do
   for case in "${cases[@]}"; do run "$impl" "$case" 0; done
 done
-count=${#impls[@]}
+count=${#timed[@]}
 for ((i = 0; i < runs; i++)); do
   for case in "${cases[@]}"; do
     for ((j = 0; j < count; j++)); do
-      run "${impls[(i + j) % count]}" "$case" 1
+      run "${timed[(i + j) % count]}" "$case" 1
     done
   done
 done
 
 median() { cut -d' ' -f1 "$1" | sort -n | awk '{ v[NR] = $1 } END { print v[int((NR + 1) / 2)] }'; }
-echo "peerbench: median of $runs runs (ms); large is build with $size \`-I dK\` pairs" \
-  "and $size inputs; peak RSS over all runs; load limit $limit, $ncpu CPUs"
-printf '%-10s %9s %9s %9s %10s %9s\n' '' small help error large 'peak RSS'
-for impl in "${impls[@]}"; do
-  row=() peak=0
-  for case in "${cases[@]}"; do
-    row+=("$(median "$work/$impl.$case.t")")
-    p=$(cut -d' ' -f2 "$work/$impl.$case.t" | sort -n | tail -n 1)
-    ((p > peak)) && peak=$p
+# peak <file>: the largest RSS among a case's runs, in MB.
+peak() { cut -d' ' -f2 "$1" | sort -n | tail -n 1 | awk '{ printf "%.1f", $1 / 1048576 }'; }
+# name_of <impl>: sets name to the impl's row label in Markdown.
+name_of() {
+  case $1 in
+    bend) name='bend-cli, native' ;;
+    bend-1t) name='bend-cli, native, 1 thread' ;;
+    bend-js) name='bend-cli, JS on Bun' ;;
+    clap) name='clap (Rust)' ;;
+    cobra) name='cobra (Go)' ;;
+    argparse) name='argparse (Python)' ;;
+    commander) name='commander (JS on Bun)' ;;
+    true) name="\`/usr/bin/true\`" ;;
+  esac
+}
+
+if [ "$markdown" = 1 ]; then
+  echo "| | one input | typical | \`build --help\` | \`--help\` | typo | bad number |" \
+    "mid | large | RSS, typical | RSS, large |"
+  echo '|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|'
+  for impl in "${timed[@]}"; do
+    name_of "$impl"
+    printf '| %s |' "$name"
+    for case in "${cases[@]}"; do printf ' %.1f |' "$(median "$work/$impl.$case.t")"; done
+    printf ' %s MB | %s MB |\n' "$(peak "$work/$impl.typical.t")" "$(peak "$work/$impl.large.t")"
   done
-  printf '%-10s %9s %9s %9s %10s %6.1f MB\n' "$impl" "${row[@]}" \
-    "$(awk -v b="$peak" 'BEGIN { printf "%.1f", b / 1048576 }')"
+  exit 0
+fi
+echo "peerbench: median of $runs runs (ms); mid and large are build with $mid_size and" \
+  "$size \`-I dK\` pairs and as many inputs; peak RSS (MB) on typical and large;" \
+  "load limit $limit, $ncpu CPUs"
+printf '%-10s' ''
+printf ' %9s' "${cases[@]}" 'RSS typ' 'RSS large'
+echo
+for impl in "${timed[@]}"; do
+  printf '%-10s' "$impl"
+  for case in "${cases[@]}"; do printf ' %9s' "$(median "$work/$impl.$case.t")"; done
+  printf ' %9s %9s\n' "$(peak "$work/$impl.typical.t")" "$(peak "$work/$impl.large.t")"
 done

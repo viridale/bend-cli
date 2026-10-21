@@ -67,10 +67,8 @@ stderr and exit with status `70`.
 See [`examples/hello`](examples/hello) for this quickstart with its laws and
 proofs, [`examples/grep`](examples/grep) for a multi-option command with
 environment fallbacks, ANSI color, and file I/O, and
-[`examples/argbench`](examples/argbench) for a benchmark CLI with equivalent
-implementations in `clap`, `cobra`, `argparse`, and `commander` under
-[`bench/peers`](bench/peers) (verified for identical output and timed by
-`tools/peerbench.sh`).
+[`examples/argbench`](examples/argbench) for the benchmark CLI behind
+[Performance](#performance).
 
 ## Define commands
 
@@ -238,6 +236,30 @@ CI runs on macOS arm64 and Ubuntu 24.04 x86-64. Native builds require `clang`;
 compiled JavaScript requires Bun 1.1 or newer. Windows is outside the 1.x
 support scope. CI also tests generated completions in bash 4.4 and 5, zsh, and
 fish 3.3 and 4, and lints generated man pages with `mandoc`.
+
+## Performance
+
+[`examples/argbench`](examples/argbench) and its ports to clap, cobra, argparse
+and commander in [`bench/peers`](bench/peers) print the same output on 23
+checked argvs. `tools/peerbench.sh -n 20 -m` times each one: median wall time
+in milliseconds over 20 runs, process start included, on an Apple M3 Max with
+macOS 26.5. `/usr/bin/true` is the cost of starting a process; mid and large
+are `build` with 1,000 and 10,000 `-I dK` pairs and as many inputs.
+
+| | one input | typical | `build --help` | `--help` | typo | bad number | mid | large | RSS, typical | RSS, large |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| bend-cli, native | 5.9 | 6.0 | 6.0 | 5.6 | 5.8 | 5.8 | 11.0 | 59.8 | 2.7 MB | 9.1 MB |
+| bend-cli, native, 1 thread | 5.7 | 5.8 | 5.8 | 5.7 | 5.7 | 5.4 | 11.0 | 59.9 | 2.7 MB | 9.1 MB |
+| bend-cli, JS on Bun | 43.6 | 44.6 | 45.2 | 43.0 | 43.9 | 43.0 | 62.7 | 185.2 | 46.8 MB | 150.4 MB |
+| clap (Rust) | 5.6 | 5.6 | 5.6 | 5.5 | 5.4 | 5.6 | 8.5 | 34.9 | 1.9 MB | 13.1 MB |
+| cobra (Go) | 6.3 | 6.1 | 6.0 | 6.1 | 6.0 | 6.1 | 8.4 | 30.4 | 4.8 MB | 11.0 MB |
+| argparse (Python) | 36.9 | 37.0 | 36.9 | 36.9 | 36.5 | 36.2 | 45.7 | 277.1 | 21.8 MB | 39.8 MB |
+| commander (JS on Bun) | 31.5 | 31.7 | 32.3 | 31.7 | 31.5 | 31.1 | 35.3 | 60.3 | 38.7 MB | 57.0 MB |
+| `/usr/bin/true` | 4.9 | 4.8 | 5.0 | 4.9 | 4.9 | 4.9 | 6.9 | 25.5 | 1.2 MB | 1.6 MB |
+
+bend-cli 0.1.0.0 on Bend 2.0.38, clap 4.6.7 on Rust 1.96, cobra 1.10.2 on Go
+1.26, argparse on Python 3.14, and commander 15.0.0 and bend-cli's JS on Bun
+1.2.23.
 
 ## Upgrading
 

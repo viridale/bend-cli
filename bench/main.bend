@@ -10,6 +10,9 @@
 # spec has a problem.
 # Run: bend bench/main.bend -o build/bench, then
 #   build/bench +RTS --threads 1 -RTS and build/bench
+# Targets, native on Apple M-series with --threads 1: eval at most 200 us
+# per argv, help at most 2 ms per page, and `pkg --help` (main.bend) at most
+# 20 ms of wall time. 0.1.0.0 on an Apple M3 Max: 140 us, 0.23 ms and 3 ms.
 
 import Base
 import ../cli.bend as Cli
