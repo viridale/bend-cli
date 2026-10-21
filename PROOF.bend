@@ -4293,6 +4293,68 @@ def findkey_append(xs: List<&2, Cli.OptKey>, +ys: List<&2, Cli.OptKey>,
     case k <> t Some{h}: {==}
     case k <> t None{}: findkey_append(t, ys, q, Cli.key_found(k, q))
 
+# key_lookup finds what find_key finds: key_rank counts the keys find_key
+# passes (rank_shift), and List.get skips as many (at_shift).
+# A rank one place later: key_rank's answer from a head one key earlier.
+def rank_next(rank: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+  match rank:
+    case None{}: None{}
+    case Some{at}: Some{1n+at}
+
+def rank_shift(keys: List<&2, Cli.OptKey>, +q: String, at: Nat, h: Bool) ->
+    {rank_next(Cli.key_rank(keys, q, at, h))
+      == Cli.key_rank(keys, q, 1n+at, h) : Maybe<&2, Nat>}:
+  match keys h:
+    case Nil{} False{}: {==}
+    case Nil{} True{}: {==}
+    case k <> t True{}: {==}
+    case k <> +t False{}: rank_shift(t, q, 1n+at, Cli.head_named(t, q))
+
+def at_shift(rank: Maybe<&2, Nat>, -k: Cli.OptKey,
+    -t: List<&2, Cli.OptKey>) ->
+    {Cli.key_at(rank, t) == Cli.key_at(rank_next(rank), k <> t)
+      : Maybe<&2, Cli.OptFound>}:
+  match rank:
+    case None{}: {==}
+    case Some{at}: {==}
+
+def lookup_step(s: Bool, +n: String, +f: Cli.OptFound,
+    +t: List<&2, Cli.OptKey>, +q: String,
+    e: {s == Cli.same_text(q, n) : Bool},
+    ih: {Cli.find_key(t, q, None{}) == Cli.key_lookup(t, q)
+      : Maybe<&2, Cli.OptFound>}) ->
+    {Cli.find_key(Cli.OptKey{n, f} <> t, q, None{})
+      == Cli.key_lookup(Cli.OptKey{n, f} <> t, q)
+      : Maybe<&2, Cli.OptFound>}:
+  match s:
+    case True{}:
+      %e : {Cli.find_key(t, q, Bool.pick(Maybe<&2, Cli.OptFound>, _,
+          Some{f}, None{}))
+        == Cli.key_at(Cli.key_rank(Cli.OptKey{n, f} <> t, q, 0n, _),
+          Cli.OptKey{n, f} <> t) : Maybe<&2, Cli.OptFound>}
+      %findkey_some(t, q, f) : {_ == Some{f} : Maybe<&2, Cli.OptFound>}
+      {==}
+    case False{}:
+      %e : {Cli.find_key(t, q, Bool.pick(Maybe<&2, Cli.OptFound>, _,
+          Some{f}, None{}))
+        == Cli.key_at(Cli.key_rank(Cli.OptKey{n, f} <> t, q, 0n, _),
+          Cli.OptKey{n, f} <> t) : Maybe<&2, Cli.OptFound>}
+      %rank_shift(t, q, 0n, Cli.head_named(t, q)) :
+        {Cli.find_key(t, q, None{}) == Cli.key_at(_, Cli.OptKey{n, f} <> t)
+          : Maybe<&2, Cli.OptFound>}
+      %at_shift(Cli.key_rank(t, q, 0n, Cli.head_named(t, q)),
+        Cli.OptKey{n, f}, t) :
+        {Cli.find_key(t, q, None{}) == _ : Maybe<&2, Cli.OptFound>}
+      ih
+
+def find_lookup(keys: List<&2, Cli.OptKey>, +q: String) ->
+    {Cli.find_key(keys, q, None{}) == Cli.key_lookup(keys, q)
+      : Maybe<&2, Cli.OptFound>}:
+  match keys:
+    case Nil{}: {==}
+    case Cli.OptKey{+n, f} <> +t:
+      lookup_step(Cli.same_text(q, n), n, f, t, q, {==}, find_lookup(t, q))
+
 # A key's polarity, as opt_key computes it from the key's name.
 def pol(+name: String, info: Cli.ArgInfo) -> Bool:
   match info:
@@ -4620,6 +4682,11 @@ def option_go(items: List<&2, Cli.Item>, +q: String) ->
     case Cli.Builtin{} <> tail: option_go(tail, q)
 
 def Laws.p19_option(items, globals, path, query):
+  %find_lookup(List.append(&2, Cli.OptKey,
+      Cli.spec_keys(Cli.spec_items(items)),
+      Cli.spec_keys(Cli.spec_items(globals))), query) :
+    {_ == Maybe.or(&2, Cli.OptFound, Cli.find_option(items, query),
+      Cli.find_option(globals, query)) : Maybe<&2, Cli.OptFound>}
   %findkey_append(Cli.spec_keys(Cli.spec_items(items)),
     Cli.spec_keys(Cli.spec_items(globals)), query, None{}) :
     {_ == Maybe.or(&2, Cli.OptFound, Cli.find_option(items, query),
@@ -8121,8 +8188,7 @@ def value_hit(b: Bool, kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
     ev: {Bool.or(Bool.not(b), Bool.and(Cli.kind_valued(kind),
       no_bad(Cli.value_bad(attrs, v)))) == True{} : Bool},
     ok: {gib(kind, attrs, g) == True{} : Bool}) ->
-    {gib(kind, attrs, Bool.pick(Cli.Gather, b,
-      Cli.gather_value(g, v, Cli.kind_many(kind)), g)) == True{} : Bool}:
+    {gib(kind, attrs, Cli.gather_value_if(b, g, v, kind)) == True{} : Bool}:
   match b:
     case True{}: value_step(kind, attrs, g, v, ev, ok)
     case False{}: ok
@@ -8156,8 +8222,7 @@ def flag_hit(b: Bool, kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
     +g: Cli.Gather, bv: Bool,
     ev: {Bool.or(Bool.not(b), Cli.kind_flag(kind)) == True{} : Bool},
     ok: {gib(kind, attrs, g) == True{} : Bool}) ->
-    {gib(kind, attrs, Bool.pick(Cli.Gather, b, Cli.gather_flag(g, bv), g))
-      == True{} : Bool}:
+    {gib(kind, attrs, Cli.gather_flag_if(b, g, bv)) == True{} : Bool}:
   match b:
     case True{}: flag_step(kind, attrs, g, bv, ev)
     case False{}: ok
@@ -8192,11 +8257,17 @@ def count_hit(b: Bool, kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
     +g: Cli.Gather,
     ev: {Bool.or(Bool.not(b), Cli.kind_count(kind)) == True{} : Bool},
     ok: {gib(kind, attrs, g) == True{} : Bool}) ->
-    {gib(kind, attrs, Bool.pick(Cli.Gather, b, Cli.gather_count(g), g))
-      == True{} : Bool}:
+    {gib(kind, attrs, Cli.gather_count_if(b, g)) == True{} : Bool}:
   match b:
     case True{}: count_step(kind, attrs, g, ev)
     case False{}: ok
+
+# P18 the other way round, to turn the code's same_text into the String.eq
+# that ev_ok states.
+def text_sym(+a: String, +b: String) ->
+    {String.eq(a, b) == Cli.same_text(a, b) : Bool}:
+  %Laws.p18_text(a, b) : {_ == Cli.same_text(a, b) : Bool}
+  {==}
 
 def gather_step(e: Cli.ScanEvent, +id: String, +kind: Cli.UsageKind,
     +attrs: List<&2, Cli.Item>, +g: Cli.Gather,
@@ -8204,11 +8275,17 @@ def gather_step(e: Cli.ScanEvent, +id: String, +kind: Cli.UsageKind,
     ev: {ev_ok(e, kind, attrs, id) == True{} : Bool}) ->
     {gib(kind, attrs, Cli.gather_event(e, id, kind, g)) == True{} : Bool}:
   match e:
-    case Cli.ValueHit{k, +v}:
+    case Cli.ValueHit{+k, +v}:
+      %text_sym(k, id) : {gib(kind, attrs,
+        Cli.gather_value_if(_, g, v, kind)) == True{} : Bool}
       value_hit(String.eq(k, id), kind, attrs, g, v, ev, ok)
-    case Cli.FlagHit{k, b}:
+    case Cli.FlagHit{+k, b}:
+      %text_sym(k, id) : {gib(kind, attrs, Cli.gather_flag_if(_, g, b))
+        == True{} : Bool}
       flag_hit(String.eq(k, id), kind, attrs, g, b, ev, ok)
-    case Cli.CountHit{k}:
+    case Cli.CountHit{+k}:
+      %text_sym(k, id) : {gib(kind, attrs, Cli.gather_count_if(_, g))
+        == True{} : Bool}
       count_hit(String.eq(k, id), kind, attrs, g, ev, ok)
     case Cli.Operand{t}: ok
     case Cli.Enter{n}: ok
@@ -11376,19 +11453,22 @@ def SomeEqs(h: Char) -> Type:
   (@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
     @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
     {Cli.scan_short_go(t, Cli.scan_event(st, Cli.FlagHit{k, p}),
-      Cli.find_short_for_head(t, Cli.scan_event(st, Cli.FlagHit{k, p})))
+      Cli.find_short_for_head(t,
+        Cli.scan_state_keys(Cli.scan_event(st, Cli.FlagHit{k, p}))))
       == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
         Cli.ArgInfo{k, u, s, l, Cli.FlagKind{}, a}, p}}) : Cli.Mode}) &
   ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
     @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
     {Cli.scan_short_go(t, Cli.scan_event(st, Cli.CountHit{k}),
-      Cli.find_short_for_head(t, Cli.scan_event(st, Cli.CountHit{k})))
+      Cli.find_short_for_head(t,
+        Cli.scan_state_keys(Cli.scan_event(st, Cli.CountHit{k}))))
       == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
         Cli.ArgInfo{k, u, s, l, Cli.CountKind{}, a}, p}}) : Cli.Mode}) &
   ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
     @s: String -> @l: String -> @a: List<&2, Cli.Item> -> @p: Bool ->
     {Cli.scan_short_go(t, Cli.scan_event(st, Cli.FlagHit{k, p}),
-      Cli.find_short_for_head(t, Cli.scan_event(st, Cli.FlagHit{k, p})))
+      Cli.find_short_for_head(t,
+        Cli.scan_state_keys(Cli.scan_event(st, Cli.FlagHit{k, p}))))
       == Cli.scan_short_go(SCon{h, t}, st, Some{Cli.OptFound{
         Cli.ArgInfo{k, u, s, l, Cli.NegatableKind{}, a}, p}}) : Cli.Mode}) &
   ((@t: String -> @st: Cli.ScanState -> @k: String -> @u: String ->
@@ -11569,7 +11649,8 @@ def short_view(h: Char) -> ShortView(h):
 
 def ShortIH(t: String, items0: List<&2, Cli.Item>, id: String) -> Type:
   @st: Cli.ScanState -> SInv(st, items0, id) ->
-    MInv(Cli.scan_short_go(t, st, Cli.find_short_for_head(t, st)), items0, id)
+    MInv(Cli.scan_short_go(t, st,
+      Cli.find_short_for_head(t, Cli.scan_state_keys(st))), items0, id)
 
 def ssv_inv(value: String, +state: Cli.ScanState, +x: Cli.ArgInfo,
     +q: String, +pol: Bool, -items0: List<&2, Cli.Item>, +id: String,
@@ -11658,6 +11739,19 @@ def sg_kind(kind: Cli.UsageKind, +k: String, +u: String, +s: String,
             MInv(_, items0, id)
           settle_inv(state, items0, id, inv)
 
+# The scanner looks a short option up in its scope's keys alone.
+def scope_keys(state: Cli.ScanState, +q: String) ->
+    {Cli.find_option_scope(Cli.scan_state_scope(state), q)
+      == Cli.key_lookup(Cli.scan_state_keys(state), q)
+      : Maybe<&2, Cli.OptFound>}:
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      match scope:
+        case Cli.Scope{path, spec}:
+          match spec:
+            case Cli.Spec{keys, args, slots, variadic, subs, has_sub, ext,
+                needs_sub, version, digit_short, inherit}: {==}
+
 def sg_found(found: Maybe<&2, Cli.OptFound>, -h: Char, +t: String,
     +state: Cli.ScanState, +q: String, -items0: List<&2, Cli.Item>,
     +id: String,
@@ -11724,32 +11818,53 @@ def sg_cons(+h: Char, +t: String, +state: Cli.ScanState,
     -items0: List<&2, Cli.Item>, +id: String, v: ShortView(h),
     inv: SInv(state, items0, id), ih: ShortIH(t, items0, id)) ->
     MInv(Cli.scan_short_go(SCon{h, t}, state,
-      Cli.find_short_for_head(SCon{h, t}, state)), items0, id):
+      Cli.find_short_for_head(SCon{h, t}, Cli.scan_state_keys(state))),
+      items0, id):
   match v:
     case Inl{+e}:
-      sg_found(Cli.find_short_for_head(SCon{h, t}, state), h, t, state,
-        String.append("-", Char.show(h)), items0, id, {==}, inv,
+      sg_found(Cli.find_short_for_head(SCon{h, t},
+        Cli.scan_state_keys(state)), h, t, state,
+        String.append("-", Char.show(h)), items0, id,
+        scope_keys(state, String.append("-", Char.show(h))), inv,
         iv => help_none(h, t, state, items0, id, e, iv),
         eqs_at(Chr{104}, h, e, some_eqs_104()), ih)
     case Inr{Inl{+e}}:
-      sg_found(Cli.find_short_for_head(SCon{h, t}, state), h, t, state,
-        String.append("-", Char.show(h)), items0, id, {==}, inv,
+      sg_found(Cli.find_short_for_head(SCon{h, t},
+        Cli.scan_state_keys(state)), h, t, state,
+        String.append("-", Char.show(h)), items0, id,
+        scope_keys(state, String.append("-", Char.show(h))), inv,
         iv => version_none(h, t, state, items0, id, e, iv),
         eqs_at(Chr{86}, h, e, some_eqs_86()), ih)
     case Inr{Inr{(ne, eqs)}}:
-      sg_found(Cli.find_short_for_head(SCon{h, t}, state), h, t, state,
-        String.append("-", Char.show(h)), items0, id, {==}, inv,
+      sg_found(Cli.find_short_for_head(SCon{h, t},
+        Cli.scan_state_keys(state)), h, t, state,
+        String.append("-", Char.show(h)), items0, id,
+        scope_keys(state, String.append("-", Char.show(h))), inv,
         iv => other_none(h, t, state, items0, id, ne, iv), eqs, ih)
 
 def sg_inv(chars: String, +state: Cli.ScanState,
     -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
     MInv(Cli.scan_short_go(chars, state,
-      Cli.find_short_for_head(chars, state)), items0, id):
+      Cli.find_short_for_head(chars, Cli.scan_state_keys(state))), items0, id):
   match chars:
     case SNil{}: settle_inv(state, items0, id, inv)
     case SCon{+h, +t}:
       sg_cons(h, t, state, items0, id, short_view(h), inv,
         st => iv => sg_inv(t, st, items0, id, iv))
+
+# scan_short opens the state only to hand its scope's keys to the lookup.
+def short_open(state: Cli.ScanState, token: String) ->
+    {Cli.scan_short_go(String.drop(token, 1n), state,
+      Cli.find_short_for_head(String.drop(token, 1n),
+        Cli.scan_state_keys(state)))
+      == Cli.scan_short(state, token) : Cli.Mode}:
+  match state:
+    case Cli.ScanState{scope, events, resting, count, external, issue}:
+      match scope:
+        case Cli.Scope{path, spec}:
+          match spec:
+            case Cli.Spec{keys, args, slots, variadic, subs, has_sub, ext,
+                needs_sub, version, digit_short, inherit}: {==}
 
 def dc_inv(operand: Bool, +token: String, +state: Cli.ScanState,
     -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
@@ -11758,7 +11873,9 @@ def dc_inv(operand: Bool, +token: String, +state: Cli.ScanState,
     case True{}:
       settle_inv(Cli.scan_operand(state, token), items0, id,
         operand_inv(state, token, items0, id, inv))
-    case False{}: sg_inv(String.drop(token, 1n), state, items0, id, inv)
+    case False{}:
+      %short_open(state, token) : MInv(_, items0, id)
+      sg_inv(String.drop(token, 1n), state, items0, id, inv)
 
 def dash_inv(+token: String, +state: Cli.ScanState,
     -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->

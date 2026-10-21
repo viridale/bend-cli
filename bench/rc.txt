@@ -273,3 +273,18 @@
 #   FID_CLI_GROUP_ELEM 0 0 4 do the same for the usage line, once per
 #   need_one rule in scope. tools/bench.sh: threads=1 177.3 -> 178.1 ms,
 #   all cores 43.0 -> 42.8 ms, peak RSS 10.7 -> 10.8 MB, stdout identical.
+#
+# A huge argv parsed faster, against main's build (7dcb4f9); bench/main.bend
+# and main.bend give the same per-def diff, and the static total 5703 -> 5672
+# (main.bend 5816 -> 5785):
+# FID_CLI_GATHER_EVENT 2 9 6 -> 1 0 8: its hit arms match on same_text
+#   instead of building both outcomes for Bool.pick, so a miss keeps and
+#   takes nothing; the gone FID_CLI_GATHER_COUNT 0 0 2 is inlined here and
+#   brings its two seals. It runs once per event per option.
+# FID_CLI_APPEND_UNIQUE 3 0 2 -> 0 0 2, FID_CLI_GATHER_EVENTS 1 6 0 ->
+#   0 6 0, FID_CLI_RESOLVE_OPTION 10 1 7 -> 5 1 7 and FID_CLI_SCAN_OPEN
+#   101 15 20 -> 89 15 20 fall; the new FID_CLI_HYPHEN_OPERAND and
+#   FID_CLI_F32_OPERAND count 0 0 0. tools/bench.sh: threads=1 181.2 ->
+#   174.6 ms, all cores 41.8 -> 42.6 ms, peak RSS 10.7 -> 10.9 MB, stdout
+#   identical; on argbench's build with 10000 -I pairs and 10000 inputs,
+#   threads=1 59.9 -> 43.9 ms, all cores 60.7 -> 43.6 ms.

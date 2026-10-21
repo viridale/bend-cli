@@ -2624,13 +2624,52 @@ def find_key(keys: List<&2, OptKey>, +query: String,
     case key <> tail Some{hit}: Some{hit}
     case key <> tail None{}: find_key(tail, query, key_found(key, query))
 
+# Whether keys' first key is named query. It only reads keys, so a walk
+# that asks before it takes a key need not copy the keys it passes.
+def head_named(keys: List<&2, OptKey>, +query: String) -> Bool:
+  match keys:
+    case Nil{}: False{}
+    case OptKey{name, found} <> tail: same_text(query, name)
+
+# The position of the first of keys named query, where hit says whether
+# keys' head is and at is its position. It only reads keys: a walk that
+# takes them, as find_key does, copies every field of each key it passes.
+def key_rank(keys: List<&2, OptKey>, +query: String, at: Nat, hit: Bool) ->
+    Maybe<&2, Nat>:
+  match keys hit:
+    case Nil{} _: None{}
+    case key <> tail True{}: Some{at}
+    case key <> +tail False{}:
+      next = head_named(tail, query)
+      key_rank(tail, query, 1n+at, next)
+
+def key_found_at(key: Maybe<&2, OptKey>) -> Maybe<&2, OptFound>:
+  match key:
+    case None{}: None{}
+    case Some{OptKey{name, found}}: Some{found}
+
+# List.get drops each key it passes whole, where a walk over OptKey would
+# open it.
+def key_at(rank: Maybe<&2, Nat>, keys: List<&2, OptKey>) ->
+    Maybe<&2, OptFound>:
+  match rank:
+    case None{}: None{}
+    case Some{at}: key_found_at(List.get(&2, OptKey, keys, at))
+
+# find_key(keys, query, None{}), copying only the key it finds.
+def key_lookup(+keys: List<&2, OptKey>, +query: String) ->
+    Maybe<&2, OptFound>:
+  hit = head_named(keys, query)
+  rank = key_rank(keys, query, 0n, hit)
+  key_at(rank, keys)
+
 # A scope's own args answer before its globals, as in find_option.
 def find_option_scope(scope: Scope, query: String) ->
     Maybe<&2, OptFound>:
   match scope:
     case Scope{path, Spec{keys, args, slots, variadic, subs, has_sub,
         external, needs_sub, version, digit_short, inherit}}:
-      find_key(keys, query, None{})
+      key_lookup(keys, query)
 
 # Whether items alias query; after a hit it walks no further.
 def has_alias(items: List<&2, Item>, +query: String, found: Bool) -> Bool:
@@ -3102,15 +3141,24 @@ def arg_is_f32(info: ArgInfo) -> Bool:
     case ArgInfo{id, usage, short, long, kind, attrs}:
       has_as_f32(attrs)
 
-def fetch_allowed(scope: Scope, +info: ArgInfo,
+# Whether info's value may be token, which starts with "-".
+def fetch_dash_allowed(scope: Scope, +info: ArgInfo,
     +token: String) -> Bool:
   Bool.and(Bool.not(String.eq(token, "--")),
-    Bool.or(Bool.not(String.starts_with(token, "-")),
-      Bool.or(String.eq(token, "-"),
-        Bool.or(arg_has_hyphen(info),
-          Bool.and(arg_is_f32(info),
-            Bool.and(is_negative_number(token),
-              Bool.not(scope_digit_short(scope))))))))
+    Bool.or(String.eq(token, "-"),
+      Bool.or(arg_has_hyphen(info),
+        Bool.and(arg_is_f32(info),
+          Bool.and(is_negative_number(token),
+            Bool.not(scope_digit_short(scope)))))))
+
+def fetch_allowed_case(dash: Bool, scope: Scope, info: ArgInfo,
+    token: String) -> Bool:
+  match dash:
+    case True{}: fetch_dash_allowed(scope, info, token)
+    case False{}: True{}
+
+def fetch_allowed(scope: Scope, info: ArgInfo, +token: String) -> Bool:
+  fetch_allowed_case(String.starts_with(token, "-"), scope, info, token)
 
 def scan_fetch_result(allowed: Bool, state: ScanState,
     info: ArgInfo, token: String) -> Mode:
@@ -3233,13 +3281,19 @@ def scan_long(+token: String, +state: ScanState) -> Mode:
   scan_long_found(find_option_scope(scan_state_scope(state), name),
     name, after_equal(token), state)
 
-def find_short_for_head(chars: String, state: ScanState) ->
+# The keys of state's scope.
+def scan_state_keys(state: ScanState) -> List<&2, OptKey>:
+  match state:
+    case ScanState{Scope{path, Spec{keys, args, slots, variadic, subs,
+        has_sub, external, needs_sub, version, digit_short, inherit}},
+        events, resting, positional_count, ext, issue}: keys
+
+def find_short_for_head(chars: String, keys: List<&2, OptKey>) ->
     Maybe<&2, OptFound>:
   match chars:
     case SNil{}: None{}
     case SCon{head, tail}:
-      find_option_scope(scan_state_scope(state),
-        String.append("-", Char.show(head)))
+      key_lookup(keys, String.append("-", Char.show(head)))
 
 def short_attached(chars: String) -> String:
   match chars:
@@ -3287,13 +3341,16 @@ def scan_short_go(chars: String, +state: ScanState,
           match kind:
             case FlagKind{}:
               +next = scan_event(state, FlagHit{id, polarity})
-              scan_short_go(tail, next, find_short_for_head(tail, next))
+              scan_short_go(tail, next,
+                find_short_for_head(tail, scan_state_keys(next)))
             case CountKind{}:
               +next = scan_event(state, CountHit{id})
-              scan_short_go(tail, next, find_short_for_head(tail, next))
+              scan_short_go(tail, next,
+                find_short_for_head(tail, scan_state_keys(next)))
             case NegatableKind{}:
               +next = scan_event(state, FlagHit{id, polarity})
-              scan_short_go(tail, next, find_short_for_head(tail, next))
+              scan_short_go(tail, next,
+                find_short_for_head(tail, scan_state_keys(next)))
             case OptionKind{many}:
               scan_short_value(tail, state,
                 ArgInfo{id, usage, short, long, OptionKind{many}, attrs})
@@ -3303,9 +3360,16 @@ def scan_short_go(chars: String, +state: ScanState,
             case PosKind{required, many}:
               scan_settle(state)
 
-def scan_short(token: String, +state: ScanState) -> Mode:
-  +chars = String.drop(token, 1n)
-  scan_short_go(chars, state, find_short_for_head(chars, state))
+# The lookup takes only the scope's keys: an accessor for them would take
+# the state and copy each of its fields.
+def scan_short(+state: ScanState, token: String) -> Mode:
+  match state:
+    case ScanState{Scope{path, Spec{keys, args, slots, variadic, subs,
+        has_sub, external, needs_sub, version, digit_short, inherit}},
+        events, resting, positional_count, ext, issue}:
+      +chars = String.drop(token, 1n)
+      found = find_short_for_head(chars, keys)
+      scan_short_go(chars, state, found)
 
 def scope_external(scope: Scope) -> Bool:
   match scope:
@@ -3407,21 +3471,32 @@ def scan_non_option_case(has_sub: Bool, token: String,
 def scan_non_option(token: String, +state: ScanState) -> Mode:
   scan_non_option_case(scope_has_sub(scan_state_scope(state)), token, state)
 
+# Whether a slot that takes hyphen values takes token: no option in scope
+# is named by it. The lookup runs only for such a slot.
+def hyphen_operand(hyphen: Bool, scope: Scope, token: String) -> Bool:
+  match hyphen:
+    case True{}: Bool.not(scope_any_option_known(scope, token))
+    case False{}: False{}
+
+# Whether an f32 slot takes token as a negative number.
+def f32_operand(f32: Bool, scope: Scope, token: String) -> Bool:
+  match f32:
+    case True{}:
+      Bool.and(is_negative_number(token), Bool.not(scope_digit_short(scope)))
+    case False{}: False{}
+
 def scan_hyphen_candidate(state: ScanState, +token: String) -> Bool:
   match state:
     case ScanState{+scope, events, resting, positional_count,
         external, issue}:
       +slot = scope_next_slot(scope, positional_count)
-      Bool.or(Bool.and(slot_hyphen(slot),
-        Bool.not(scope_any_option_known(scope, token))),
-        Bool.and(slot_f32(slot),
-          Bool.and(is_negative_number(token),
-            Bool.not(scope_digit_short(scope)))))
+      Bool.or(hyphen_operand(slot_hyphen(slot), scope, token),
+        f32_operand(slot_f32(slot), scope, token))
 
 def scan_dash_case(operand: Bool, token: String, state: ScanState) -> Mode:
   match operand:
     case True{}: scan_settle(scan_operand(state, token))
-    case False{}: scan_short(token, state)
+    case False{}: scan_short(state, token)
 
 def scan_dash_token(+token: String, +state: ScanState) -> Mode:
   scan_dash_case(scan_hyphen_candidate(state, token), token, state)
@@ -3550,18 +3625,32 @@ def kind_many(kind: UsageKind) -> Bool:
     case PosKind{required, many}: many
     case _: False{}
 
+# gather with a hit's value, or as it was on a miss: a match, not
+# Bool.pick, so a miss builds nothing.
+def gather_value_if(hit: Bool, gather: Gather, value: String,
+    kind: UsageKind) -> Gather:
+  match hit:
+    case True{}: gather_value(gather, value, kind_many(kind))
+    case False{}: gather
+
+def gather_flag_if(hit: Bool, gather: Gather, value: Bool) -> Gather:
+  match hit:
+    case True{}: gather_flag(gather, value)
+    case False{}: gather
+
+def gather_count_if(hit: Bool, gather: Gather) -> Gather:
+  match hit:
+    case True{}: gather_count(gather)
+    case False{}: gather
+
 def gather_event(event: ScanEvent, id: String,
-    kind: UsageKind, +gather: Gather) -> Gather:
+    kind: UsageKind, gather: Gather) -> Gather:
   match event:
     case ValueHit{key, value}:
-      Bool.pick(Gather, String.eq(key, id),
-        gather_value(gather, value, kind_many(kind)), gather)
+      gather_value_if(same_text(key, id), gather, value, kind)
     case FlagHit{key, value}:
-      Bool.pick(Gather, String.eq(key, id),
-        gather_flag(gather, value), gather)
-    case CountHit{key}:
-      Bool.pick(Gather, String.eq(key, id),
-        gather_count(gather), gather)
+      gather_flag_if(same_text(key, id), gather, value)
+    case CountHit{key}: gather_count_if(same_text(key, id), gather)
     case _: gather
 
 def gather_events(events: List<&2, ScanEvent>, +id: String,
@@ -3885,11 +3974,23 @@ def scope_missing(scope: Scope,
   +items = scope_arg_items(scope)
   missing_items(items, items, fields, [])
 
+def append_new(seen: Bool, ids: List<&2, String>, id: String) ->
+    List<&2, String>:
+  match seen:
+    case True{}: ids
+    case False{}: List.append(&2, String, ids, [id])
+
+# Whether names holds query: List.contains with String.eq would copy each
+# name it compares.
+def has_text(names: List<&2, String>, +query: String, found: Bool) -> Bool:
+  match names found:
+    case _ True{}: True{}
+    case Nil{} False{}: False{}
+    case name <> tail False{}: has_text(tail, query, same_text(name, query))
+
 def append_unique(+ids: List<&2, String>, +id: String) ->
     List<&2, String>:
-  Bool.pick(List<&2, String>,
-    List.contains(~String, ~String.eq, ids, id), ids,
-    List.append(&2, String, ids, [id]))
+  append_new(has_text(ids, id, False{}), ids, id)
 
 def append_event_id(found: Maybe<&2, String>,
     ids: List<&2, String>) -> List<&2, String>:
