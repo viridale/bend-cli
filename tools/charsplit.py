@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 
-BEND_TOOLS_PIN = '2.0.37'
+BEND_TOOLS_PIN = '2.0.38'
 
 
 def warn_bend_version():

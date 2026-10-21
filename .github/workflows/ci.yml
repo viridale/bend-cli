@@ -30,8 +30,8 @@ jobs:
           bend version
           version="$(bend version | awk '{print $2}')"
           IFS=. read -r major minor patch <<< "$version"
-          if (( major < 2 || (major == 2 && minor == 0 && patch < 37) )); then
-            echo "Bend 2.0.37 or newer is required" >&2
+          if (( major < 2 || (major == 2 && minor == 0 && patch < 38) )); then
+            echo "Bend 2.0.38 or newer is required" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -49,9 +49,10 @@ jobs:
           run_defs=(Sys.isatty Sys.columns Sys.exit exit_when exit finish host
             ended stepped main)
           foreign() {
-            local names=("${run_defs[@]/#/$1}" "${@:2}")
+            local names=("${run_defs[@]/#/$1}" "${@:2}") list
+            printf -v list '%s, ' "${names[@]}"
             printf 'SOME PROOFS FAIL\nError: %d defs rely on unsafe or foreign code:\n' "${#names[@]}"
-            printf -- '- %s\n' "${names[@]}"
+            printf 'defs that depend on foreign effects: %s\n' "${list%, }"
           }
           failed=0
           while IFS= read -r file; do
@@ -135,10 +136,10 @@ jobs:
       - name: Example apps
         shell: bash
         run: |
-          # The runtime takes the first --, and Bun one before it (F4, F19).
+          # Bun takes a -- right after the script path (F19).
           app() {
-            if [ "$mode" = native ]; then "build/$1" -- "${@:2}"
-            else bun "build/$1.js" -- -- "${@:2}"; fi
+            if [ "$mode" = native ]; then "build/$1" "${@:2}"
+            else bun "build/$1.js" -- "${@:2}"; fi
           }
           # want GOT EXPECTED: unless equal, shows both and fails the step.
           want() {
@@ -165,7 +166,7 @@ jobs:
         shell: bash
         run: |
           for t in 1 all; do
-            flags=(); [ "$t" = 1 ] && flags=(--threads 1)
+            flags=(); [ "$t" = 1 ] && flags=(+RTS --threads 1 -RTS)
             out=build/bench.$t
             build/bench "${flags[@]}" >"$out.txt" 2>"$out.err" &&
               status=0 || status=$?

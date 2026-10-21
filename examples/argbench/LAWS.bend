@@ -90,7 +90,7 @@ law forms:
 law defaults:
   {Cli.eval(~App.Job, ~App.decode, App.cli(), Cli.host(80n),
     ["build", "a.c"])
-    == Cli.Go{App.Build{0n, False{}, "out", [], 1, App.Text{}, ["a.c"]},
+    == Cli.Go{App.Build{0n, False{}, "out", [], 1, App.Plain{}, ["a.c"]},
       Cli.Term{False{}, False{}, 80n}} : Cli.Step<App.Job>}
 
 # A repeated single-value option takes its last value; a repeatable one
@@ -99,14 +99,14 @@ law repeats:
   {Cli.eval(~App.Job, ~App.decode, App.cli(), Cli.host(80n),
     ["build", "-o", "a", "-I", "y", "-o", "b", "-I", "x", "-j", "2", "-j",
       "3", "in"])
-    == Cli.Go{App.Build{0n, False{}, "b", ["y", "x"], 3, App.Text{},
+    == Cli.Go{App.Build{0n, False{}, "b", ["y", "x"], 3, App.Plain{},
       ["in"]}, Cli.Term{False{}, False{}, 80n}} : Cli.Step<App.Job>}
 
 # After --, an argument that looks like an option is an input.
 law dash:
   {Cli.eval(~App.Job, ~App.decode, App.cli(), Cli.host(80n),
     ["build", "--", "-x"])
-    == Cli.Go{App.Build{0n, False{}, "out", [], 1, App.Text{}, ["-x"]},
+    == Cli.Go{App.Build{0n, False{}, "out", [], 1, App.Plain{}, ["-x"]},
       Cli.Term{False{}, False{}, 80n}} : Cli.Step<App.Job>}
 
 # A repeated flag is still one flag.
@@ -135,7 +135,7 @@ law typo:
 law jobs_limit:
   {Cli.eval(~App.Job, ~App.decode, App.cli(), Cli.host(80n),
     ["build", "-j", "4294967295", "a"])
-    == Cli.Go{App.Build{0n, False{}, "out", [], 4294967295, App.Text{},
+    == Cli.Go{App.Build{0n, False{}, "out", [], 4294967295, App.Plain{},
       ["a"]}, Cli.Term{False{}, False{}, 80n}} : Cli.Step<App.Job>} &
   {Cli.eval(~App.Job, ~App.decode, App.cli(), Cli.host(80n),
     ["build", "-j", "4294967296", "a"])
@@ -202,7 +202,7 @@ law line_build:
     ["a.c", "b.c"]})
     == "build verbose=2 quiet=false output=out.bin include=src,lib jobs=4 format=json inputs=a.c,b.c"
     : String} &
-  {App.line(App.Build{0n, True{}, "out", [], 1, App.Text{}, ["a"]})
+  {App.line(App.Build{0n, True{}, "out", [], 1, App.Plain{}, ["a"]})
     == "build verbose=0 quiet=true output=out include= jobs=1 format=text inputs=a"
     : String} &
   {App.line(App.Build{1n, False{}, "o", ["i"], 0, App.Csv{}, ["a"]})

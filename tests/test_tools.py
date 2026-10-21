@@ -21,9 +21,9 @@ class ToolTests(unittest.TestCase):
         self.bin.mkdir()
         self.env = dict(os.environ, PATH=f'{self.bin}:{os.environ["PATH"]}')
         self.env['XDG_CACHE_HOME'] = str(self.root / 'cache')
-        self.write('bin/curl', '#!/bin/sh\nprintf \'{"tag_name": "v2.0.37"}\\n\'\n',
+        self.write('bin/curl', '#!/bin/sh\nprintf \'{"tag_name": "v2.0.38"}\\n\'\n',
                    executable=True)
-        self.write('bin/bend', '#!/bin/sh\necho "bend 2.0.37"\n', executable=True)
+        self.write('bin/bend', '#!/bin/sh\necho "bend 2.0.38"\n', executable=True)
 
     def write(self, name, content, executable=False):
         path = self.root / name
@@ -89,35 +89,35 @@ type U is Data:
         self.write('bin/curl', '''#!/bin/sh
 mkdir -p "$XDG_CACHE_HOME"
 echo called >> "$XDG_CACHE_HOME/curl_calls"
-printf '{"tag_name": "v2.0.38"}\\n'
+printf '{"tag_name": "v2.0.39"}\\n'
 ''', executable=True)
         for _ in range(2):
             got = self.run_tool('charsplit.py', 'OTHER', '65')
             self.assertEqual(got.returncode, 0, got.stderr)
-            self.assertIn('pinned to Bend 2.0.37; latest release is 2.0.38', got.stderr)
+            self.assertIn('pinned to Bend 2.0.38; latest release is 2.0.39', got.stderr)
         calls = (self.root / 'cache/curl_calls').read_text().splitlines()
         self.assertEqual(calls, ['called'])
 
     def test_new_pin_refreshes_older_cached_release(self):
         cache = self.root / 'cache/bend-tools/latest-release'
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(f'{int(time.time())} 2.0.36\n')
+        cache.write_text(f'{int(time.time())} 2.0.37\n')
         self.write('bin/curl', '''#!/bin/sh
 echo called >> "$XDG_CACHE_HOME/curl_calls"
-printf '{"tag_name": "v2.0.37"}\\n'
+printf '{"tag_name": "v2.0.38"}\\n'
 ''', executable=True)
         got = self.run_tool('charsplit.py', 'OTHER', '65')
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertNotIn('pinned to Bend', got.stderr)
-        self.assertEqual(cache.read_text().split()[1], '2.0.37')
+        self.assertEqual(cache.read_text().split()[1], '2.0.38')
         self.assertEqual((self.root / 'cache/curl_calls').read_text().splitlines(),
                          ['called'])
 
     def test_version_pin_warns_for_installed_mismatch(self):
-        self.write('bin/bend', '#!/bin/sh\necho "bend 2.0.36"\n', executable=True)
+        self.write('bin/bend', '#!/bin/sh\necho "bend 2.0.37"\n', executable=True)
         got = self.run_tool('charsplit.py', 'OTHER', '65')
         self.assertEqual(got.returncode, 0, got.stderr)
-        self.assertIn('pinned to Bend 2.0.37; installed Bend is 2.0.36', got.stderr)
+        self.assertIn('pinned to Bend 2.0.38; installed Bend is 2.0.37', got.stderr)
 
     def test_version_lookup_failure_warns_without_blocking(self):
         self.write('bin/curl', '#!/bin/sh\nexit 22\n', executable=True)
@@ -127,13 +127,13 @@ printf '{"tag_name": "v2.0.37"}\\n'
 
     def test_every_utility_runs_version_advisory(self):
         self.repo()
-        self.write('bin/curl', '#!/bin/sh\nprintf \'{"tag_name": "v2.0.38"}\\n\'\n',
+        self.write('bin/curl', '#!/bin/sh\nprintf \'{"tag_name": "v2.0.39"}\\n\'\n',
                    executable=True)
         for name in ('bench.sh', 'chk.sh', 'kernel.sh', 'lawcheck.sh',
                      'perlaw.sh', 'rc.sh', 'charsplit.py', 'ctorarms.py'):
             with self.subTest(name=name):
                 got = self.run_tool(name)
-                self.assertIn('latest release is 2.0.38', got.stderr)
+                self.assertIn('latest release is 2.0.39', got.stderr)
 
     def test_chk_only_hides_exact_allowlisted_defs(self):
         self.repo()
@@ -142,8 +142,7 @@ printf '{"tag_name": "v2.0.37"}\\n'
 cat <<'EOF'
 SOME PROOFS FAIL
 Error: 2 defs rely on unsafe or foreign code:
-- known
-- newly_added
+defs that depend on foreign effects: known, newly_added
 Use --verdict for mathematical validity.
 EOF
 exit 1
@@ -151,7 +150,7 @@ exit 1
         self.write('expected.tsv', 'run.bend\tknown\n')
         got = self.run_tool('chk.sh', '-e', 'expected.tsv', 'run.bend')
         self.assertEqual(got.returncode, 1)
-        self.assertIn('newly_added: relies', got.stdout)
+        self.assertIn('- newly_added: depend', got.stdout)
         self.write('expected.tsv', 'run.bend\tknown\nrun.bend\tnewly_added\n')
         got = self.run_tool('chk.sh', '-e', 'expected.tsv', 'run.bend')
         self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
@@ -161,19 +160,20 @@ exit 1
         self.repo()
         self.write('run.bend', 'def known:\n  0n\n')
         self.write('bin/bend', '''#!/bin/sh
-if [ "$1" = version ]; then echo 'bend 2.0.37'; exit 0; fi
+if [ "$1" = version ]; then echo 'bend 2.0.38'; exit 0; fi
 cat <<'EOF'
 SOME PROOFS FAIL
 Error: 2 defs rely on unsafe or foreign code:
-- Sys.isatty
-- newly_added
+defs that depend on @unsafe: newly_added
+defs that depend on foreign effects: Sys.isatty
+Hint: no law or proof uses these defs. Move them to a file this proof does not import, and the proofs will check: newly_added, Sys.isatty
 EOF
 exit 1
 ''', executable=True)
         got = self.run_tool('chk.sh', 'run.bend')
         self.assertEqual(got.returncode, 1)
-        self.assertIn('newly_added: relies', got.stdout)
-        self.assertNotIn('Sys.isatty: relies', got.stdout)
+        self.assertIn('- newly_added: depend', got.stdout)
+        self.assertNotIn('Sys.isatty', got.stdout)
 
     def test_perlaw_keeps_qualified_names_distinct_and_handles_spaces(self):
         self.repo()

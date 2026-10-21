@@ -14,7 +14,7 @@ type Case is Data:
 def page(lines: List<&2, String>) -> String:
   String.concat([String.join(lines, "\n"), "\n"])
 
-# pkg (main.bend) in every mode, after the launcher's "--".
+# pkg (main.bend) in every mode.
 def cases() -> List<&2, Case>:
   [
   Case{"version", [], ["--version"], 0,
@@ -40,6 +40,10 @@ def cases() -> List<&2, Case>:
     ""},
   Case{"script args after --", [], ["run", "s", "--", "-x"], 0,
     "run script=s args=-x verbose=0\n",
+    ""},
+  Case{"runtime option names reach the app", [],
+    ["run", "s", "--", "--threads", "1", "--bend-help"], 0,
+    "run script=s args=--threads,1,--bend-help verbose=0\n",
     ""},
   Case{"no arguments", [], [], 2,
     "",
@@ -302,24 +306,16 @@ def cases() -> List<&2, Case>:
     ])},
   ]
 
-# pkg in the native and js modes without the launcher's "--", so the
-# runtime acts on the case's own argv. A failing canary means U1 landed:
-# delete the K1 and K2 workarounds and their docs (§13).
-def canaries() -> List<&2, Case>:
+# pkg in the native and js modes, whose runtime takes its options from
+# between +RTS and -RTS and passes on every argument after --RTS (§13).
+def rts_cases() -> List<&2, Case>:
   [
-  Case{"K1 runtime takes --", [], ["run", "s", "--", "-x"], 2,
-    "",
-    page([
-      "error: unexpected argument '-x' found",
-      "",
-      "  tip: to pass '-x' as a value, use '-- -x'",
-      "",
-      "Usage: pkg run [OPTIONS] <SCRIPT> [ARGS]...",
-      "",
-      "For more information, try '--help'.",
-    ])},
-  Case{"K2 runtime takes --threads", [], ["run", "s", "--threads", "1"], 0,
+  Case{"runtime options stay out of argv", [],
+    ["run", "+RTS", "--threads", "1", "-RTS", "s"], 0,
     "run script=s args= verbose=0\n",
+    ""},
+  Case{"--RTS passes the rest", [], ["run", "s", "--RTS", "+RTS"], 0,
+    "run script=s args=+RTS verbose=0\n",
     ""},
   ]
 

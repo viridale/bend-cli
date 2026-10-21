@@ -34,11 +34,11 @@
 - Have a lookup return what it found as a `Maybe` and branch on that; never test membership and then search again.
 - Find a def in the emitted C as `FID_<FILE>_<DEF>` in upper case, named after its file's path from the harness with `_` for each `.` and `/` (`../cli.bend` gives `FID____CLI_<DEF>`), not its import alias, with continuations at `_K<n>` and lifted closures at `_C<n>`; an inlined def may have none.
 - Verify a refactor by building one harness to C and native from the old and new code, requiring byte-identical output, and comparing `tools/rc.sh new.c old.txt` per def and in total, where `old.txt` is `tools/rc.sh old.c`.
-- Keep the first `--`, `--threads`, `--gpu`, `--gpu-build`, and `--bend-help` out of app options, values, and tests; the runtime consumes them before `main` sees argv (README, Platform notes). Don't release 1.0 until bendlang/bend#1466 is fixed (README); then update this, the Bun line below, and the README.
-- Launch compiled JS under Bun as `bun app.js -- -- args`: Bun removes a `--` right after the script path, and the runtime removes the next.
+- Keep `+RTS`, `-RTS`, and `--RTS` out of app options, values, and tests: a native or compiled-JS runtime takes the words from `+RTS` through `-RTS` (or to the end) as its own options, and passes every word after `--RTS` on unchanged (README, Platform notes). Pass runtime options as `app +RTS --threads 1 -RTS args`.
+- Launch compiled JS under Bun as `bun app.js -- args`: Bun removes a `--` right after the script path.
 - Test generated shell scripts in real shells at CI's oldest versions; drive bash TAB through a pty (a faked `COMP_WORDS` hid a bug).
-- Build the deployment target; run it with `--threads 1` and with all cores, confirm equal output, and report the speedup.
-- Benchmark with `tools/bench.sh harness.bend args…` (idle `uptime`, a detached main worktree, alternating A/B, median of 5, peak RSS, `--threads 1` over all cores) on shallow and deep inputs; `sample <pid>` names the hot `WL_FID_<DEF>`. Compare with clap, cobra, argparse and commander by `tools/peerbench.sh` (`-c` checks their agreement only).
+- Build the deployment target; run it with `+RTS --threads 1 -RTS` and with all cores, confirm equal output, and report the speedup.
+- Benchmark with `tools/bench.sh harness.bend args…` (idle `uptime`, a detached main worktree, alternating A/B, median of 5, peak RSS, one thread over all cores) on shallow and deep inputs; `sample <pid>` names the hot `WL_FID_<DEF>`. Compare with clap, cobra, argparse and commander by `tools/peerbench.sh` (`-c` checks their agreement only).
 - After changing a tool, run `python3 tests/test_tools.py`. Raise the minimum Bend in one commit: README, CI's version gate, `chk-expected.tsv`'s header, and each tool's `BEND_TOOLS_PIN`; `tests/test_tools.py` keeps the release before the pin on purpose.
 - `bend tests/e2e.bend` needs CI's Build step's outputs in `build/` first.
 - Commit straight to `main`; push only when asked, then watch CI until it finishes.

@@ -5992,7 +5992,7 @@ type Comp is Data:
   Words{list: Nat, values: List<&2, String>}
   Files{}
   Dirs{}
-  Text{}
+  Free{}
 
 # An option as a script offers it: its names, shorts first, its kind, its
 # placeholder, what its value completes to, and its help on one line.
@@ -6053,7 +6053,7 @@ def type_comp(found: Maybe<&2, ValueType>) -> Comp:
   match found:
     case Some{TFile{}}: Files{}
     case Some{TDir{}}: Dirs{}
-    case _: Text{}
+    case _: Free{}
 
 def comp_of(found: Maybe<&2, List<&2, String>>, t: Maybe<&2, ValueType>,
     lists: List<&2, List<&2, String>>) -> Comp:
@@ -6116,7 +6116,7 @@ def arg_opts(items: List<&2, Item>, +lists: List<&2, List<&2, String>>) ->
     case head <> tail: arg_opts(tail, lists)
 
 def flag_opt(names: List<&2, String>, help: String) -> Opt:
-  Opt{names, FlagKind{}, "", Text{}, help}
+  Opt{names, FlagKind{}, "", Free{}, help}
 
 def version_opts(present: Bool, args: List<&2, Item>) -> List<&2, Opt>:
   match present:
@@ -6280,7 +6280,7 @@ def bash_letter(comp: Comp) -> String:
     case Words{list, values}: "w"
     case Files{}: "f"
     case Dirs{}: "d"
-    case Text{}: "s"
+    case Free{}: "s"
 
 def bash_values(comp: Comp) -> String:
   match comp:
@@ -6487,7 +6487,7 @@ def zsh_action(comp: Comp) -> String:
     case Words{list, values}: String.concat(["($v", Nat.show(list), ")"])
     case Files{}: "_files"
     case Dirs{}: "_files -/"
-    case Text{}: " "
+    case Free{}: " "
 
 # The prefix of an option's specs: * when it repeats, else its names as a
 # group that excludes each other.
@@ -6879,7 +6879,7 @@ def fish_words(+id: String, comp: Comp) -> String:
       String.concat([" -a '(", id, "_values ", Nat.show(list), ")'"])
     case Files{}: " -F"
     case Dirs{}: " -a '(__fish_complete_directories)'"
-    case Text{}: ""
+    case Free{}: ""
 
 def fish_needs(comp: Comp) -> String:
   match comp:
@@ -6934,7 +6934,7 @@ def fish_slot_lines(slots: List<&2, Slot>, +at: String, +id: String) ->
     case Nil{}: Nil{}
     case Slot{k, True{}, required, many, rest, ph, comp} <> tail:
       fish_slot_lines(tail, at, id)
-    case Slot{k, False{}, required, many, rest, ph, Text{}} <> tail:
+    case Slot{k, False{}, required, many, rest, ph, Free{}} <> tail:
       fish_slot_lines(tail, at, id)
     case Slot{k, False{}, required, many, rest, ph, comp} <> tail:
       String.concat([at, " p", Nat.show(k), "'", fish_words(id, comp)]) <>

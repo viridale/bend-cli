@@ -39,7 +39,7 @@ def cli() -> Cli.Cmd:
   ])
 
 type Format is Data:
-  Text{}
+  Plain{}
   Json{}
 
 type Job is Data:
@@ -67,7 +67,7 @@ def show(+m: Cli.Matches) -> Cli.Dec(Job):
   do Cli.Dec<Job>:
     all : Bool <- Cli.flag(m, "all")
     format : Format <- Cli.choose(Format, m, "format",
-      [("text", Text{}), ("json", Json{})])
+      [("text", Plain{}), ("json", Json{})])
     return Show{all, format}
 
 def script(+m: Cli.Matches) -> Cli.Dec(Job):
@@ -99,7 +99,7 @@ def bool_word(b: Bool) -> String:
 
 def format_word(f: Format) -> String:
   match f:
-    case Text{}: "text"
+    case Plain{}: "text"
     case Json{}: "json"
 
 def dir_text(dir: Maybe<&2, String>) -> String:

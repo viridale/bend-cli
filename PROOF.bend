@@ -125,7 +125,7 @@ def starts_empty(s: String) ->
     case SCon{head, tail}: {==}
 
 def starts_if_identity(t: String, b: Bool) ->
-    {String.starts_with.if(t, "", b) == b : Bool}:
+    {String.starts_with.go.if("", t, b) == b : Bool}:
   match b:
     case False{}: {==}
     case True{}: starts_empty(t)
@@ -2203,8 +2203,8 @@ def word_cmp_refl(n: Nat, w: Word(n)) -> {EQ{} == Word.cmp(n, w, w) : Cmp}:
           %word_cmp_refl(p, t) : {EQ{} == Word.cmp.fin(b, b, _) : Cmp}
           bool_cmp_refl(b)
 
-def string_cmp_refl(s: String) ->
-    {((s, s), EQ{}) == String.cmp(s, s) : (String & String) & Cmp}:
+def string_order_refl(s: String) ->
+    {EQ{} == String.order.go(s, s, EQ{}) : Cmp}:
   match s:
     case SNil{}: {==}
     case SCon{h, t}:
@@ -2213,19 +2213,11 @@ def string_cmp_refl(s: String) ->
           match x:
             case U32{w}:
               %word_cmp_refl(32n, w) :
-                {((SCon{Chr{U32{w}}, t}, SCon{Chr{U32{w}}, t}), EQ{})
-                  == String.cmp.fin(t, t,
-                    ((Chr{U32{w}}, Chr{U32{w}}), _))
-                  : (String & String) & Cmp}
-              %string_cmp_refl(t) :
-                {((SCon{Chr{U32{w}}, t}, SCon{Chr{U32{w}}, t}), EQ{})
-                  == String.cmp.rec(Chr{U32{w}}, Chr{U32{w}}, _)
-                  : (String & String) & Cmp}
-              {==}
+                {EQ{} == String.order.go(t, t, _) : Cmp}
+              string_order_refl(t)
 
 def string_eq_refl(s: String) -> {String.eq(s, s) == True{} : Bool}:
-  %string_cmp_refl(s) :
-    {Cmp.is_eq(Pair.snd(String & String, Cmp, _)) == True{} : Bool}
+  %string_order_refl(s) : {Cmp.is_eq(_) == True{} : Bool}
   {==}
 
 def same_take_prefix(xs: List<&2, String>, +ys: List<&2, String>) ->
@@ -2596,19 +2588,32 @@ def p9_dash(pre: List<&2, String>, +post: List<&2, String>, mode: Cli.Mode,
     case Cli.Closed{tail}:
       p9_closed(post, pre, post, Cli.scan_tail(tail, "--"), clear)
 
-def or_false_left(b: Bool, c: Bool,
-    e: {False{} == Bool.or(b, c) : Bool}) -> {False{} == b : Bool}:
+# List.contains on a cons is List.any.if over the head's test, with the
+# rest's search delayed until the head misses.
+def any_false_left(b: Bool, -c: Bool,
+    e: {False{} == List.any.if(u => c, b) : Bool}) -> {False{} == b : Bool}:
   match b:
     case True{}:
       Empty.absurd({False{} == True{} : Bool}, false_true_absurd(e))
     case False{}: {==}
 
-def or_false_right(b: Bool, c: Bool,
-    e: {False{} == Bool.or(b, c) : Bool}) -> {False{} == c : Bool}:
+def any_false_right(b: Bool, -c: Bool,
+    e: {False{} == List.any.if(u => c, b) : Bool}) -> {False{} == c : Bool}:
   match b:
     case True{}:
       Empty.absurd({False{} == c : Bool}, false_true_absurd(e))
     case False{}: e
+
+def any_if_or(b: Bool, -c: Bool) ->
+    {Bool.or(b, c) == List.any.if(u => c, b) : Bool}:
+  match b:
+    case True{}: {==}
+    case False{}: {==}
+
+def contains_cons(+x: String, t: List<&2, String>, +q: String) ->
+    {Bool.or(String.eq(x, q), List.contains(~String, ~String.eq, t, q))
+      == List.contains(~String, ~String.eq, x <> t, q) : Bool}:
+  any_if_or(String.eq(x, q), List.contains(~String, ~String.eq, t, q))
 
 def p9_before(pre: List<&2, String>, q: List<&2, String>,
     +post: List<&2, String>, mode: Cli.Mode,
@@ -2622,29 +2627,29 @@ def p9_before(pre: List<&2, String>, q: List<&2, String>,
     case +t <> +rest:
       match mode:
         case Cli.Open{state}:
-          %or_false_left(String.eq(t, "--"),
+          %any_false_left(String.eq(t, "--"),
             List.contains(~String, ~String.eq, rest, "--"), free) :
             {Laws.p9_trace(q, post, Cli.scan_trace(Cli.scan_go(
               List.append(&2, String, rest, "--" <> post),
               Cli.scan_open(_, state, t)))) == True{} : Bool}
           p9_before(rest, q, post, Cli.scan_token(t, state), clear,
-            or_false_right(String.eq(t, "--"),
+            any_false_right(String.eq(t, "--"),
               List.contains(~String, ~String.eq, rest, "--"), free))
         case Cli.Fetch{state, info}:
           p9_before(rest, q, post, Cli.scan_fetch(state, info, t), clear,
-            or_false_right(String.eq(t, "--"),
+            any_false_right(String.eq(t, "--"),
               List.contains(~String, ~String.eq, rest, "--"), free))
         case Cli.Operands{state, ended}:
           p9_before(rest, q, post,
             Cli.Operands{Cli.scan_operand(state, t), ended}, clear,
-            or_false_right(String.eq(t, "--"),
+            any_false_right(String.eq(t, "--"),
               List.contains(~String, ~String.eq, rest, "--"), free))
         case Cli.Capture{state, name}:
           p9_unended(q, post, Cli.scan_external(state, name,
             t <> List.append(&2, String, rest, "--" <> post)), clear)
         case Cli.Closed{tail}:
           p9_before(rest, q, post, Cli.Closed{Cli.scan_tail(tail, t)},
-            clear, or_false_right(String.eq(t, "--"),
+            clear, any_false_right(String.eq(t, "--"),
               List.contains(~String, ~String.eq, rest, "--"), free))
 
 def p9_split(dash: Bool, +pre: List<&2, String>, +post: List<&2, String>,
@@ -3169,8 +3174,8 @@ def Laws.g_check_route_words():
 # wildcard arm leaves its head refined away from the named ones, which does
 # not reduce.
 
-# P18 text: String.eq is String.cmp's result at EQ, which a mismatched char
-# fixes, as it fixes same_go's flag at False.
+# P18 text: String.eq is String.order's result at EQ, which a mismatched
+# char fixes, as it fixes same_go's flag at False.
 def same_go_false(a: String, b: String) ->
     {Cli.same_go(a, b, False{}) == False{} : Bool}:
   match a b:
@@ -3179,26 +3184,38 @@ def same_go_false(a: String, b: String) ->
     case SCon{h, t} SNil{}: {==}
     case SCon{x, xt} SCon{y, yt}: {==}
 
-def cmp_rec_snd(h1: Char, h2: Char, rr: (String & String) & Cmp) ->
-    {Pair.snd(String & String, Cmp, rr)
-      == Pair.snd(String & String, Cmp, String.cmp.rec(h1, h2, rr)) : Cmp}:
-  match rr:
-    case (ts, r):
-      match ts:
-        case (t1, t2): {==}
+def order_lt(a: String, b: String) ->
+    {LT{} == String.order.go(a, b, LT{}) : Cmp}:
+  match a b:
+    case SNil{} SNil{}: {==}
+    case SNil{} SCon{h, t}: {==}
+    case SCon{h, t} SNil{}: {==}
+    case SCon{Chr{x}, xt} SCon{Chr{y}, yt}: {==}
 
-def text_step(+xt: String, +yt: String, h1: Char, h2: Char, c: Cmp) ->
+def order_gt(a: String, b: String) ->
+    {GT{} == String.order.go(a, b, GT{}) : Cmp}:
+  match a b:
+    case SNil{} SNil{}: {==}
+    case SNil{} SCon{h, t}: {==}
+    case SCon{h, t} SNil{}: {==}
+    case SCon{Chr{x}, xt} SCon{Chr{y}, yt}: {==}
+
+def text_step(+xt: String, +yt: String, c: Cmp) ->
     {Cli.same_go(xt, yt, True{}) == String.eq(xt, yt) : Bool} ->
-    {Cli.same_go(xt, yt, Cmp.is_eq(c)) == Cmp.is_eq(Pair.snd(String & String,
-      Cmp, String.cmp.fin(xt, yt, ((h1, h2), c)))) : Bool}:
+    {Cli.same_go(xt, yt, Cmp.is_eq(c))
+      == Cmp.is_eq(String.order.go(xt, yt, c)) : Bool}:
   match c:
-    case LT{}: ih => same_go_false(xt, yt)
-    case EQ{}:
+    case LT{}:
       ih =>
-        %cmp_rec_snd(h1, h2, String.cmp(xt, yt)) :
-          {Cli.same_go(xt, yt, True{}) == Cmp.is_eq(_) : Bool}
-        ih
-    case GT{}: ih => same_go_false(xt, yt)
+        %order_lt(xt, yt) :
+          {Cli.same_go(xt, yt, False{}) == Cmp.is_eq(_) : Bool}
+        same_go_false(xt, yt)
+    case EQ{}: ih => ih
+    case GT{}:
+      ih =>
+        %order_gt(xt, yt) :
+          {Cli.same_go(xt, yt, False{}) == Cmp.is_eq(_) : Bool}
+        same_go_false(xt, yt)
 
 def Laws.p18_text(a, b):
   match a b:
@@ -3206,8 +3223,7 @@ def Laws.p18_text(a, b):
     case SNil{} SCon{h, t}: {==}
     case SCon{h, t} SNil{}: {==}
     case SCon{Chr{+p}, +xt} SCon{Chr{+q}, +yt}:
-      text_step(xt, yt, Chr{p}, Chr{q}, U32.cmp(p, q),
-        Laws.p18_text(xt, yt))
+      text_step(xt, yt, U32.cmp(p, q), Laws.p18_text(xt, yt))
 
 # P18 key: each walk below runs from the lookup's found so far, which stays
 # once it is Some, and is the found so far or else the reference over the
@@ -3902,7 +3918,9 @@ def contains_aliases(items: List<&2, Cli.Item>, +q: String) ->
       : Bool}:
   match items:
     case Nil{}: {==}
-    case Cli.Alias{name} <> tail:
+    case Cli.Alias{name} <> +tail:
+      %contains_cons(name, Cli.find_aliases(tail), q) :
+        {Bool.or(String.eq(name, q), Laws.aliases_name(tail, q)) == _ : Bool}
       %contains_aliases(tail, q) :
         {Bool.or(String.eq(name, q), Laws.aliases_name(tail, q))
           == Bool.or(String.eq(name, q), _) : Bool}
@@ -4269,7 +4287,13 @@ def names_go(ns: List<&2, String>, +q: String, +info: Cli.ArgInfo,
     case Nil{} None{}: {==}
     case Nil{} Some{h}: {==}
     case n <> t Some{h}: {==}
-    case +n <> t None{}:
+    case +n <> +t None{}:
+      %contains_cons(n, t, q) :
+        {Bool.pick(Maybe<&2, Cli.OptFound>, _,
+          Some{Cli.OptFound{info, pol(q, info)}}, None{})
+          == Cli.find_key(Cli.name_keys(t, info), q,
+            Cli.key_found(Cli.opt_key(n, info), q))
+          : Maybe<&2, Cli.OptFound>}
       %names_go(t, q, info, Cli.key_found(Cli.opt_key(n, info), q)) :
         {Bool.pick(Maybe<&2, Cli.OptFound>,
           Bool.or(String.eq(n, q), List.contains(~String, ~String.eq, t, q)),
@@ -4324,6 +4348,14 @@ def contains_append(xs: List<&2, String>, +ys: List<&2, String>,
   match xs:
     case Nil{}: {==}
     case +x <> +t:
+      %contains_cons(x, t, q) :
+        {Bool.or(_, List.contains(~String, ~String.eq, ys, q))
+          == List.contains(~String, ~String.eq,
+            x <> List.append(&2, String, t, ys), q) : Bool}
+      %contains_cons(x, List.append(&2, String, t, ys), q) :
+        {Bool.or(Bool.or(String.eq(x, q),
+          List.contains(~String, ~String.eq, t, q)),
+          List.contains(~String, ~String.eq, ys, q)) == _ : Bool}
       %contains_append(t, ys, q) :
         {Bool.or(Bool.or(String.eq(x, q),
           List.contains(~String, ~String.eq, t, q)),
@@ -4332,15 +4364,15 @@ def contains_append(xs: List<&2, String>, +ys: List<&2, String>,
       or_assoc(String.eq(x, q), List.contains(~String, ~String.eq, t, q),
         List.contains(~String, ~String.eq, ys, q))
 
-def or_false(x: Bool) -> {x == Bool.or(x, False{}) : Bool}:
+def any_last(x: Bool) -> {x == List.any.if(u => False{}, x) : Bool}:
   match x:
     case True{}: {==}
     case False{}: {==}
 
-def sym_or_false(+q: String, +s: String) ->
-    {String.eq(q, s) == Bool.or(String.eq(s, q), False{}) : Bool}:
-  %str_sym(s, q) : {_ == Bool.or(String.eq(s, q), False{}) : Bool}
-  or_false(String.eq(s, q))
+def sym_contains_one(+q: String, +s: String) ->
+    {String.eq(q, s) == List.contains(~String, ~String.eq, [s], q) : Bool}:
+  %str_sym(s, q) : {_ == List.any.if(u => False{}, String.eq(s, q)) : Bool}
+  any_last(String.eq(s, q))
 
 def nonempty_contains(s: String, +q: String) ->
     {Bool.and(Bool.not(String.is_empty(s)), String.eq(q, s))
@@ -4348,14 +4380,14 @@ def nonempty_contains(s: String, +q: String) ->
       : Bool}:
   match s:
     case SNil{}: {==}
-    case SCon{+h, +t}: sym_or_false(q, SCon{h, t})
+    case SCon{+h, +t}: sym_contains_one(q, SCon{h, t})
 
 def neg_contains(g: Bool, l: Bool, +nl: String, +q: String) ->
     {Bool.and(g, Bool.and(l, String.eq(q, nl)))
       == List.contains(~String, ~String.eq,
         Bool.pick(List<&2, String>, Bool.and(g, l), [nl], []), q) : Bool}:
   match g l:
-    case True{} True{}: sym_or_false(q, nl)
+    case True{} True{}: sym_contains_one(q, nl)
     case True{} False{}: {==}
     case False{} _: {==}
 
@@ -6208,8 +6240,8 @@ def keys_nil_absurd(keys: List<&2, String>,
 def keys_contains_step(b: Bool, +head: String, tail: List<&2, String>,
     +keys: List<&2, String>, +value: String,
     eb: {String.eq(head, value) == b : Bool},
-    ec: {Bool.or(b, List.contains(~String, ~String.eq, tail, value)) == True{}
-      : Bool},
+    ec: {List.any.if(u => List.contains(~String, ~String.eq, tail, value), b)
+      == True{} : Bool},
     ea: {Bool.and(List.contains(~String, ~String.eq, keys, head),
       Cli.all_in(tail, keys)) == True{} : Bool},
     ih: {List.contains(~String, ~String.eq, tail, value) == True{} : Bool} ->
@@ -14259,15 +14291,15 @@ def step_open(s: Cli.Prescan, +token: String, open: scan_open(s),
     case Cli.ColorWant{}: want_open(String.starts_with(token, "-"), token, e)
     case Cli.ColorStop{last}: open
 
-def or_false_head(b: Bool, c: Bool, e: {Bool.or(b, c) == False{} : Bool}) ->
-    {b == False{} : Bool}:
+def any_false_head(b: Bool, -c: Bool,
+    e: {List.any.if(u => c, b) == False{} : Bool}) -> {b == False{} : Bool}:
   match b:
     case True{}:
       Empty.absurd({True{} == False{} : Bool}, true_false_absurd(e))
     case False{}: {==}
 
-def or_false_tail(b: Bool, c: Bool, e: {Bool.or(b, c) == False{} : Bool}) ->
-    {c == False{} : Bool}:
+def any_false_tail(b: Bool, -c: Bool,
+    e: {List.any.if(u => c, b) == False{} : Bool}) -> {c == False{} : Bool}:
   match b:
     case True{}: Empty.absurd({c == False{} : Bool}, true_false_absurd(e))
     case False{}: e
@@ -14285,9 +14317,9 @@ def pre_pick(pre: List<&2, String>, +rest: List<&2, String>,
     case Nil{}: hit(s, open)
     case +token <> +tail:
       pre_pick(tail, rest, Cli.color_step(s, token), b,
-        step_open(s, token, open, or_false_head(String.eq(token, "--"),
+        step_open(s, token, open, any_false_head(String.eq(token, "--"),
           List.contains(~String, ~String.eq, tail, "--"), clear)),
-        or_false_tail(String.eq(token, "--"),
+        any_false_tail(String.eq(token, "--"),
           List.contains(~String, ~String.eq, tail, "--"), clear), hit)
 
 def hit_never(+post: List<&2, String>,

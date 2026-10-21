@@ -11,7 +11,7 @@ import Base
 import ../../cli.bend as Cli
 
 type Format is Data:
-  Text{}
+  Plain{}
   Json{}
   Csv{}
 
@@ -48,7 +48,7 @@ def build(+m: Cli.Matches) -> Cli.Dec(Job):
     include : List<&2, String> <- Cli.strs(m, "include")
     jobs : U32 <- Cli.u32(m, "jobs")
     format : Format <- Cli.choose(Format, m, "format",
-      [("text", Text{}), ("json", Json{}), ("csv", Csv{})])
+      [("text", Plain{}), ("json", Json{}), ("csv", Csv{})])
     inputs : List<&2, String> <- Cli.strs(m, "input")
     return Build{verbose, quiet, output, include, jobs, format, inputs}
 
@@ -68,7 +68,7 @@ def bool_word(b: Bool) -> String:
 
 def format_word(f: Format) -> String:
   match f:
-    case Text{}: "text"
+    case Plain{}: "text"
     case Json{}: "json"
     case Csv{}: "csv"
 

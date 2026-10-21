@@ -9,10 +9,10 @@
 import Base
 import ./cases.bend as Cases
 
-# How a mode starts an app; dash adds the launcher's "--" (K1). Bun removes
-# a "--" right after the script path (F19), so the js launchers end in one.
+# How a mode starts an app. Bun removes a "--" right after the script path
+# (F19), and bend one after the file, so those launchers end in one.
 type Mode is Data:
-  Mode{name: String, launcher: List<&2, String>, dash: Bool}
+  Mode{name: String, launcher: List<&2, String>}
 
 # One process to run: env(1)'s arguments and what the case expects.
 type Job is Data:
@@ -21,29 +21,25 @@ type Job is Data:
 
 def modes(native: String, js: String, dev: String) -> List<&2, Mode>:
   [
-    Mode{"native", [native], True{}},
-    Mode{"js", ["bun", js, "--"], True{}},
-    Mode{"dev", ["bend", dev], True{}},
+    Mode{"native", [native]},
+    Mode{"js", ["bun", js, "--"]},
+    Mode{"dev", ["bend", dev, "--"]},
   ]
 
-def canary_modes() -> List<&2, Mode>:
+# The modes whose runtime reads its options from argv.
+def rts_modes() -> List<&2, Mode>:
   [
-    Mode{"native", ["build/pkg"], False{}},
-    Mode{"js", ["bun", "build/pkg.js", "--"], False{}},
+    Mode{"native", ["build/pkg"]},
+    Mode{"js", ["bun", "build/pkg.js", "--"]},
   ]
-
-def dashed(dash: Bool) -> List<&2, String>:
-  match dash:
-    case True{}: ["--"]
-    case False{}: []
 
 def job(path: String, m: Mode, c: Cases.Case) -> Job:
   match m c:
-    case Mode{name, launcher, dash}
+    case Mode{name, launcher}
         Cases.Case{case_name, env, argv, code, out, err}:
       Job{String.concat([name, ": ", case_name]),
         List.concat(&2, String, [["-i", String.append("PATH=", path)], env,
-          launcher, dashed(dash), argv]),
+          launcher, argv]),
         code, out, err}
 
 def mode_jobs(cases: List<&2, Cases.Case>, +path: String, +m: Mode) ->
@@ -65,7 +61,7 @@ def jobs(+path: String) -> List<&2, Job>:
   List.concat(&2, Job, [
     all_jobs(modes("build/pkg", "build/pkg.js", "main.bend"), Cases.cases(),
       path),
-    all_jobs(canary_modes(), Cases.canaries(), path),
+    all_jobs(rts_modes(), Cases.rts_cases(), path),
     all_jobs(modes("build/f32", "build/f32.js", "tests/f32.bend"),
       Cases.f32_cases(), path),
     all_jobs(modes("build/host", "build/host.js", "tests/host.bend"),

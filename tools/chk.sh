@@ -14,7 +14,7 @@
 # lines beginning with # are ignored.
 # - "N TODOs found" in a LAWS.bend, when N is its number of laws.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.37
+BEND_TOOLS_PIN=2.0.38
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
@@ -64,14 +64,23 @@ for file in "${files[@]}"; do
     case $line in
       'Error: '*' defs rely on unsafe or foreign code:'|'Error: '*' def relies on unsafe or foreign code:')
         listing=1; continue ;;
-      '- '*)
+      'defs that depend on '*': '*)
         if [ "$listing" = 1 ]; then
-          if [ -n "${expected_defs["$file_key"$'\t'"${line#- }"]:-}" ]; then
-            suppressed=1
-            continue
-          fi
-          line+=': relies on unsafe or foreign code'
+          on=${line%%: *}
+          IFS=, read -r -a names <<<"${line##*: }"
+          for name in "${names[@]}"; do
+            name=${name# }
+            if [ -n "${expected_defs["$file_key"$'\t'"$name"]:-}" ]; then
+              suppressed=1
+            else
+              keep+=("- $name: ${on#defs that }")
+            fi
+          done
+          continue
         fi ;;
+      'Hint: '*)
+        # It repeats the listed names.
+        if [ "$listing" = 1 ]; then continue; fi ;;
       *) listing=0 ;;
     esac
     case $line in

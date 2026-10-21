@@ -23,7 +23,7 @@
 # shell, so a time includes process start; runs rotate which
 # implementation goes first.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.37
+BEND_TOOLS_PIN=2.0.38
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
@@ -97,13 +97,13 @@ if command -v bun >/dev/null; then
   impls+=(commander)
 fi
 
-# cmd <impl>: sets c to the command that runs impl, before its argv. The
-# runtime takes the first --, and Bun one before it (README, Platform notes).
+# cmd <impl>: sets c to the command that runs impl, before its argv. Bun
+# takes a -- right after the script path (README, Platform notes).
 cmd() {
   case $1 in
-    bend) c=("$out/bend" --) ;;
-    bend-1t) c=("$out/bend" --threads 1 --) ;;
-    bend-js) c=(bun "$out/bend.js" -- --) ;;
+    bend) c=("$out/bend") ;;
+    bend-1t) c=("$out/bend" +RTS --threads 1 -RTS) ;;
+    bend-js) c=(bun "$out/bend.js" --) ;;
     clap) c=("$out/clap/release/argbench") ;;
     cobra) c=("$out/cobra") ;;
     argparse) c=(python3 "$peers/argparse/argbench.py") ;;

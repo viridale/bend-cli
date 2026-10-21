@@ -16,7 +16,7 @@
 # limit defaults to a quarter of the CPUs; after building, the script waits
 # up to 2 minutes for the load its builds raised to fall below it.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.37
+BEND_TOOLS_PIN=2.0.38
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
@@ -84,9 +84,9 @@ else
 fi
 run() {
   local bin=$work/$1.bin flags=() t0 t1 rc rss
-  [ "$2" = all ] || flags=(--threads "$2")
+  [ "$2" = all ] || flags=(+RTS --threads "$2" -RTS)
   t0=$EPOCHREALTIME
-  "${timer[@]}" -o "$work/$3.time" "$bin" "${flags[@]}" -- "${args[@]}" >"$work/$3.out" 2>"$work/$3.err" </dev/null &&
+  "${timer[@]}" -o "$work/$3.time" "$bin" "${flags[@]}" "${args[@]}" >"$work/$3.out" 2>"$work/$3.err" </dev/null &&
     rc=0 || rc=$?
   t1=$EPOCHREALTIME
   if [ "$rc" -ne 0 ]; then

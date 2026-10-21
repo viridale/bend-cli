@@ -8,8 +8,8 @@
 # tallies and checksum, the same at every thread count; on stderr, each
 # phase's time. It exits 1 if an argv hits a bug, as every argv does when the
 # spec has a problem.
-# Run: bend bench/main.bend -o build/bench, then build/bench --threads 1 and
-#   build/bench
+# Run: bend bench/main.bend -o build/bench, then
+#   build/bench +RTS --threads 1 -RTS and build/bench
 
 import Base
 import ../cli.bend as Cli

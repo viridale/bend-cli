@@ -3861,7 +3861,7 @@ law g_err_decode:
     Cli.Go{"accepted", Cli.Term{True{}, False{}, 200n}} : Cli.Step<String>} &
   {Cli.eval(~Demo.Action, ~Demo.decode, Demo.cli(), tty(),
     ["--color=never", "list"]) ==
-    Cli.Go{Demo.Action{0n, None{}, Demo.Show{False{}, Demo.Text{}}},
+    Cli.Go{Demo.Action{0n, None{}, Demo.Show{False{}, Demo.Plain{}}},
       Cli.Term{False{}, False{}, 80n}} : Cli.Step<Demo.Action>} &
   {newline_run([]) == Cli.Quit{2, "", page([
     "error: pass --ok to accept",

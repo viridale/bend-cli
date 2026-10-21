@@ -6,13 +6,7 @@ completions, and man pages from one definition. Parsing and rendering are pure
 functions, so applications can state their CLI behavior as Bend laws.
 
 The BendHub package is `cli`. Import `cli.bend` in application code and laws;
-import `run.bend` only in the executable shell. Bend 2.0.37 or newer is required.
-
-`bend-cli` will not stabilize at 1.0 until Bend's runtime stops taking its
-own options out of a program's argv
-([bendlang/bend#1466](https://github.com/bendlang/bend/issues/1466)). Until
-then, apps cannot use those options or the first `--` as their own; see
-[Platform notes](#platform-notes).
+import `run.bend` only in the executable shell. Bend 2.0.38 or newer is required.
 
 ## Quickstart
 
@@ -197,14 +191,16 @@ stdout and usage errors to stderr.
 
 ## Platform notes
 
-- Bend's runtime consumes the first `--`. In a native or
-  compiled-JavaScript app, use `hello -- -- -x` to pass `-x` as a
-  positional value after the CLI's end-of-options marker. In development
-  mode, use `bend main.bend -- -- -x`.
-- Native Bend consumes `--threads N`, `--gpu V`, `--gpu-build`,
-  and `--bend-help` before the app sees argv. Compiled JavaScript also
-  consumes `--threads N`, `--gpu V`, and `--bend-help`. Do not use
-  these as app options or values on those targets.
+- In a native or compiled-JavaScript app, Bend's runtime takes its own
+  options from between `+RTS` and `-RTS` anywhere in argv (a trailing
+  `-RTS` may be left off), as in `hello +RTS --threads 4 -RTS Ada`; native
+  builds also read them from `BENDRTS`. The app never sees those words or
+  the options between them. After `--RTS`, every argument reaches the app
+  unchanged, so `hello --RTS +RTS` passes `+RTS`. Everything else, `--`
+  included, reaches the app. `bend main.bend -- args` reads no runtime
+  options.
+- Run compiled JavaScript under Bun as `bun hello.js -- args`: Bun removes a
+  `--` right after the script path.
 - The app module can be imported by laws. Keep the executable shell out of
   their import graph: terminal probing and exit are host effects.
 - Display width adds each code point's East Asian Width, except that an

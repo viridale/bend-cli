@@ -1,4 +1,4 @@
-# Exact unsafe/foreign diagnostics expected from Bend 2.0.37.
+# Exact unsafe/foreign diagnostics expected from Bend 2.0.38.
 # file<TAB>listed def
 run.bend	Sys.isatty
 run.bend	Sys.columns
