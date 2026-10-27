@@ -90,13 +90,14 @@ def host(c: Cli.Cmd) -> IO(Cli.Host):
     return Cli.probe(vars, U32.is_eq(out_tty, 1), U32.is_eq(err_tty, 1),
       out_cols, err_cols)
 
-def argv_list(args: List<String>) -> List<&2, String>:
+def argv_list(args: List<List<&2, U32>>) -> List<&2, String>:
   match args:
     case Nil{}: Nil{}
-    case arg <> tail: arg <> argv_list(tail)
+    case arg <> tail: Cli.arg_text(arg) <> argv_list(tail)
 
-# IO.args without its head, the program as invoked.
-def argv_of(args: List<String>) -> List<&2, String>:
+# IO.args_bytes without its head, the program as invoked, each argument
+# decoded by Cli.arg_text, so Cli.arg_bytes gives back its bytes.
+def argv_of(args: List<List<&2, U32>>) -> List<&2, String>:
   match args:
     case Nil{}: Nil{}
     case program <> tail: argv_list(tail)
@@ -119,6 +120,6 @@ def stepped(~A: Type, ~act: @+t: Cli.Term -> A -> IO(U32),
 def main(~A: Type, ~decode: @+m: Cli.Matches -> Cli.Dec(A),
     ~act: @+t: Cli.Term -> A -> IO(U32), +c: Cli.Cmd) -> IO(Unit):
   do IO<Unit>:
-    args : List<String> <- IO.args()
+    args : List<List<&2, U32>> <- IO.args_bytes()
     h : Cli.Host <- host(c)
     stepped(~A, ~act, Cli.eval(~A, ~decode, c, h, argv_of(args)))

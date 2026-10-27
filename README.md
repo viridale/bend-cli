@@ -228,9 +228,17 @@ stderr as an internal bug and exits `70`.
   sequences (ZWJ sequences joined with U+200D, skin-tone or VS16 modifiers,
   keycaps, regional indicator flags, and tag sequences) count as 2 columns,
   matching Rust's `unicode-width` 0.2. Terminals that render a sequence at a
-  different width may still misalign columns. Invalid UTF-8 in `argv` is
-  replaced with U+FFFD, so non-UTF-8 byte sequences in filenames cannot be
-  passed unchanged.
+  different width may still misalign columns.
+- `Run.main` reads `argv` as bytes and decodes each argument with
+  `Cli.arg_text`: valid UTF-8 stays as is, and each byte that starts no
+  well-formed sequence becomes U+DC00 plus the byte, as Python's
+  `surrogateescape` does (PEP 383). Printed text shows each such byte as
+  U+FFFD. `Cli.arg_bytes` gives back an argument's bytes, so
+  `File.open_bytes(Cli.arg_bytes(path), "r")` opens a file whose name is not
+  UTF-8, as [`examples/grep`](examples/grep) does. Bun replaces invalid UTF-8
+  in `argv` with U+FFFD before the program starts, so compiled JavaScript
+  cannot recover those bytes. Environment values are still read as text, with
+  U+FFFD for invalid UTF-8.
 
 CI runs on macOS arm64 and Ubuntu 24.04 x86-64. Native builds require `clang`;
 compiled JavaScript requires Bun 1.1 or newer. Windows is outside the 1.x

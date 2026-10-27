@@ -1369,18 +1369,16 @@ def p13_finish(+s: String, +cols: Nat) ->
 def Laws.p13(s, cols):
   p13_finish(s, cols)
 
-def list_append_assoc(+xs: List<&2, String>, +ys: List<&2, String>,
-    +zs: List<&2, String>) ->
-    {List.append(&2, String, List.append(&2, String, xs, ys), zs)
-      == List.append(&2, String, xs, List.append(&2, String, ys, zs))
-      : List<&2, String>}:
+def list_append_assoc(-A: Data, +xs: List<&2, A>, +ys: List<&2, A>,
+    +zs: List<&2, A>) ->
+    {List.append(&2, A, List.append(&2, A, xs, ys), zs)
+      == List.append(&2, A, xs, List.append(&2, A, ys, zs)) : List<&2, A>}:
   match xs:
     case Nil{}: {==}
     case head <> tail:
-      %list_append_assoc(tail, ys, zs) :
-        {head <> List.append(&2, String,
-          List.append(&2, String, tail, ys), zs) == head <> _
-          : List<&2, String>}
+      %list_append_assoc(A, tail, ys, zs) :
+        {head <> List.append(&2, A, List.append(&2, A, tail, ys), zs)
+          == head <> _ : List<&2, A>}
       {==}
 
 def all_words_append(xs: List<&2, String>, +ys: List<&2, String>) ->
@@ -1411,7 +1409,7 @@ def all_words_append(xs: List<&2, String>, +ys: List<&2, String>) ->
           List.append(&2, String, Cli.words(head),
             List.append(&2, String, Laws.all_words(tail),
               Laws.all_words(ys))),
-          list_append_assoc(Cli.words(head), Laws.all_words(tail),
+          list_append_assoc(String, Cli.words(head), Laws.all_words(tail),
             Laws.all_words(ys))))
 
 def chunk_words(xs: List<&2, String>) -> List<&2, String>:
@@ -1624,7 +1622,7 @@ def chunk_words_append(xs: List<&2, String>, +ys: List<&2, String>) ->
               chunk_words(tail)), chunk_words(ys)),
           List.append(&2, String, Laws.all_words(String.lines(head)),
             List.append(&2, String, chunk_words(tail), chunk_words(ys))),
-          list_append_assoc(Laws.all_words(String.lines(head)),
+          list_append_assoc(String, Laws.all_words(String.lines(head)),
             chunk_words(tail), chunk_words(ys))))
 
 def rev_chunk_step(+line: String, +done: List<&2, String>) ->
@@ -1717,7 +1715,7 @@ def list_append_one(+xs: List<&2, String>, +word: String,
         List.append(&2, String, xs, [word]), rest)
       == List.append(&2, String, xs, word <> rest)
       : List<&2, String>}:
-  list_append_assoc(xs, [word], rest)
+  list_append_assoc(String, xs, [word], rest)
 
 def WrapGoalWords(words: List<&2, String>, indent: String, cols: Nat,
     line: String, done: List<&2, String>) -> Type:
@@ -1873,7 +1871,7 @@ def break_words_target(+line: String, +done: List<&2, String>,
           List.append(&2, String, xs, rest)),
         Cli.words(String.append(indent, word)), [word],
         words_indent_word(indent, word, spaces, clean, non)),
-      list_append_assoc(
+      list_append_assoc(String,
         chunk_words(List.reverse(&2, String, done)),
         Cli.words(line), word <> rest)))
 
@@ -2757,6 +2755,41 @@ def Laws.g_val_delim():
 
 def Laws.g_val_delim_typed():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
+
+def Laws.g_bytes_utf8():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_bytes_escape():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))
+
+def Laws.g_bytes_out():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
+def Laws.g_bytes_round():
+  {==}
+
+# P23 with its sides swapped, so the induction hypothesis rewrites the
+# bytes of t ++ b, and append's associativity closes the step.
+def p23_swapped(+a: String, +b: String) ->
+    {List.append(&2, U32, Cli.arg_bytes(a), Cli.arg_bytes(b))
+      == Cli.arg_bytes(String.append(a, b)) : List<&2, U32>}:
+  match a:
+    case SNil{}: {==}
+    case SCon{c, t}:
+      %p23_swapped(t, b) :
+        {List.append(&2, U32, List.append(&2, U32, Cli.char_bytes(c),
+          Cli.arg_bytes(t)), Cli.arg_bytes(b))
+          == List.append(&2, U32, Cli.char_bytes(c), _) : List<&2, U32>}
+      list_append_assoc(U32, Cli.char_bytes(c), Cli.arg_bytes(t),
+        Cli.arg_bytes(b))
+
+def Laws.p23(a, b):
+  Equal.sym(List<&2, U32>,
+    List.append(&2, U32, Cli.arg_bytes(a), Cli.arg_bytes(b)),
+    Cli.arg_bytes(String.append(a, b)), p23_swapped(a, b))
+
+def Laws.g_bytes_parse():
+  ({==}, ({==}, ({==}, {==})))
 
 def Laws.g_src_env():
   {==}

@@ -7769,3 +7769,130 @@ def act_code(fits: Bool, n: U32) -> (U32 & String):
 # §7.2: act's code, or 70 with a stderr line when it exceeds 255.
 def act_exit(+n: U32) -> (U32 & String):
   act_code(U32.is_le(n, 255), n)
+
+# ---- Argument bytes (§7.2) ----
+
+# What a byte starts: no UTF-8 sequence (a continuation byte, C0, C1, F5
+# to FF, or a value past 255), or one with more continuation bytes, the
+# code point bits the byte carries, and the least code point a sequence
+# that long may hold, below which it is overlong.
+type Utf8Lead is Data:
+  NotLead{}
+  Utf8Lead{more: Nat, bits: U32, least: U32}
+
+def utf8_lead(+b: U32) -> Utf8Lead:
+  Bool.pick(Utf8Lead, U32.is_lt(b, 194), NotLead{},
+    Bool.pick(Utf8Lead, U32.is_lt(b, 224), Utf8Lead{1n, (b - 192 : U32), 128},
+      Bool.pick(Utf8Lead, U32.is_lt(b, 240),
+        Utf8Lead{2n, (b - 224 : U32), 2048},
+        Bool.pick(Utf8Lead, U32.is_lt(b, 245),
+          Utf8Lead{3n, (b - 240 : U32), 65536}, NotLead{}))))
+
+def utf8_next(ok: Bool, found: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match ok:
+    case True{}: found
+    case False{}: None{}
+
+# The code point acc continues to through the first more bytes of rest,
+# each a continuation byte (80..BF); None if rest ends first or one is not.
+def utf8_tail(rest: List<&2, U32>, more: Nat, acc: U32) -> Maybe<&2, U32>:
+  match rest more:
+    case Nil{} 0n: Some{acc}
+    case Nil{} 1n+m: None{}
+    case Con{b, t} 0n: Some{acc}
+    case Con{+b, t} 1n+m:
+      utf8_next(U32.is_lt((b - 128 : U32), 64),
+        utf8_tail(t, m, (acc * 64 + (b - 128) : U32)))
+
+# A decoded code point, if it is a Unicode scalar at least least.
+def utf8_scalar(found: Maybe<&2, U32>, least: U32) -> Maybe<&2, U32>:
+  match found:
+    case None{}: None{}
+    case Some{+x}:
+      utf8_next(Bool.and(Bool.and(U32.is_ge(x, least),
+        U32.is_le(x, 1114111)), U32.is_ge((x - 55296 : U32), 2048)), Some{x})
+
+# U+DC00 plus byte b, PEP 383's escape for a byte that starts no
+# well-formed UTF-8 sequence; U+FFFD for a value past 255, no byte.
+def byte_escape(+b: U32) -> Char:
+  Chr{Bool.pick(U32, U32.is_le(b, 255), (b + 56320 : U32), 65533)}
+
+# A char decoded from argument bytes, and how many bytes after its first
+# it took.
+type ArgChar is Data:
+  ArgChar{c: Char, more: Nat}
+
+def arg_found(found: Maybe<&2, U32>, more: Nat, b: U32) -> ArgChar:
+  match found:
+    case None{}: ArgChar{byte_escape(b), 0n}
+    case Some{x}: ArgChar{Chr{x}, more}
+
+def arg_seq(lead: Utf8Lead, b: U32, rest: List<&2, U32>) -> ArgChar:
+  match lead:
+    case NotLead{}: ArgChar{byte_escape(b), 0n}
+    case Utf8Lead{+more, bits, least}:
+      arg_found(utf8_scalar(utf8_tail(rest, more, bits), least), more, b)
+
+def arg_char_by(ascii: Bool, +b: U32, rest: List<&2, U32>) -> ArgChar:
+  match ascii:
+    case True{}: ArgChar{Chr{b}, 0n}
+    case False{}: arg_seq(utf8_lead(b), b, rest)
+
+# The char that byte b and the bytes after it, rest, start.
+def arg_char(+b: U32, rest: List<&2, U32>) -> ArgChar:
+  arg_char_by(U32.is_lt(b, 128), b, rest)
+
+# step's char, then bytes as text once step's other bytes are skipped.
+def arg_text_go(bytes: List<&2, U32>, step: ArgChar) -> String:
+  match bytes step:
+    case Nil{} ArgChar{c, more}: SCon{c, SNil{}}
+    case Con{b, rest} ArgChar{c, 1n+m}: arg_text_go(rest, ArgChar{c, m})
+    case Con{b, +rest} ArgChar{c, 0n}:
+      SCon{c, arg_text_go(rest, arg_char(b, rest))}
+
+# A raw argument as text: each well-formed UTF-8 sequence as its char, and
+# each byte that starts none as U+DC00 plus the byte (PEP 383), decoding on
+# from the next byte. Run.main reads argv through it.
+def arg_text(bytes: List<&2, U32>) -> String:
+  match bytes:
+    case Nil{}: SNil{}
+    case Con{b, +rest}: arg_text_go(rest, arg_char(b, rest))
+
+def cont_byte(x: U32) -> U32:
+  (128 + x % 64 : U32)
+
+# Scalar x's UTF-8, for x from 80: 2 bytes below 800, 3 below 10000, else 4.
+def utf8_bytes(two: Bool, three: Bool, +x: U32) -> List<&2, U32>:
+  match two three:
+    case True{} _: [(192 + x / 64 : U32), cont_byte(x)]
+    case False{} True{}:
+      [(224 + x / 4096 : U32), cont_byte((x / 64 : U32)), cont_byte(x)]
+    case False{} False{}:
+      [(240 + x / 262144 : U32), cont_byte((x / 4096 : U32)),
+        cont_byte((x / 64 : U32)), cont_byte(x)]
+
+def code_bytes(ascii: Bool, escape: Bool, scalar: Bool, +x: U32) ->
+    List<&2, U32>:
+  match ascii escape scalar:
+    case True{} _ _: [x]
+    case False{} True{} _: [(x - 56320 : U32)]
+    case False{} False{} True{}:
+      utf8_bytes(U32.is_lt(x, 2048), U32.is_lt(x, 65536), x)
+    case False{} False{} False{}: [239, 191, 189]
+
+# The bytes c stands for: an escape's byte for U+DC80..U+DCFF, a Unicode
+# scalar's UTF-8, and U+FFFD's for any other surrogate or a value past
+# U+10FFFF, as Bend's writer prints them.
+def char_bytes(c: Char) -> List<&2, U32>:
+  match c:
+    case Chr{+x}:
+      code_bytes(U32.is_lt(x, 128), U32.is_lt((x - 56448 : U32), 128),
+        Bool.and(U32.is_le(x, 1114111), U32.is_ge((x - 55296 : U32), 2048)),
+        x)
+
+# The raw argument arg_text decoded to s: open a file by it with
+# File.open_bytes.
+def arg_bytes(s: String) -> List<&2, U32>:
+  match s:
+    case SNil{}: []
+    case SCon{c, t}: List.append(&2, U32, char_bytes(c), arg_bytes(t))

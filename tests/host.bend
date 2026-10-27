@@ -40,6 +40,6 @@ def stepped(s: Cli.Step<String>) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    args : List<String> <- IO.args()
+    args : List<List<&2, U32>> <- IO.args_bytes()
     h : Cli.Host <- Run.host(cli())
     stepped(Cli.eval(~String, ~decode, cli(), h, Run.argv_of(args)))

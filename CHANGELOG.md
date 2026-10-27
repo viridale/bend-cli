@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Cli.arg_text` decodes an argument's bytes, turning each byte that starts
+  no well-formed UTF-8 sequence into U+DC00 plus the byte (PEP 383), and
+  `Cli.arg_bytes` gives the bytes back. `Run.main` reads `argv` through
+  them, so a native app can open a file whose name is not UTF-8 with
+  `File.open_bytes` (#66).
+
+### Changed
+
+- Bend 2.0.39 or newer is required.
+- `Run.argv_of` takes the list `IO.args_bytes()` answers instead of
+  `IO.args()`'s.
+
+### Output changes
+
+- In a native app, an argument cut short in the middle of a UTF-8 sequence
+  prints one U+FFFD for each of its bytes: `E2 82` printed one before and
+  prints two now. Compiled JavaScript is unchanged.
+
 ## 0.1.0.0
 
 ### Added

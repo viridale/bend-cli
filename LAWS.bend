@@ -26,9 +26,12 @@
 # end-to-end cases cover it. P22 also fixes that choose's verdict passes only
 # a table whose keys are its arg's values. P3-P6 and P15 fix the quoters
 # against models of how each shell and man(7) read text; G-COMP and G-MAN fix
-# the bytes of script and roff, and g_eval_builtins fixes V6. Nothing here
-# fixes what a real shell offers from a script, nor Run.main's IO, which
-# tests/e2e.bend covers (K4).
+# the bytes of script and roff, and g_eval_builtins fixes V6. P23 makes
+# arg_bytes map each char on its own; G-BYTES fixes arg_text and arg_bytes
+# at UTF-8's boundaries and at each escape, their round trip on bytes that
+# mix them, and parse on decoded arguments. No law states that round trip
+# for every byte list. Nothing here fixes what a real shell offers from a
+# script, nor Run.main's IO, which tests/e2e.bend covers (K4).
 
 import Base
 import ./cli.bend as Cli
@@ -1054,6 +1057,110 @@ law g_val_delim_typed:
   {Cli.problems(numbers([Cli.as_nat(), Cli.delim(','),
     Cli.default("1,x,y")])) == [Cli.BadDefault{"tool", "n", "x"}]
     : List<&2, Cli.Problem>}
+
+# G-BYTES: arg_text decodes UTF-8 at every length, at both ends of each
+# lead byte's range and next to the surrogates.
+law g_bytes_utf8:
+  {Cli.arg_text([104, 195, 169, 226, 130, 172, 240, 159, 152, 128]) ==
+    "h\u{E9}\u{20AC}\u{1F600}" : String} &
+  {Cli.arg_text([127, 194, 128, 223, 191, 224, 160, 128, 237, 159, 191,
+    238, 128, 128, 239, 191, 191]) ==
+    "\u{7F}\u{80}\u{7FF}\u{800}\u{D7FF}\u{E000}\u{FFFF}" : String} &
+  {Cli.arg_text([240, 144, 128, 128, 243, 191, 191, 191, 244, 143, 191,
+    191]) == "\u{10000}\u{FFFFF}\u{10FFFF}" : String} &
+  {Cli.arg_text([]) == "" : String}
+
+# G-BYTES: a byte that starts no well-formed UTF-8 sequence becomes U+DC00
+# plus the byte (PEP 383), and decoding resumes at the next byte: a Latin-1
+# name, lone continuation bytes, the lead bytes UTF-8 never uses, overlong
+# forms, surrogates' forms (an escape's own included), code points past
+# U+10FFFF, and sequences cut short by the end or by a byte that does not
+# continue them. A value past 255 is no byte and becomes U+FFFD, even where
+# its low byte would lead or continue a sequence.
+law g_bytes_escape:
+  {Cli.arg_text([99, 97, 102, 233]) == "caf\u{DCE9}" : String} &
+  {Cli.arg_text([128, 191]) == "\u{DC80}\u{DCBF}" : String} &
+  {Cli.arg_text([192, 128, 193, 191, 245, 255]) ==
+    "\u{DCC0}\u{DC80}\u{DCC1}\u{DCBF}\u{DCF5}\u{DCFF}" : String} &
+  {Cli.arg_text([224, 159, 191, 240, 143, 191, 191]) ==
+    "\u{DCE0}\u{DC9F}\u{DCBF}\u{DCF0}\u{DC8F}\u{DCBF}\u{DCBF}" : String} &
+  {Cli.arg_text([237, 160, 128, 237, 179, 169]) ==
+    "\u{DCED}\u{DCA0}\u{DC80}\u{DCED}\u{DCB3}\u{DCA9}" : String} &
+  {Cli.arg_text([244, 144, 128, 128]) ==
+    "\u{DCF4}\u{DC90}\u{DC80}\u{DC80}" : String} &
+  {Cli.arg_text([226, 130, 65, 194, 127, 194, 192, 240, 159, 152]) ==
+    "\u{DCE2}\u{DC82}A\u{DCC2}\u{7F}\u{DCC2}\u{DCC0}\u{DCF0}\u{DC9F}\u{DC98}"
+    : String} &
+  {Cli.arg_text([256, 65, 195, 425, 451, 169]) ==
+    "\u{FFFD}A\u{DCC3}\u{FFFD}\u{FFFD}\u{DCA9}" : String}
+
+# G-BYTES: arg_bytes writes each of U+DC80..U+DCFF as the byte it escapes,
+# and every other Unicode scalar as UTF-8, at every length's ends. The
+# surrogates outside that range and the chars past U+10FFFF are no scalar,
+# and become U+FFFD's bytes, as Bend's writer prints them.
+law g_bytes_out:
+  {Cli.arg_bytes("h\u{E9}\u{20AC}\u{1F600}") ==
+    [104, 195, 169, 226, 130, 172, 240, 159, 152, 128] : List<&2, U32>} &
+  {Cli.arg_bytes("\u{7F}\u{80}\u{7FF}\u{800}\u{FFFF}\u{10000}\u{10FFFF}") ==
+    [127, 194, 128, 223, 191, 224, 160, 128, 239, 191, 191, 240, 144, 128,
+      128, 244, 143, 191, 191] : List<&2, U32>} &
+  {Cli.arg_bytes("caf\u{DCE9}\u{DC80}\u{DCFF}") ==
+    [99, 97, 102, 233, 128, 255] : List<&2, U32>} &
+  {Cli.arg_bytes("\u{D7FF}\u{D800}\u{DC7F}\u{DD00}\u{DFFF}\u{E000}") ==
+    [237, 159, 191, 239, 191, 189, 239, 191, 189, 239, 191, 189, 239, 191,
+      189, 238, 128, 128] : List<&2, U32>} &
+  {Cli.arg_bytes(SCon{Char.from_u32(1114112), SNil{}}) ==
+    [239, 191, 189] : List<&2, U32>} &
+  {Cli.arg_bytes("") == [] : List<&2, U32>}
+
+# Bytes that mix every way arg_text escapes with UTF-8 it decodes.
+def mixed_bytes() -> List<&2, U32>:
+  [99, 97, 102, 233, 195, 169, 237, 179, 169, 226, 130, 65, 192, 128, 244,
+    144, 128, 128, 240, 159, 152, 128, 237, 160, 128, 128, 255]
+
+# G-BYTES: arg_bytes gives back the bytes arg_text decoded.
+law g_bytes_round:
+  {Cli.arg_bytes(Cli.arg_text(mixed_bytes())) == mixed_bytes()
+    : List<&2, U32>}
+
+# P23: arg_bytes maps each char on its own, so the bytes of a value parse
+# cuts from an argument (after "--name=", or a delim piece) are that
+# part's bytes of the argument.
+law p23:
+  for a: String
+  for b: String
+  {Cli.arg_bytes(String.append(a, b)) ==
+    List.append(&2, U32, Cli.arg_bytes(a), Cli.arg_bytes(b))
+    : List<&2, U32>}
+
+# "--value=" and "--n=" as bytes.
+def value_eq() -> List<&2, U32>:
+  [45, 45, 118, 97, 108, 117, 101, 61]
+
+def n_eq() -> List<&2, U32>:
+  [45, 45, 110, 61]
+
+# G-BYTES: parse keeps a decoded argument's escapes in the value it cuts,
+# attached, in the next argument, or as a delim piece, and E04 quotes the
+# value with them.
+law g_bytes_parse:
+  {Cli.parse(typed([]), host(), [Cli.arg_text(List.append(&2, U32,
+    value_eq(), [99, 97, 102, 233]))]) == ok([
+      field("value", ["caf\u{DCE9}"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(typed([]), host(),
+    ["--value", Cli.arg_text([99, 97, 102, 233])]) == ok([
+      field("value", ["caf\u{DCE9}"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(numbers([Cli.delim(',')]), host(), [Cli.arg_text(
+    List.append(&2, U32, n_eq(), [99, 97, 102, 233, 44, 255]))]) == ok([
+      field("n", ["caf\u{DCE9}", "\u{DCFF}"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(typed([Cli.as_u32()]), host(), [Cli.arg_text(List.append(&2,
+    U32, value_eq(), [52, 255]))]) ==
+    Cli.Rejected{[], Cli.E04{"--value <V>", "4\u{DCFF}",
+      "expected a whole number from 0 to 4294967295"}}
+    : Cli.ParseResult}
 
 def sourced() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [

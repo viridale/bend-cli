@@ -202,10 +202,12 @@ def read_opened(opened: Result<&1, &1, U32 & String, File>) ->
 # path's text, read in one piece at the size the file has when opened, so
 # a file must be a regular file under 2 GiB that does not grow while read;
 # a file that is not fails. A FIFO is out of scope: opening one waits for a
-# writer.
+# writer. The file opens by path's argv bytes, so a name that is not UTF-8
+# opens too.
 def read_text(path: String) -> IO(Result<&1, &1, U32 & String, String>):
   do IO<Result<&1, &1, U32 & String, String>>:
-    opened : Result<&1, &1, U32 & String, File> <- File.open(path, "r")
+    opened : Result<&1, &1, U32 & String, File> <-
+      File.open_bytes(Cli.arg_bytes(path), "r")
     read_opened(opened)
 
 # Prints a file's lines, or its error to stderr, and answers whether a file
