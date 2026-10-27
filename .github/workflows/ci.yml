@@ -41,8 +41,8 @@ jobs:
           bend version
           version="$(bend version | awk '{print $2}')"
           IFS=. read -r major minor patch <<< "$version"
-          if (( major < 2 || (major == 2 && minor == 0 && patch < 38) )); then
-            echo "Bend 2.0.38 or newer is required" >&2
+          if (( major < 2 || (major == 2 && minor == 0 && patch < 39) )); then
+            echo "Bend 2.0.39 or newer is required" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"

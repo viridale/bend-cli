@@ -7,7 +7,7 @@ man pages. Because parsing and rendering are pure functions, applications can
 state and prove their CLI behavior as Bend laws.
 
 The BendHub package is `cli`. Import `cli.bend` in application logic and laws;
-import `run.bend` only in the `IO` entry point. Bend 2.0.38 or newer is
+import `run.bend` only in the `IO` entry point. Bend 2.0.39 or newer is
 required.
 
 ## Quickstart

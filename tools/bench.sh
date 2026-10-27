@@ -16,7 +16,7 @@
 # limit defaults to a quarter of the CPUs; after building, the script waits
 # up to 2 minutes for the load its builds raised to fall below it.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.38
+BEND_TOOLS_PIN=2.0.39
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"

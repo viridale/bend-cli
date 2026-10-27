@@ -14,7 +14,7 @@
 # source's own path, so relative imports resolve. A law is ok when its file leaves exactly the
 # base's TODOs less the imported laws it fills.
 set -euo pipefail
-BEND_TOOLS_PIN=2.0.38
+BEND_TOOLS_PIN=2.0.39
 # shellcheck source=.bend-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/.bend-version.sh"
 bend_tools_warn_version "$BEND_TOOLS_PIN" "$(basename "$0")"
