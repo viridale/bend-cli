@@ -117,6 +117,15 @@ unless `Cli.sub_optional()` is set), only its `Cli.global()` options remain in
 scope for the subcommand, so lint rejects `Cli.required()` on its local
 options.
 
+Add `Cli.external()` to a command to accept an unknown subcommand name as an
+external call, for plugins such as `git-lfs` behind `git lfs`: scanning stops
+at the name, and `Cli.external_args(m)` returns `Some{(name, args)}` with the
+tokens after it unchanged. Such a command needs no subcommand, so with none (an
+empty `argv` or options alone) its decoder runs at the command's own path with
+`Cli.external_args(m)` equal to `None{}`. Handle that case with `Cli.fail` and a
+usage message, which exits `2`, or by decoding a default; `Cli.bug` there exits
+`70`, and `Cli.check` reports it.
+
 Decode matched arguments by ID inside a `do Cli.Dec<A>:` block. Use `Cli.flag`
 for boolean and negatable flags, `Cli.count` for occurrence counts, and
 `Cli.str`, `Cli.nat`, `Cli.u32`, `Cli.f32`, or `Cli.bool` for required or
