@@ -2756,6 +2756,9 @@ def Laws.g_val_delim():
 def Laws.g_val_delim_typed():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
 
+def Laws.g_val_delim_operands():
+  ({==}, ({==}, {==}))
+
 def Laws.g_bytes_utf8():
   ({==}, ({==}, ({==}, {==})))
 
@@ -15084,6 +15087,9 @@ def Laws.g_val_delim_eval():
 
 def Laws.g_val_delim_typed_eval():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
+def Laws.g_val_delim_operands_eval():
+  ({==}, ({==}, {==}))
 
 def Laws.g_src_env_eval():
   {==}

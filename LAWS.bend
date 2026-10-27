@@ -1058,6 +1058,31 @@ law g_val_delim_typed:
     Cli.default("1,x,y")])) == [Cli.BadDefault{"tool", "n", "x"}]
     : List<&2, Cli.Problem>}
 
+# A -v flag, and [FILES]... with delim(',') and attrs.
+def delim_files(attrs: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("-v, --verbose", "Verbose", []),
+    Cli.arg("[FILES]...", "Files", Cli.delim(',') <> attrs),
+  ])
+
+# G-VAL: delim splits every value a variadic positional takes: after "--",
+# where a token that starts with "-" is an operand, and inside rest(), where
+# "--" and an option the scope knows are values once the slot has its first.
+# Empty pieces stay.
+law g_val_delim_operands:
+  {Cli.parse(delim_files([]), host(), ["x,y", "-v", "--", "-v,a", "b,c"]) ==
+    ok([
+      field("verbose", ["true"], Cli.Argv{}),
+      field("files", ["x", "y", "-v", "a", "b", "c"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(delim_files([Cli.rest()]), host(),
+    ["a,b", "-v,x", "--", "c,d", "-v"]) == ok([
+      field("files", ["a", "b", "-v", "x", "--", "c", "d", "-v"], Cli.Argv{}),
+    ]) : Cli.ParseResult} &
+  {Cli.parse(delim_files([]), host(), ["--", ",a,,"]) == ok([
+      field("files", ["", "a", "", ""], Cli.Argv{}),
+    ]) : Cli.ParseResult}
+
 # G-BYTES: arg_text decodes UTF-8 at every length, at both ends of each
 # lead byte's range and next to the surrogates.
 law g_bytes_utf8:
@@ -3906,6 +3931,22 @@ law g_val_delim_typed_eval:
     failed(Parsed,
       "invalid value 'x' for '<N>...': expected a whole number from 0 to 4294967295",
       [], "tool <N>...") : Cli.Step<Parsed>}
+
+law g_val_delim_operands_eval:
+  {ran(delim_files([]), host(), ["x,y", "-v", "--", "-v,a", "b,c"]) ==
+    went([
+      field("verbose", ["true"], Cli.Argv{}),
+      field("files", ["x", "y", "-v", "a", "b", "c"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(delim_files([Cli.rest()]), host(),
+    ["a,b", "-v,x", "--", "c,d", "-v"]) ==
+    went([
+      field("files", ["a", "b", "-v", "x", "--", "c", "d", "-v"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(delim_files([]), host(), ["--", ",a,,"]) ==
+    went([
+      field("files", ["", "a", "", ""], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>}
 
 law g_src_env_eval:
   {ran(sourced(),

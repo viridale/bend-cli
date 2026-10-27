@@ -102,6 +102,19 @@ precedence order: `argv`, the first set and non-empty variable from one or more
 (`Cli.conflicts`, `Cli.requires`, `Cli.exclusive`, and `Cli.need_one`) apply to
 values supplied by `argv` or the environment, not to defaults.
 
+`Cli.delim(',')` on a repeatable option or a variadic positional splits each of
+its values at the separator, before any type check, and keeps empty pieces
+(`a,,b` gives `a`, an empty value, and `b`). It splits every value the argument
+takes, from `argv`, the environment, or a default, including operands after
+`--`. Once a `Cli.rest()` positional has its first value, every later token is
+one of its values, `--` and tokens that start with `-` included, and is split
+too. With `-v` and `[FILES]...` declared with `Cli.delim(',')`:
+
+```text
+$ tool x,y -v -- -v,a    # files: x, y, -v, a (the first -v is the flag)
+$ tool a,b -v,x -- c     # with Cli.rest() too: a, b, -v, x, --, c
+```
+
 Options may appear between positional operands. Short flags cluster (`-abc`),
 options accept attached values (`-ofile`, `--output=file`), and a repeated
 single-value option retains its last occurrence. Option and subcommand names
