@@ -89,7 +89,9 @@ string determines its kind, flags, placeholder, and default ID:
 
 An argument's ID defaults to its long option name (`"output"`), its short flag
 character when no long name is declared (`"v"`), or its lowercased placeholder
-name for positionals (`"input"`). Use `Cli.id(...)` to override the derived ID.
+name for positionals (`"input"`). A negatable `--[no-]cache` has the ID
+`"cache"`, while a plain `--no-clobber` keeps `"no-clobber"`. Use `Cli.id(...)`
+to override the derived ID.
 
 Use argument attributes to declare types, value sources, and constraints. For
 example, `Cli.as_u32()` validates values during parsing, `Cli.env("PORT")`
