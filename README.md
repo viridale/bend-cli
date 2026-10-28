@@ -149,6 +149,59 @@ reports whether an argument resolved from `argv`, the environment, a default,
 or was omitted (`Cli.Absent{}`). For nested subcommands, `Cli.route` dispatches
 to a decoder by space-separated command path.
 
+To reuse a set of arguments across commands, define its items and its decoder
+once, append the items to each command that takes the set, and bind the
+decoder in each of those commands' decoders. Unlike `Cli.global()`, which puts
+an option in scope for every descendant, the set appears only where you add
+it, and each command's help lists it:
+
+```python
+def conn_args() -> List<&2, Cli.Item>:
+  [
+    Cli.arg("--host <HOST>", "Server host", [Cli.default("localhost")]),
+    Cli.arg("-p, --port <PORT>", "Server port",
+      [Cli.as_u32(), Cli.default("5432")]),
+  ]
+
+def cli() -> Cli.Cmd:
+  Cli.cmd("db", "Talk to a database", [
+    Cli.sub("ping", "Check the server", conn_args()),
+    Cli.sub("query", "Run a query", List.append(&2, Cli.Item, conn_args(), [
+      Cli.arg("<SQL>", "Query text", []),
+    ])),
+  ])
+
+type Conn is Data:
+  Conn{host: String, port: U32}
+
+type Job is Data:
+  Ping{conn: Conn}
+  Query{conn: Conn, sql: String}
+
+def conn(+m: Cli.Matches) -> Cli.Dec(Conn):
+  do Cli.Dec<Conn>:
+    host : String <- Cli.str(m, "host")
+    port : U32 <- Cli.u32(m, "port")
+    return Conn{host, port}
+
+def ping(+m: Cli.Matches) -> Cli.Dec(Job):
+  do Cli.Dec<Job>:
+    c : Conn <- conn(m)
+    return Ping{c}
+
+def query(+m: Cli.Matches) -> Cli.Dec(Job):
+  do Cli.Dec<Job>:
+    c : Conn <- conn(m)
+    sql : String <- Cli.str(m, "sql")
+    return Query{c, sql}
+
+def decode(+m: Cli.Matches) -> Cli.Dec(Job):
+  Cli.route(Job, m, [("ping", ping), ("query", query)])
+```
+
+Lint rejects a command that declares an option of the set again, and
+`Cli.check` reports a decoder that reads the set in a command without it.
+
 Add `Cli.version("1.0.0")` for `-V` and `--version`, `Cli.color()` for
 `--color`, `Cli.completions()` for `completions <bash|zsh|fish>`, and
 `Cli.man()` for a hidden `man [COMMAND]...` subcommand that prints `roff` man
