@@ -3171,6 +3171,52 @@ law g_tip_suggest:
       ["to pass '-x' as a value, use '-- -x'"], "cp <SRC>... <DST>")
     : Cli.Outcome}
 
+# git with commit, alias ci, and remote, whose add takes no args; items go
+# first in both commands.
+def plugged(+items: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("git", "Git", List.append(&2, Cli.Item, items, [
+    Cli.sub("commit", "Record changes", [Cli.alias("ci")]),
+    Cli.sub("remote", "Manage remotes", List.append(&2, Cli.Item, items, [
+      Cli.sub("add", "Add a remote", []),
+    ])),
+  ]))
+
+# G-TIP: unknown_text is the E02 page eval prints for a name at path, with
+# T4's similar subcommands and the scope's usage, in stderr's colors and the
+# terminal's width, so an app with external() can report a name that no
+# plugin answers to.
+law g_tip_unknown:
+  {Cli.unknown_text(plugged([Cli.external()]), [], "comit",
+    Cli.Term{False{}, False{}, 80n}) ==
+    error_text("unrecognized subcommand 'comit'",
+      ["a similar subcommand exists: 'commit'"], "git [COMMAND]") : String} &
+  {Cli.unknown_text(plugged([Cli.external()]), ["remote"], "ad",
+    Cli.Term{False{}, False{}, 80n}) ==
+    error_text("unrecognized subcommand 'ad'",
+      ["a similar subcommand exists: 'add'"], "git remote [COMMAND]")
+    : String} &
+  {Cli.unknown_text(plugged([Cli.external()]), [], "zzz",
+    Cli.Term{False{}, False{}, 80n}) ==
+    error_text("unrecognized subcommand 'zzz'", [], "git [COMMAND]")
+    : String} &
+  {Cli.outcome(plugged([Cli.sub_optional()]), host(), ["remote", "ad"]) ==
+    Cli.Shown{2, "", Cli.unknown_text(plugged([Cli.external()]),
+      ["remote"], "ad", Cli.Term{True{}, False{}, 80n})} : Cli.Outcome} &
+  {Cli.unknown_text(plugged([Cli.external()]), [], "comit",
+    Cli.Term{False{}, True{}, 80n}) == String.concat([
+      "\u{1B}[1;31merror:\u{1B}[0m unrecognized subcommand '",
+      "\u{1B}[33mcomit\u{1B}[0m'\n\n  \u{1B}[1;32mtip:\u{1B}[0m ",
+      "a similar subcommand exists: '\u{1B}[32mcommit\u{1B}[0m'\n\n",
+      "\u{1B}[1;4mUsage:\u{1B}[0m \u{1B}[1mgit\u{1B}[0m [COMMAND]\n\n",
+      "For more information, try '\u{1B}[1m--help\u{1B}[0m'.\n",
+    ]) : String} &
+  {Cli.unknown_text(plugged([Cli.external(),
+    Cli.arg("--work-tree <PATH>", "Work tree", [Cli.required()])]),
+    ["remote"], "ad", Cli.Term{False{}, False{}, 40n}) ==
+    error_text("unrecognized subcommand 'ad'",
+      ["a similar subcommand exists: 'add'"],
+      "git remote --work-tree <PATH>\n       [COMMAND]") : String}
+
 def rmf() -> Cli.Cmd:
   Cli.cmd("rmf", "Remove a file", [
     Cli.arg("-f, --force", "Force", []),

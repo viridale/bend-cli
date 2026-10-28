@@ -166,7 +166,12 @@ tokens after it unchanged. Such a command needs no subcommand, so with none (an
 empty `argv` or options alone) its decoder runs at the command's own path with
 `Cli.external_args(m)` equal to `None{}`. Handle that case with `Cli.fail` and a
 usage message, which exits `2`, or by decoding a default; `Cli.bug` there exits
-`70`, and `Cli.check` reports it.
+`70`, and `Cli.check` reports it. Keep `Cli.path(m)` with the name, and when
+no plugin answers to it, write `Cli.unknown_text(cli(), path, name, t)` to
+stderr and exit `2`, as a plan's `Cli.Ran{2, "", text}`: it is the error
+`Cli.eval` gives an unknown subcommand, in stderr's colors, with similar
+names as tips and the command's usage, so `git comit` still suggests
+`commit`.
 
 Decode matched arguments by ID inside a `do Cli.Dec<A>:` block. Use `Cli.flag`
 for boolean and negatable flags, `Cli.count` for occurrence counts, and

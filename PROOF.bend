@@ -14827,6 +14827,9 @@ def Laws.g_tip_scope():
 def Laws.g_tip_suggest():
   ({==}, ({==}, ({==}, {==})))
 
+def Laws.g_tip_unknown():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
 def Laws.g_tip_order():
   {==}
 

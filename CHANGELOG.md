@@ -18,6 +18,9 @@
   `Cli.Program{name, args}`, a program and its arguments in one slot, as
   `timeout` and `env` take them; `Cli.program_opt` reads `[COMMAND]...`
   (#43).
+- `Cli.unknown_text(c, path, name, t)` renders the error `Cli.eval` gives an
+  unknown subcommand, with similar names and usage, so an app with
+  `Cli.external()` can report a name that no plugin answers to (#44).
 
 ### Changed
 

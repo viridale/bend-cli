@@ -6073,6 +6073,14 @@ def fault_err(t: Term, fault: ScanFault, +c: Cmd, +path: List<&2, String>,
       emit(err_color, fault_view(view_of(c, path), fault, c, path, argv,
         page_width(width)))
 
+# The E02 page eval prints for an unknown subcommand name at path, with its
+# similar names and the scope's usage, in t's stderr colors and width. An app
+# with external() prints it, and exits 2 as eval does, when no plugin answers
+# to name.
+def unknown_text(c: Cmd, path: List<&2, String>, name: String,
+    t: Term) -> String:
+  fault_err(t, E02{name}, c, path, [])
+
 def summary_err(t: Term, view: View) -> String:
   match t:
     case Term{out_color, err_color, width}:
