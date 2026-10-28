@@ -313,3 +313,18 @@
 # stderr with owed, which looks for its final "\n", and the seals build the
 # three-cell list that String.concat joins. FID_RUN_FINISH 0 0 0 is gone,
 # inlined into wrote. It runs once per process.
+#
+# rest() and hyphen() positionals taking dash values (#42), against main's
+# build (c2cd585); bench/main.bend, main.bend and argbench give the same
+# per-def diff, and the static total 5624 -> 5626 (main.bend 5752 -> 5754),
+# with no def rising:
+# the new FID_CLI_LONG_TOKEN 0 0 2: a long token that names no option,
+#   declared or built-in, is rebuilt from its name and attached value, an
+#   "=" cell and append's cells, when the next slot takes hyphen values. It
+#   runs only for such a token, which was an error before; a long token
+#   that names an option takes main's path, so FID_CLI_SCAN_OPEN stays
+#   76 15 20. tools/bench.sh -L 14, loaded (load 6 to 13 from other work):
+#   threads=1 169.8 -> 170.0 ms, all cores 42.0 -> 42.4 ms, peak RSS 10.7
+#   MB on both, stdout identical; on argbench's build with 10000
+#   --include=src and 10000 inputs, threads=1 44.2 -> 44.1 ms, all cores
+#   44.2 -> 43.8 ms.

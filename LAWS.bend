@@ -721,6 +721,50 @@ law g_pos_variadic_dash:
   {Cli.parse(f32_operands(), host(), ["1", "-5", "-x"]) ==
     Cli.Rejected{[], Cli.E01{"-x"}} : Cli.ParseResult}
 
+# G-POS: a hyphen() slot takes a long token that names no option in scope,
+# with or without "=", as it takes a short one; --help is still help.
+law g_pos_hyphen_long:
+  {Cli.parse(dash_operands(), host(), ["--x=1", "-v", "--y"]) == ok([
+    field("v", ["true"], Cli.Argv{}),
+    field("x", ["--x=1", "--y"], Cli.Argv{}),
+  ]) : Cli.ParseResult} &
+  {Cli.parse(dash_operands(), host(), ["a", "--help"]) ==
+    Cli.HelpRequested{[], True{}} : Cli.ParseResult}
+
+# A -v flag, <COMMAND>, and [ARGS]... with rest().
+def retry() -> Cli.Cmd:
+  Cli.cmd("retry", "Retry a command", [
+    Cli.arg("-v, --verbose", "Verbose", []),
+    Cli.arg("<COMMAND>", "Command", []),
+    Cli.arg("[ARGS]...", "Arguments", [Cli.rest()]),
+  ])
+
+# G-POS: a rest() slot's first value may start with "-", as a hyphen()
+# slot's may: a short or long token that names no option in scope, and
+# every later token is a value too. An option the scope knows, by its name
+# before "=", and a built-in stay options, and the slot before rest() takes
+# no dash token.
+law g_pos_rest_dash:
+  {Cli.parse(retry(), host(), ["curl", "-fsS", "-v", "url"]) == ok([
+    field("command", ["curl"], Cli.Argv{}),
+    field("args", ["-fsS", "-v", "url"], Cli.Argv{}),
+  ]) : Cli.ParseResult} &
+  {Cli.parse(retry(), host(), ["curl", "--max-time=5", "--", "url"]) == ok([
+    field("command", ["curl"], Cli.Argv{}),
+    field("args", ["--max-time=5", "--", "url"], Cli.Argv{}),
+  ]) : Cli.ParseResult} &
+  {Cli.parse(retry(), host(), ["curl", "-v", "-x"]) == ok([
+    field("verbose", ["true"], Cli.Argv{}),
+    field("command", ["curl"], Cli.Argv{}),
+    field("args", ["-x"], Cli.Argv{}),
+  ]) : Cli.ParseResult} &
+  {Cli.parse(retry(), host(), ["curl", "--verbose=1"]) ==
+    Cli.Rejected{[], Cli.E05{"--verbose", "1"}} : Cli.ParseResult} &
+  {Cli.parse(retry(), host(), ["curl", "--help"]) ==
+    Cli.HelpRequested{[], True{}} : Cli.ParseResult} &
+  {Cli.parse(retry(), host(), ["-x", "curl"]) ==
+    Cli.Rejected{[], Cli.E01{"-x"}} : Cli.ParseResult}
+
 def sub_tool() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
     Cli.arg("--root", "Root only", []),
@@ -3638,6 +3682,66 @@ law g_pos_variadic_dash_eval:
     failed(Parsed, "unexpected argument '-x' found",
       ["to pass '-x' as a value, use '-- -x'"], "tool <N>...")
     : Cli.Step<Parsed>}
+
+law g_pos_hyphen_long_eval:
+  {ran(dash_operands(), host(), ["--x=1", "-v", "--y"]) ==
+    went([
+      field("v", ["true"], Cli.Argv{}),
+      field("x", ["--x=1", "--y"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(dash_operands(), host(), ["a", "--help"]) ==
+    Cli.Quit{0, page([
+      "Tool",
+      "",
+      "Usage: tool [OPTIONS] <X>...",
+      "",
+      "Arguments:",
+      "  <X>...      Operands",
+      "",
+      "Options:",
+      "  -v          Verbose",
+      "  -h, --help  Print help",
+    ]), ""} : Cli.Step<Parsed>}
+
+law g_pos_rest_dash_eval:
+  {ran(retry(), host(), ["curl", "-fsS", "-v", "url"]) ==
+    went([
+      field("command", ["curl"], Cli.Argv{}),
+      field("args", ["-fsS", "-v", "url"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(retry(), host(), ["curl", "--max-time=5", "--", "url"]) ==
+    went([
+      field("command", ["curl"], Cli.Argv{}),
+      field("args", ["--max-time=5", "--", "url"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(retry(), host(), ["curl", "-v", "-x"]) ==
+    went([
+      field("verbose", ["true"], Cli.Argv{}),
+      field("command", ["curl"], Cli.Argv{}),
+      field("args", ["-x"], Cli.Argv{}),
+    ]) : Cli.Step<Parsed>} &
+  {ran(retry(), host(), ["curl", "--verbose=1"]) ==
+    failed(Parsed,
+      "unexpected value '1' for '--verbose' found; no more were expected",
+      [], "retry [OPTIONS] <COMMAND> [ARGS]...") : Cli.Step<Parsed>} &
+  {ran(retry(), host(), ["curl", "--help"]) ==
+    Cli.Quit{0, page([
+      "Retry a command",
+      "",
+      "Usage: retry [OPTIONS] <COMMAND> [ARGS]...",
+      "",
+      "Arguments:",
+      "  <COMMAND>      Command",
+      "  [ARGS]...      Arguments",
+      "",
+      "Options:",
+      "  -v, --verbose  Verbose",
+      "  -h, --help     Print help",
+    ]), ""} : Cli.Step<Parsed>} &
+  {ran(retry(), host(), ["-x", "curl"]) ==
+    failed(Parsed, "unexpected argument '-x' found",
+      ["to pass '-x' as a value, use '-- -x'"],
+      "retry [OPTIONS] <COMMAND> [ARGS]...") : Cli.Step<Parsed>}
 
 law g_sub_descent_eval:
   {ran(sub_tool(), host(), ["-g", "alpha", "-g", "--child"]) ==

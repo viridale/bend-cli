@@ -2702,6 +2702,12 @@ def Laws.g_pos_cases():
 def Laws.g_pos_variadic_dash():
   ({==}, ({==}, {==}))
 
+def Laws.g_pos_hyphen_long():
+  ({==}, {==})
+
+def Laws.g_pos_rest_dash():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
+
 def Laws.g_sub_descent():
   ({==}, ({==}, {==}))
 
@@ -11396,73 +11402,6 @@ def found_inv(f: Cli.OptFound, attached: Maybe<&2, String>,
           kind_inv(kind, k, u, s, l, a, pol, attached, state, q, items0, id,
             ef, inv)
 
-def bh_inv(attached: Maybe<&2, String>, +state: Cli.ScanState,
-    +event: Cli.ScanEvent, +name: String, -items0: List<&2, Cli.Item>,
-    +id: String, eo: {off(event, id) == True{} : Bool},
-    inv: SInv(state, items0, id)) ->
-    MInv(Cli.scan_builtin_hit(attached, state, event, name), items0, id):
-  match attached:
-    case Some{+v}:
-      settle_inv(Cli.scan_error(state, Cli.E05{name, v}), items0, id,
-        err_inv(state, Cli.E05{name, v}, items0, id, inv))
-    case None{}: push_off(state, event, items0, id, eo, inv)
-
-def bv_inv(enabled: Bool, attached: Maybe<&2, String>, +state: Cli.ScanState,
-    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
-    MInv(Cli.scan_builtin_version(enabled, attached, state), items0, id):
-  match enabled:
-    case True{}:
-      bh_inv(attached, state, Cli.VersionHit{}, "--version", items0, id, {==},
-        inv)
-    case False{}:
-      settle_inv(Cli.scan_error(state, Cli.E01{"--version"}), items0, id,
-        err_inv(state, Cli.E01{"--version"}, items0, id, inv))
-
-def bo_inv(version: Bool, +name: String, attached: Maybe<&2, String>,
-    +state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
-    inv: SInv(state, items0, id)) ->
-    MInv(Cli.scan_builtin_other(version, name, attached, state), items0, id):
-  match version:
-    case True{}:
-      bv_inv(Cli.scope_version(Cli.scan_state_scope(state)), attached, state,
-        items0, id, inv)
-    case False{}:
-      settle_inv(Cli.scan_error(state, Cli.E01{name}), items0, id,
-        err_inv(state, Cli.E01{name}, items0, id, inv))
-
-def blc_inv(help: Bool, +name: String, attached: Maybe<&2, String>,
-    state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
-    inv: SInv(state, items0, id)) ->
-    MInv(Cli.scan_builtin_long_case(help, name, attached, state), items0, id):
-  match help:
-    case True{}:
-      bh_inv(attached, state, Cli.HelpHit{True{}}, "--help", items0, id, {==},
-        inv)
-    case False{}:
-      bo_inv(String.eq(name, "--version"), name, attached, state, items0, id,
-        inv)
-
-def lf_inv(found: Maybe<&2, Cli.OptFound>, +name: String,
-    attached: Maybe<&2, String>, +state: Cli.ScanState, +q: String,
-    -items0: List<&2, Cli.Item>, +id: String,
-    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q) == found
-      : Maybe<&2, Cli.OptFound>},
-    inv: SInv(state, items0, id)) ->
-    MInv(Cli.scan_long_found(found, name, attached, state), items0, id):
-  match found:
-    case Some{f}: found_inv(f, attached, state, q, items0, id, ef, inv)
-    case None{}:
-      blc_inv(String.eq(name, "--help"), name, attached, state, items0, id,
-        inv)
-
-def long_inv(+token: String, +state: Cli.ScanState,
-    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
-    MInv(Cli.scan_long(token, state), items0, id):
-  lf_inv(Cli.find_option_scope(Cli.scan_state_scope(state),
-    Cli.before_equal(token)), Cli.before_equal(token),
-    Cli.after_equal(token), state, Cli.before_equal(token), items0, id, {==},
-    inv)
-
 def ok_inv(state: Cli.ScanState, token: String, -items0: List<&2, Cli.Item>,
     +id: String, inv: SInv(state, items0, id)) ->
     SInv(Cli.scan_operand_ok(state, token), items0, id):
@@ -11486,6 +11425,81 @@ def operand_inv(state: Cli.ScanState, token: String,
       opc_inv(Cli.scope_can_take(scope, count),
         Cli.ScanState{scope, events, resting, count, external, issue}, token,
         items0, id, inv)
+
+def ulc_inv(hyphen: Bool, +name: String, +attached: Maybe<&2, String>,
+    +state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_unknown_long_case(hyphen, name, attached, state), items0,
+      id):
+  match hyphen:
+    case True{}:
+      settle_inv(Cli.scan_operand(state, Cli.long_token(attached, name)),
+        items0, id,
+        operand_inv(state, Cli.long_token(attached, name), items0, id, inv))
+    case False{}:
+      settle_inv(Cli.scan_error(state, Cli.E01{name}), items0, id,
+        err_inv(state, Cli.E01{name}, items0, id, inv))
+
+def ul_inv(name: String, attached: Maybe<&2, String>, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_unknown_long(name, attached, state), items0, id):
+  ulc_inv(Cli.scan_state_hyphen(state), name, attached, state, items0, id,
+    inv)
+
+def bh_inv(attached: Maybe<&2, String>, +state: Cli.ScanState,
+    +event: Cli.ScanEvent, +name: String, -items0: List<&2, Cli.Item>,
+    +id: String, eo: {off(event, id) == True{} : Bool},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_hit(attached, state, event, name), items0, id):
+  match attached:
+    case Some{+v}:
+      settle_inv(Cli.scan_error(state, Cli.E05{name, v}), items0, id,
+        err_inv(state, Cli.E05{name, v}, items0, id, inv))
+    case None{}: push_off(state, event, items0, id, eo, inv)
+
+def bo_inv(version: Bool, +name: String, attached: Maybe<&2, String>,
+    +state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_other(version, name, attached, state), items0, id):
+  match version:
+    case True{}:
+      bh_inv(attached, state, Cli.VersionHit{}, "--version", items0, id, {==},
+        inv)
+    case False{}: ul_inv(name, attached, state, items0, id, inv)
+
+def blc_inv(help: Bool, +name: String, attached: Maybe<&2, String>,
+    +state: Cli.ScanState, -items0: List<&2, Cli.Item>, +id: String,
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_builtin_long_case(help, name, attached, state), items0, id):
+  match help:
+    case True{}:
+      bh_inv(attached, state, Cli.HelpHit{True{}}, "--help", items0, id, {==},
+        inv)
+    case False{}:
+      bo_inv(Bool.and(String.eq(name, "--version"),
+        Cli.scope_version(Cli.scan_state_scope(state))), name, attached, state,
+        items0, id, inv)
+
+def lf_inv(found: Maybe<&2, Cli.OptFound>, +name: String,
+    attached: Maybe<&2, String>, +state: Cli.ScanState, +q: String,
+    -items0: List<&2, Cli.Item>, +id: String,
+    ef: {Cli.find_option_scope(Cli.scan_state_scope(state), q) == found
+      : Maybe<&2, Cli.OptFound>},
+    inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_long_found(found, name, attached, state), items0, id):
+  match found:
+    case Some{f}: found_inv(f, attached, state, q, items0, id, ef, inv)
+    case None{}:
+      blc_inv(String.eq(name, "--help"), name, attached, state, items0, id,
+        inv)
+
+def long_inv(+token: String, +state: Cli.ScanState,
+    -items0: List<&2, Cli.Item>, +id: String, inv: SInv(state, items0, id)) ->
+    MInv(Cli.scan_long(token, state), items0, id):
+  lf_inv(Cli.find_option_scope(Cli.scan_state_scope(state),
+    Cli.before_equal(token)), Cli.before_equal(token),
+    Cli.after_equal(token), state, Cli.before_equal(token), items0, id, {==},
+    inv)
 
 # What scan_short_go does with a found arg of each kind, for a head h.
 def SomeEqs(h: Char) -> Type:
@@ -15042,6 +15056,12 @@ def Laws.g_pos_cases_eval():
 
 def Laws.g_pos_variadic_dash_eval():
   ({==}, ({==}, {==}))
+
+def Laws.g_pos_hyphen_long_eval():
+  ({==}, {==})
+
+def Laws.g_pos_rest_dash_eval():
+  ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))
 
 def Laws.g_sub_descent_eval():
   ({==}, ({==}, {==}))

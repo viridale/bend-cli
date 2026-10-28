@@ -20,6 +20,11 @@
 - Bend 2.0.39 or newer is required.
 - `Run.argv_of` takes the list `IO.args_bytes()` answers instead of
   `IO.args()`'s.
+- A `Cli.rest()` positional's first value may start with `-`, as a
+  `Cli.hyphen()` positional's may, so `retry curl -fsS url` passes `-fsS` on
+  instead of failing on `-f` (#42).
+- A `Cli.hyphen()` positional takes a long token that names no option, such
+  as `--x=1`, as it takes `-x`.
 
 ### Output changes
 

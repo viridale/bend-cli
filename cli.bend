@@ -3253,29 +3253,54 @@ def scan_builtin_hit(attached: Maybe<&2, String>, state: ScanState,
     case Some{value}: scan_settle(scan_error(state, E05{name, value}))
     case None{}: Closed{Stopped{scan_event(state, event)}}
 
-def scan_builtin_version(enabled: Bool, attached: Maybe<&2, String>,
-    state: ScanState) -> Mode:
-  match enabled:
-    case True{}:
-      scan_builtin_hit(attached, state, VersionHit{}, "--version")
-    case False{}:
-      scan_settle(scan_error(state, E01{"--version"}))
+def traits_hyphen(traits: SlotTraits) -> Bool:
+  match traits:
+    case SlotTraits{rest, hyphen, f32}: Bool.or(rest, hyphen)
 
-def scan_builtin_other(version: Bool, name: String,
-    attached: Maybe<&2, String>, +state: ScanState) -> Mode:
-  match version:
-    case True{}:
-      scan_builtin_version(scope_version(scan_state_scope(state)),
-        attached, state)
+# Whether the slot after state's operands takes hyphen values, as a rest()
+# slot does until it has its first value.
+def scan_state_hyphen(state: ScanState) -> Bool:
+  match state:
+    case ScanState{scope, events, resting, positional_count,
+        external, issue}:
+      traits_hyphen(scope_slot_traits(scope, positional_count))
+
+# The long token that before_equal and after_equal split into name and
+# attached.
+def long_token(attached: Maybe<&2, String>, name: String) -> String:
+  match attached:
+    case Some{value}: String.append(name, SCon{Chr{61}, value})
+    case None{}: name
+
+def scan_unknown_long_case(hyphen: Bool, name: String,
+    attached: Maybe<&2, String>, state: ScanState) -> Mode:
+  match hyphen:
+    case True{}: scan_settle(scan_operand(state, long_token(attached, name)))
     case False{}: scan_settle(scan_error(state, E01{name}))
 
-def scan_builtin_long_case(help: Bool, +name: String,
+# A long token that names no option, declared or built-in: a value of the
+# next slot if that slot takes hyphen values, else unknown. Only here is the
+# token rebuilt from its name and attached value, so a token that names an
+# option is split once and not kept.
+def scan_unknown_long(name: String, attached: Maybe<&2, String>,
+    +state: ScanState) -> Mode:
+  scan_unknown_long_case(scan_state_hyphen(state), name, attached, state)
+
+def scan_builtin_other(version: Bool, name: String,
     attached: Maybe<&2, String>, state: ScanState) -> Mode:
+  match version:
+    case True{}:
+      scan_builtin_hit(attached, state, VersionHit{}, "--version")
+    case False{}: scan_unknown_long(name, attached, state)
+
+def scan_builtin_long_case(help: Bool, +name: String,
+    attached: Maybe<&2, String>, +state: ScanState) -> Mode:
   match help:
     case True{}:
       scan_builtin_hit(attached, state, HelpHit{True{}}, "--help")
     case False{}:
-      scan_builtin_other(String.eq(name, "--version"), name, attached, state)
+      scan_builtin_other(Bool.and(String.eq(name, "--version"),
+        scope_version(scan_state_scope(state))), name, attached, state)
 
 def scan_builtin_long(+name: String, attached: Maybe<&2, String>,
     state: ScanState) -> Mode:
@@ -3482,8 +3507,9 @@ def scan_non_option_case(has_sub: Bool, token: String,
 def scan_non_option(token: String, +state: ScanState) -> Mode:
   scan_non_option_case(scope_has_sub(scan_state_scope(state)), token, state)
 
-# Whether a slot that takes hyphen values takes token: no option in scope
-# is named by it. The lookup runs only for such a slot.
+# Whether a slot that takes hyphen values takes a dash token: no option in
+# scope is named by it. The lookup runs only for such a slot, which a rest()
+# slot is until it has its first value.
 def hyphen_operand(hyphen: Bool, scope: Scope, token: String) -> Bool:
   match hyphen:
     case True{}: Bool.not(scope_any_option_known(scope, token))
@@ -3500,7 +3526,7 @@ def slot_candidate(traits: SlotTraits, +scope: Scope, +token: String) ->
     Bool:
   match traits:
     case SlotTraits{rest, hyphen, f32}:
-      Bool.or(hyphen_operand(hyphen, scope, token),
+      Bool.or(hyphen_operand(Bool.or(rest, hyphen), scope, token),
         f32_operand(f32, scope, token))
 
 def scan_hyphen_candidate(state: ScanState, +token: String) -> Bool:
@@ -3517,8 +3543,9 @@ def scan_dash_case(operand: Bool, token: String, state: ScanState) -> Mode:
 def scan_dash_token(+token: String, +state: ScanState) -> Mode:
   scan_dash_case(scan_hyphen_candidate(state, token), token, state)
 
-# How an open scan reads a token: a long option, a dash token (a cluster of
-# short options, or an operand a slot takes), or a word; "-" is a word.
+# How an open scan reads a token: a long token or a dash token (an option,
+# a cluster of short options, or an operand a slot takes), or a word; "-" is
+# a word.
 type TokenClass is Data:
   LongToken{}
   DashToken{}

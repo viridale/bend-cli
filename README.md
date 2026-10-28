@@ -122,6 +122,21 @@ options accept attached values (`-ofile`, `--output=file`), and a repeated
 single-value option retains its last occurrence. Option and subcommand names
 match exactly; close misspellings receive suggestions.
 
+`Cli.hyphen()` lets a value start with `-`. An option with it takes any next
+token but `--` as its value, even `-h`. A positional with it takes a token
+that starts with `-`, short or long, when the token names no option in scope:
+`-x` and `--x=1` are values, while a declared `-v` or `--verbose=1` and the
+built-in help and version options stay options. `Cli.rest()` on the last,
+variadic positional does the same for its first value, and every later token
+is one of its values. With `-v, --verbose`, `<COMMAND>`, and `[ARGS]...`
+declared with `Cli.rest()`:
+
+```text
+$ retry curl -fsS --max-time=5 url   # args: -fsS, --max-time=5, url
+$ retry curl -v url                  # -v is retry's flag; args: url
+$ retry curl -- -v url               # args: -v, url
+```
+
 Add `Cli.global()` to propagate an option to descendant subcommands. A
 command's `Cli.exclusive` and `Cli.need_one` rules propagate as well when every
 argument the command places in the group is global; in a subcommand, they also
