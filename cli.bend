@@ -7770,6 +7770,53 @@ def act_code(fits: Bool, n: U32) -> (U32 & String):
 def act_exit(+n: U32) -> (U32 & String):
   act_code(U32.is_le(n, 255), n)
 
+# ---- Pure runs (§7.2) ----
+
+# What a run prints and how it ends: its exit status, its stdout text and
+# its stderr text.
+type Ran is Data:
+  Ran{code: U32, out: String, err: String}
+
+def owed_end(newline: Bool) -> String:
+  match newline:
+    case True{}: ""
+    case False{}: "\n"
+
+def owed_after(t: String, c: Char) -> String:
+  match t:
+    case SNil{}: owed_end(Char.is_eq(c, '\n'))
+    case SCon{d, u}: owed_after(u, d)
+
+# "\n" unless s is empty or ends with one: what IO.print_err adds to s.
+def owed(s: String) -> String:
+  match s:
+    case SNil{}: ""
+    case SCon{c, t}: owed_after(t, c)
+
+def ran_exit(e: (U32 & String), out: String, +err: String) -> Ran:
+  match e:
+    case (code, bug): Ran{code, out, String.concat([err, owed(err), bug])}
+
+# r with act_exit's mapping: a code above 255 becomes 70, with the bug line
+# after r's stderr.
+def ran_act(r: Ran) -> Ran:
+  match r:
+    case Ran{code, out, err}: ran_exit(act_exit(code), out, err)
+
+def ran_step(~A: Type, ~plan: @+t: Term -> A -> Ran, s: Step<A>) -> Ran:
+  match s:
+    case Quit{code, out, err}: Ran{code, out, err}
+    case Go{a, t}: ran_act(plan(t, a))
+
+# §7.2: what Run.planned writes and exits with, given the host and argv:
+# Quit's code and text, or plan's run on the value and terminal, mapped by
+# ran_act. plan builds its output whole, so an action that streams or does
+# other IO is an act for Run.main instead.
+def invoke(~A: Type, ~decode: @+m: Matches -> Dec(A),
+    ~plan: @+t: Term -> A -> Ran, c: Cmd, h: Host,
+    argv: List<&2, String>) -> Ran:
+  ran_step(~A, ~plan, eval(~A, ~decode, c, h, argv))
+
 # ---- Argument bytes (§7.2) ----
 
 # What a byte starts: no UTF-8 sequence (a continuation byte, C0, C1, F5

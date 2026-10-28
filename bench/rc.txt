@@ -305,3 +305,11 @@
 #   41.8 ms, peak RSS 10.8 -> 10.7 MB, stdout identical; on argbench's
 #   build with 10000 -I pairs and 10000 inputs, threads=1 43.5 -> 42.6 ms,
 #   all cores 43.6 -> 42.8 ms.
+#
+# Cli.invoke and Run.planned, against main's build (26db72a): bench/main.bend
+# gives the same counts; main.bend, now on Run.planned, gains
+# FID_CLI_INVOKE_0 1 2 6, and its static total goes 5743 -> 5752. The takes
+# match the plan's Ran and act_exit's pair, the keep shares the plan's
+# stderr with owed, which looks for its final "\n", and the seals build the
+# three-cell list that String.concat joins. FID_RUN_FINISH 0 0 0 is gone,
+# inlined into wrote. It runs once per process.

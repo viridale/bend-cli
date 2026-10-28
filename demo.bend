@@ -1,5 +1,5 @@
-# Purpose: the pkg reference app, pure part: its spec, actions, decoder,
-# plan and act (§12.3).
+# Purpose: the pkg reference app, pure part: its spec, actions, decoder
+# and plan (§12.3).
 # Expected output: ALL PROOFS CHECK.
 # Run: bend demo.bend --check-only
 
@@ -140,14 +140,11 @@ def plan(a: Action) -> Plan:
       job_plan(job, String.concat([" verbose=", Nat.show(verbose),
         dir_text(dir)]))
 
-def said(p: Plan) -> IO(U32):
+def ran_of(p: Plan) -> Cli.Ran:
   match p:
-    case Plan{code, line}:
-      do IO<U32>:
-        IO.print(line)
-        return code
+    case Plan{code, line}: Cli.Ran{code, String.append(line, "\n"), ""}
 
-# pkg's act: print plan's line and return its code. pkg does nothing else,
-# so it ignores the terminal.
-def act(+t: Cli.Term, a: Action) -> IO(U32):
-  said(plan(a))
+# pkg's plan for Run.planned: plan's line on stdout, and its code. pkg does
+# nothing else, so it ignores the terminal.
+def ran(+t: Cli.Term, a: Action) -> Cli.Ran:
+  ran_of(plan(a))

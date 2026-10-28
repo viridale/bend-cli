@@ -1,4 +1,4 @@
-# Purpose: the hello example shell: one call to Run.main.
+# Purpose: the hello example shell: one call to Run.planned.
 # Expected output: `bend examples/hello/main.bend -- Ada` prints
 # `Hello, Ada!`. `--check-only` prints SOME PROOFS FAIL listing only defs
 # that rely on sys.c and sys.js (F1).
@@ -9,4 +9,4 @@ import ./app.bend as App
 import ../../run.bend as Run
 
 def main() -> IO(Unit):
-  Run.main(~App.Greeting, ~App.decode, ~App.act, App.cli())
+  Run.planned(~App.Greeting, ~App.decode, ~App.plan, App.cli())

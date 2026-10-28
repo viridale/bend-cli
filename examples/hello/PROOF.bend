@@ -14,6 +14,9 @@ def Laws.default_name():
 def Laws.given_name():
   {==}
 
+def Laws.greets():
+  ({==}, {==})
+
 def Laws.help():
   ({==}, {==})
 

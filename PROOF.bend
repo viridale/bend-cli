@@ -15166,6 +15166,12 @@ def Laws.g_act_exit():
 def Laws.g_plan_pkg():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))))
 
+def Laws.g_invoke_pkg():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_invoke_plan():
+  ({==}, ({==}, ({==}, {==})))
+
 # M6: completions and man pages.
 
 # The checker compares two strings with one nested call per char, so a

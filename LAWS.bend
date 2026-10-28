@@ -4329,7 +4329,7 @@ law g_act_exit:
     (70, "bug: exit code 4294967295 is out of range 0..255\n")
     : (U32 & String)}
 
-# §12.3: pkg's act prints plan's line and returns plan's code. The line is
+# §12.3: pkg's plan gives the line its run prints and its code. The line is
 # the job, its fields, verbose and any -C dir, with lists joined by commas;
 # `run exit <N>` with one argument that reads as a U32 returns N, and every
 # other action returns 0.
@@ -4357,6 +4357,75 @@ law g_plan_pkg:
     Demo.Plan{0, "run script=exit args=1,2 verbose=0"} : Demo.Plan} &
   {Demo.plan(job(Demo.Script{"exit", []})) ==
     Demo.Plan{0, "run script=exit args= verbose=0"} : Demo.Plan}
+
+# pkg's run on argv, with an 80-column host and no variables or terminal.
+def pkg_invoked(argv: List<&2, String>) -> Cli.Ran:
+  Cli.invoke(~Demo.Action, ~Demo.decode, ~Demo.ran, Demo.cli(), Cli.host(80n),
+    argv)
+
+# §7.2: Cli.invoke gives what Run.planned writes and exits with. A run that
+# eval ends gives Quit's code and text; one that reaches the plan gives the
+# plan's, with act_exit's mapping, so `run exit 256` exits 70 with the bug
+# line on stderr. pkg's plan puts its line on stdout and nothing on stderr.
+law g_invoke_pkg:
+  {pkg_invoked(["run", "exit", "3"]) ==
+    Cli.Ran{3, "run script=exit args=3 verbose=0\n", ""} : Cli.Ran} &
+  {pkg_invoked(["run", "exit", "256"]) ==
+    Cli.Ran{70, "run script=exit args=256 verbose=0\n",
+      "bug: exit code 256 is out of range 0..255\n"} : Cli.Ran} &
+  {pkg_invoked(["--version"]) == Cli.Ran{0, "pkg 0.1.0\n", ""} : Cli.Ran} &
+  {pkg_invoked(["list", "-x"]) == Cli.Ran{2, "", String.concat([
+    "error: unexpected argument '-x' found\n",
+    "\n",
+    "Usage: pkg list [OPTIONS]\n",
+    "\n",
+    "For more information, try '--help'.\n",
+  ])} : Cli.Ran}
+
+# A plan that writes both streams, for g_invoke_plan: pkg's line and the
+# terminal's width on stdout, and a run job's arguments on stderr, joined
+# by "\n" with none after the last.
+def noisy_err(j: Demo.Job) -> String:
+  match j:
+    case Demo.Add{dev, registry, names}: ""
+    case Demo.Remove{names}: ""
+    case Demo.Show{all, format}: ""
+    case Demo.Script{name, args}: String.join(args, "\n")
+
+def noisy_ran(p: Demo.Plan, t: Cli.Term, err: String) -> Cli.Ran:
+  match p t:
+    case Demo.Plan{code, line} Cli.Term{out_color, err_color, width}:
+      Cli.Ran{code, String.concat([line, " width=", Nat.show(width), "\n"]),
+        err}
+
+def noisy_action(+a: Demo.Action, t: Cli.Term) -> Cli.Ran:
+  match a:
+    case Demo.Action{verbose, dir, job}:
+      noisy_ran(Demo.plan(a), t, noisy_err(job))
+
+def noisy(+t: Cli.Term, a: Demo.Action) -> Cli.Ran:
+  noisy_action(a, t)
+
+# The noisy plan's run on argv, with a 60-column host.
+def noisy_invoked(argv: List<&2, String>) -> Cli.Ran:
+  Cli.invoke(~Demo.Action, ~Demo.decode, ~noisy, Demo.cli(), Cli.host(60n),
+    argv)
+
+# §7.2: invoke hands the plan the host's terminal and keeps the plan's
+# stderr, ending it in "\n", as IO.print_err does, unless it is empty or
+# already ends so; act_exit's bug line comes after it.
+law g_invoke_plan:
+  {noisy_invoked(["run", "exit", "256"]) ==
+    Cli.Ran{70, "run script=exit args=256 verbose=0 width=60\n",
+      "256\nbug: exit code 256 is out of range 0..255\n"} : Cli.Ran} &
+  {noisy_invoked(["-v", "run", "x", "a", "b"]) ==
+    Cli.Ran{0, "run script=x args=a,b verbose=1 width=60\n", "a\nb\n"}
+    : Cli.Ran} &
+  {noisy_invoked(["run", "x", "a", ""]) ==
+    Cli.Ran{0, "run script=x args=a, verbose=0 width=60\n", "a\n"}
+    : Cli.Ran} &
+  {noisy_invoked(["run", "x"]) ==
+    Cli.Ran{0, "run script=x args= verbose=0 width=60\n", ""} : Cli.Ran}
 
 # ---- M6: completions and man pages (§11) ----
 

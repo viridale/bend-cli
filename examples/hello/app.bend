@@ -1,5 +1,5 @@
 # Purpose: the hello example app, pure part: the README quickstart's command
-# definition, decoder and action.
+# definition, decoder and plan.
 # Expected output: ALL PROOFS CHECK.
 # Run: bend examples/hello/app.bend --check-only
 
@@ -19,9 +19,6 @@ def decode(+m: Cli.Matches) -> Cli.Dec(Greeting):
     name : String <- Cli.str(m, "name")
     return Greeting{name}
 
-def act(+t: Cli.Term, greeting: Greeting) -> IO(U32):
+def plan(+t: Cli.Term, greeting: Greeting) -> Cli.Ran:
   match greeting:
-    case Greeting{name}:
-      do IO<U32>:
-        IO.print(("Hello, " ++ name ++ "!" : String))
-        return 0
+    case Greeting{name}: Cli.Ran{0, ("Hello, " ++ name ++ "!\n" : String), ""}

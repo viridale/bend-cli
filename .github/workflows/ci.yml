@@ -57,7 +57,7 @@ jobs:
       - name: Check source modules
         shell: bash
         run: |
-          run_defs=(Sys.isatty Sys.columns host main)
+          run_defs=(Sys.isatty Sys.columns host main planned)
           foreign() {
             local names=("${run_defs[@]/#/$1}" "${@:2}") list
             printf -v list '%s, ' "${names[@]}"

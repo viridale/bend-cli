@@ -9,6 +9,11 @@
   `Cli.arg_bytes` gives the bytes back. `Run.main` reads `argv` through
   them, so a native app can open a file whose name is not UTF-8 with
   `File.open_bytes` (#66).
+- `Run.planned` runs an app whose action is a pure `plan(term, value)`
+  returning a `Cli.Ran{code, out, err}`: its exit status and its stdout and
+  stderr text. `Cli.invoke` returns the `Cli.Ran` that `Run.planned` writes
+  and exits with for an `argv`, so a law can state what the app prints. The
+  quickstart, `examples/hello` and the pkg demo now use a plan (#41).
 
 ### Changed
 

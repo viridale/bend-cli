@@ -12,7 +12,7 @@ required.
 
 ## Quickstart
 
-Create `app.bend` with the command definition, decoder, and action:
+Create `app.bend` with the command definition, decoder, and plan:
 
 ```python
 import Base
@@ -31,13 +31,15 @@ def decode(+m: Cli.Matches) -> Cli.Dec(Greeting):
     name : String <- Cli.str(m, "name")
     return Greeting{name}
 
-def act(+t: Cli.Term, greeting: Greeting) -> IO(U32):
+def plan(+t: Cli.Term, greeting: Greeting) -> Cli.Ran:
   match greeting:
-    case Greeting{name}:
-      do IO<U32>:
-        IO.print(("Hello, " ++ name ++ "!" : String))
-        return 0
+    case Greeting{name}: Cli.Ran{0, ("Hello, " ++ name ++ "!\n" : String), ""}
 ```
+
+`plan` returns what the command prints and how it exits as
+`Cli.Ran{code, out, err}`: its exit status and its stdout and stderr text. It
+does no IO, so laws can state what the binary prints (see
+[State and prove CLI behavior](#state-and-prove-cli-behavior)).
 
 Create `main.bend` to wire the command into process arguments, terminal
 probing, and standard streams:
@@ -48,7 +50,7 @@ import ./app.bend as App
 import cli@0.1.0.0/run.bend as Run
 
 def main() -> IO(Unit):
-  Run.main(~App.Greeting, ~App.decode, ~App.act, App.cli())
+  Run.planned(~App.Greeting, ~App.decode, ~App.plan, App.cli())
 ```
 
 Build and run the binary:
@@ -231,8 +233,17 @@ returns `Done{l}` or `Fail{problems}` (matching `Cli.problems(c)`), and pass
 `l` to `Cli.eval_linted(~A, ~decode, l, h, argv)`. `Cli.eval_linted` returns
 the same `Step<A>` result as `Cli.eval` without re-running lint.
 
+`Cli.invoke(~A, ~decode, ~plan, c, h, argv)` returns the `Cli.Ran` that
+`Run.planned` writes and exits with, as click's `CliRunner` does for Python:
+`Quit`'s code and text when `Cli.eval` ends the run, else the plan's for the
+decoded value and terminal. A plan's code above `255` becomes `70`, with a
+`bug:` line after the plan's stderr, and a non-empty stderr ends with a
+newline: `Run.planned` writes stderr with `IO.print_err`, which adds one when
+the plan leaves it off. A law on `Cli.invoke` thus states the exit status and
+bytes the binary gives for an `argv`.
+
 For the quickstart application, `LAWS.bend` states both the definition check
-and a parsing law:
+a parsing law, and what the binary prints:
 
 ```python
 import Base
@@ -247,6 +258,10 @@ law default_name:
   {Cli.eval(~App.Greeting, ~App.decode, App.cli(), Cli.host(80n), [])
     == Cli.Go{App.Greeting{"world"}, Cli.Term{False{}, False{}, 80n}}
     : Cli.Step<App.Greeting>}
+
+law greets_ada:
+  {Cli.invoke(~App.Greeting, ~App.decode, ~App.plan, App.cli(), Cli.host(80n),
+    ["Ada"]) == Cli.Ran{0, "Hello, Ada!\n", ""} : Cli.Ran}
 ```
 
 `PROOF.bend` imports those laws and provides one proof definition per law:
@@ -259,6 +274,9 @@ def Laws.cli_ok():
   {==}
 
 def Laws.default_name():
+  {==}
+
+def Laws.greets_ada():
   {==}
 ```
 
@@ -278,11 +296,18 @@ environment, followed in precedence order by `NO_COLOR`, `CLICOLOR_FORCE`,
 and man pages never include ANSI escape sequences.
 
 `Cli.Term{out_color, err_color, width}` passes the resolved stream color flags
-and terminal width to `act(term, value)`. `Run.main` writes help, version,
+and terminal width to `plan(term, value)`. `Run.planned` writes help, version,
 completion, and man-page output to stdout (exiting `0`) and usage or definition
-errors to stderr (exiting `2` or `70`). When `act` runs, `Run.main` exits with
-the returned status code (`0`–`255`); a return value above `255` is reported to
-stderr as an internal bug and exits `70`.
+errors to stderr (exiting `2` or `70`). Otherwise it writes the plan's stdout
+and stderr text and exits with the plan's status code (`0`–`255`); a code
+above `255` is reported to stderr as an internal bug and exits `70`.
+
+A plan builds its whole output before anything is written. An action that
+reads files, or writes output as it goes, is instead an
+`act(term, value) -> IO(U32)` that prints for itself and returns the status
+code; `Run.main(~A, ~decode, ~act, c)` runs it as `Run.planned` runs a plan,
+as [`examples/grep`](examples/grep) does. Laws then state what its pure parts
+compute, since `act`'s output is IO.
 
 ## Platform notes
 
@@ -306,8 +331,8 @@ stderr as an internal bug and exits `70`.
   keycaps, regional indicator flags, and tag sequences) count as 2 columns,
   matching Rust's `unicode-width` 0.2. Terminals that render a sequence at a
   different width may still misalign columns.
-- `Run.main` reads `argv` as bytes and decodes each argument with
-  `Cli.arg_text`: valid UTF-8 stays as is, and each byte that starts no
+- `Run.main` and `Run.planned` read `argv` as bytes and decode each argument
+  with `Cli.arg_text`: valid UTF-8 stays as is, and each byte that starts no
   well-formed sequence becomes U+DC00 plus the byte, as Python's
   `surrogateescape` does (PEP 383). Printed text shows each such byte as
   U+FFFD. `Cli.arg_bytes` gives back an argument's bytes, so

@@ -123,3 +123,17 @@ def main(~A: Type, ~decode: @+m: Cli.Matches -> Cli.Dec(A),
     args : List<List<&2, U32>> <- IO.args_bytes()
     h : Cli.Host <- host(c)
     stepped(~A, ~act, Cli.eval(~A, ~decode, c, h, argv_of(args)))
+
+def wrote(r: Cli.Ran) -> IO(Unit):
+  match r:
+    case Cli.Ran{code, out, err}: finish(code, out, err)
+
+# §7.2: the whole main of an app whose action is a pure plan: Cli.invoke's
+# run on the host and argv, written out, so a law on Cli.invoke states what
+# the app prints and exits with.
+def planned(~A: Type, ~decode: @+m: Cli.Matches -> Cli.Dec(A),
+    ~plan: @+t: Cli.Term -> A -> Cli.Ran, +c: Cli.Cmd) -> IO(Unit):
+  do IO<Unit>:
+    args : List<List<&2, U32>> <- IO.args_bytes()
+    h : Cli.Host <- host(c)
+    wrote(Cli.invoke(~A, ~decode, ~plan, c, h, argv_of(args)))
