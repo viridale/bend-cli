@@ -328,3 +328,15 @@
 #   MB on both, stdout identical; on argbench's build with 10000
 #   --include=src and 10000 inputs, threads=1 44.2 -> 44.1 ms, all cores
 #   44.2 -> 43.8 ms.
+#
+# Cli.program and Cli.program_opt (#43), against main's build (2f0e00b);
+# bench/main.bend and main.bend give the same per-def diff, and the static
+# total 5626 -> 5639 (main.bend 5754 -> 5767), with no other def changed:
+# FID_CLI_VERDICT 8 11 8 -> 12 16 8: want_verdict, inlined here, gains a
+#   WProgram arm, which keeps id and attrs across kind_verdict,
+#   absent_verdict and rest_verdict, and the spins it calls, walks over the
+#   arg's attrs, add the takes. The other arms' C is unchanged, so no
+#   executed count rises for any other reader; the arm runs once per
+#   program or program_opt read.
+# the new FID_CLI_REST_VERDICT 0 0 4: the seals build the four-cell list
+#   String.concat joins into the message, only for a slot without rest().

@@ -1557,6 +1557,8 @@ def reader_bugs(+m: Cli.Matches, +id: String,
     bug_of(Bool, Cli.bool(m, id)),
     bug_of(Maybe<&2, Bool>, Cli.bool_opt(m, id)),
     bug_of(List<&2, Bool>, Cli.bools(m, id)),
+    bug_of(Cli.Program, Cli.program(m, id)),
+    bug_of(Maybe<&2, Cli.Program>, Cli.program_opt(m, id)),
     bug_of(Bool, Cli.given(m, id)),
     bug_of(Cli.Src, Cli.source(m, id)),
     bug_of(String, Cli.choose(String, m, id, choose_table(keys))),
@@ -1684,6 +1686,61 @@ law g_check_choose:
   {Cli.check(~String, ~(+m => Cli.choose(String, m, "format",
     [("json", "json"), ("text", "first"), ("text", "second")])), kinds()) ==
     [] : List<&2, Cli.Problem>}
+
+# retry with a nat -n, --times, a --tag list, and command declared with attrs.
+def wrapper(command: String, attrs: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("retry", "Run a command until it succeeds", [
+    Cli.arg("-n, --times <N>", "Tries", [Cli.as_nat(), Cli.default("3")]),
+    Cli.arg("--tag <T>...", "Tags", []),
+    Cli.arg(command, "Program and its arguments", attrs),
+  ])
+
+# G-CHECK: program and program_opt read a variadic string positional with
+# rest(); a bare program needs it always present. The kind is checked
+# first, then absence, then rest().
+law g_check_program:
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("<COMMAND>...", [Cli.rest()])) == [] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("[COMMAND]...", [Cli.rest(), Cli.default("true")])) ==
+    [] : List<&2, Cli.Problem>} &
+  {Cli.check(~Maybe<&2, Cli.Program>, ~(+m => Cli.program_opt(m, "command")),
+    wrapper("[COMMAND]...", [Cli.rest()])) == [] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("[COMMAND]...", [Cli.rest()])) == [
+    Cli.DecodeBug{"retry",
+      "'command' may be absent; read it with Cli.program_opt"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("<COMMAND>...", [])) == [
+    Cli.DecodeBug{"retry",
+      "'command' has no Cli.rest(); give it one or read it with Cli.strs"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Maybe<&2, Cli.Program>, ~(+m => Cli.program_opt(m, "command")),
+    wrapper("[COMMAND]...", [])) == [
+    Cli.DecodeBug{"retry",
+      "'command' has no Cli.rest(); give it one or read it with Cli.strs"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("[COMMAND]...", [])) == [
+    Cli.DecodeBug{"retry",
+      "'command' may be absent; read it with Cli.program_opt"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("<COMMAND>", [])) == [
+    Cli.DecodeBug{"retry",
+      "'command' is a string value; read it with Cli.str"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "command")),
+    wrapper("<COMMAND>...", [Cli.as_nat(), Cli.rest()])) == [
+    Cli.DecodeBug{"retry",
+      "'command' is a list of nat values; read it with Cli.nats"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Cli.Program, ~(+m => Cli.program(m, "tag")),
+    wrapper("<COMMAND>...", [Cli.rest()])) == [
+    Cli.DecodeBug{"retry",
+      "'tag' is a list of string values; read it with Cli.strs"},
+  ] : List<&2, Cli.Problem>}
 
 def routed() -> Cli.Cmd:
   Cli.cmd("tool", "Tool", [
@@ -2163,7 +2220,7 @@ def read_keys(values: List<&2, String>, +keys: List<&2, String>) -> Bool:
 # What want's reader may read: values its type accepts, one for a bare
 # reader or choose, at most one for _opt, choose_opt, flag and count, a
 # flag's as "true" or "false", a count's as digits, and choose's among its
-# keys.
+# keys; program and program_opt read any strings.
 def read_good(want: Cli.Want, +values: List<&2, String>) -> Bool:
   match want:
     case Cli.WFlag{}: Bool.and(read_flags(values), read_most_one(values))
@@ -2173,6 +2230,7 @@ def read_good(want: Cli.Want, +values: List<&2, String>) -> Bool:
     case Cli.WAny{}: True{}
     case Cli.WChoose{opt, keys}:
       Bool.and(read_choose(opt, values), read_keys(values, keys))
+    case Cli.WProgram{opt}: True{}
 
 # Once the verdict passes, the reader reads only what read_good allows.
 def read_at(verdict: Maybe<&2, String>, want: Cli.Want,
@@ -2523,6 +2581,49 @@ law g_read_pkg:
     Some{Done{Demo.Action{0n, None{}, Demo.Script{"build",
       ["x", "--", "-y"]}}}}
     : Maybe<Cli.Dec(Demo.Action)>}
+
+type Tries is Data:
+  Tries{times: Nat, program: Cli.Program}
+
+def tries(+m: Cli.Matches) -> Cli.Dec(Tries):
+  do Cli.Dec<Tries>:
+    times : Nat <- Cli.nat(m, "times")
+    program : Cli.Program <- Cli.program(m, "command")
+    return Tries{times, program}
+
+def tries_opt(+m: Cli.Matches) -> Cli.Dec(Maybe<&2, Cli.Program>):
+  Cli.program_opt(m, "command")
+
+# G-READ: program reads a rest() slot's first value as the program and every
+# later value, options and "--" included, as its arguments, in order;
+# program_opt reads an empty slot as None.
+law g_read_program:
+  {decoded(~Tries, ~tries, wrapper("<COMMAND>...", [Cli.rest()]), host(),
+    ["curl", "--help"]) ==
+    Some{Done{Tries{3n, Cli.Program{"curl", ["--help"]}}}}
+    : Maybe<Cli.Dec(Tries)>} &
+  {decoded(~Tries, ~tries, wrapper("<COMMAND>...", [Cli.rest()]), host(),
+    ["-n", "5", "curl", "-n", "1", "--", "x"]) ==
+    Some{Done{Tries{5n, Cli.Program{"curl", ["-n", "1", "--", "x"]}}}}
+    : Maybe<Cli.Dec(Tries)>} &
+  {decoded(~Tries, ~tries, wrapper("<COMMAND>...", [Cli.rest()]), host(),
+    ["--", "-n"]) == Some{Done{Tries{3n, Cli.Program{"-n", []}}}}
+    : Maybe<Cli.Dec(Tries)>} &
+  {decoded(~Tries, ~tries, wrapper("<COMMAND>...", [Cli.rest()]), host(),
+    ["curl"]) == Some{Done{Tries{3n, Cli.Program{"curl", []}}}}
+    : Maybe<Cli.Dec(Tries)>} &
+  {decoded(~Tries, ~tries,
+    wrapper("[COMMAND]...", [Cli.rest(), Cli.default("true")]), host(),
+    []) == Some{Done{Tries{3n, Cli.Program{"true", []}}}}
+    : Maybe<Cli.Dec(Tries)>} &
+  {decoded(~Maybe<&2, Cli.Program>, ~tries_opt,
+    wrapper("[COMMAND]...", [Cli.rest()]), host(), []) ==
+    Some{Done{None{}}} : Maybe<Cli.Dec(Maybe<&2, Cli.Program>)>} &
+  {decoded(~Maybe<&2, Cli.Program>, ~tries_opt,
+    wrapper("[COMMAND]...", [Cli.rest()]), host(),
+    ["--tag", "a", "sh", "-c", "exit 1"]) ==
+    Some{Done{Some{Cli.Program{"sh", ["-c", "exit 1"]}}}}
+    : Maybe<Cli.Dec(Maybe<&2, Cli.Program>)>}
 
 # M4: outcome is eval's answer before decoding (V1-V5): Shown is the exit
 # code and the bytes for stdout and stderr; Matched is a parse to decode.

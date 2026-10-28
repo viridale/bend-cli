@@ -3009,6 +3009,8 @@ type Rd is Data:
   RBool{}
   RBoolOpt{}
   RBools{}
+  RProgram{}
+  RProgramOpt{}
   RGiven{}
   RSource{}
   RChoose{}
@@ -3035,6 +3037,9 @@ def entry(r: Rd, +m: Cli.Matches, +id: String, +keys: List<&2, String>) ->
     case RBool{}: Laws.bug_of(Bool, Cli.bool(m, id))
     case RBoolOpt{}: Laws.bug_of(Maybe<&2, Bool>, Cli.bool_opt(m, id))
     case RBools{}: Laws.bug_of(List<&2, Bool>, Cli.bools(m, id))
+    case RProgram{}: Laws.bug_of(Cli.Program, Cli.program(m, id))
+    case RProgramOpt{}:
+      Laws.bug_of(Maybe<&2, Cli.Program>, Cli.program_opt(m, id))
     case RGiven{}: Laws.bug_of(Bool, Cli.given(m, id))
     case RSource{}: Laws.bug_of(Cli.Src, Cli.source(m, id))
     case RChoose{}:
@@ -3053,7 +3058,7 @@ def entries(rs: List<&2, Rd>, +m: Cli.Matches, +id: String,
     case r <> tail: entry(r, m, id, keys) <> entries(tail, m, id, keys)
 
 def readers() -> List<&2, Rd>:
-  [RFlag{}, RCount{}, RStr{}, RStrOpt{}, RStrs{}, RNat{}, RNatOpt{}, RNats{}, RU32{}, RU32Opt{}, RU32s{}, RF32{}, RF32Opt{}, RF32s{}, RBool{}, RBoolOpt{}, RBools{}, RGiven{}, RSource{}, RChoose{}, RChooseOpt{}, RRoute{}]
+  [RFlag{}, RCount{}, RStr{}, RStrOpt{}, RStrs{}, RNat{}, RNatOpt{}, RNats{}, RU32{}, RU32Opt{}, RU32s{}, RF32{}, RF32Opt{}, RF32s{}, RBool{}, RBoolOpt{}, RBools{}, RProgram{}, RProgramOpt{}, RGiven{}, RSource{}, RChoose{}, RChooseOpt{}, RRoute{}]
 
 def entry_same(r: Rd, +c: Cli.Cmd, +path: List<&2, String>,
     +f1: List<&2, Cli.Field>, x1: Maybe<&2, Cli.ExternalArgs>,
@@ -3113,6 +3118,12 @@ def entry_same(r: Rd, +c: Cli.Cmd, +path: List<&2, String>,
     case RBools{}:
       read_same(~List<&2, Bool>, ~(f => Cli.get_many(~Bool, ~Cli.env_bool_true, f)), Cli.WValue{"bool", Cli.ReadMany{}},
         c, path, f1, x1, f2, x2, id)
+    case RProgram{}:
+      read_same(~Cli.Program, ~(Cli.get_program), Cli.WProgram{False{}},
+        c, path, f1, x1, f2, x2, id)
+    case RProgramOpt{}:
+      read_same(~Maybe<&2, Cli.Program>, ~(Cli.get_program_opt),
+        Cli.WProgram{True{}}, c, path, f1, x1, f2, x2, id)
     case RGiven{}:
       read_same(~Bool, ~(f => Cli.source_given(Cli.field_src(f))), Cli.WAny{},
         c, path, f1, x1, f2, x2, id)
@@ -3207,6 +3218,9 @@ def Laws.g_check_absent():
 
 def Laws.g_check_choose():
   ({==}, ({==}, {==}))
+
+def Laws.g_check_program():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))))
 
 def Laws.g_check_route():
   ({==}, ({==}, ({==}, {==})))
@@ -6605,6 +6619,10 @@ def core(want: Cli.Want, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
     case Cli.WChoose{opt, keys}:
       choose_core(Cli.find_default(attrs), kind, opt, keys, attrs, id, okd,
         okl)
+    case Cli.WProgram{opt}:
+      read_at_any(Cli.want_verdict(Cli.WProgram{opt}, id, kind, attrs),
+        Cli.WProgram{opt}, default_vals(Cli.find_default(attrs), kind, attrs),
+        {==})
 
 # P21 sample lint: lint's lists, rewritten by issue_list, sub_list and
 # top_list, give each Arg below the root its facts (DeepClean).
@@ -7775,6 +7793,9 @@ def final(want: Cli.Want, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
     case Cli.WValue{stem, form}: value_final(kind, stem, form, attrs, id, vs, ev, ep)
     case Cli.WAny{}: {==}
     case Cli.WChoose{opt, keys}: choose_final(kind, opt, keys, attrs, id, vs, ev, ep)
+    case Cli.WProgram{opt}:
+      read_at_any(Cli.want_verdict(Cli.WProgram{opt}, id, kind, attrs),
+        Cli.WProgram{opt}, vs, {==})
 
 # P21 field values: what env, a default and the argv give an arg satisfy
 # (fgood), which gap and final then read.
@@ -14459,6 +14480,9 @@ def Laws.g_read_external():
 
 def Laws.g_read_pkg():
   ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_read_program():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
 
 # P7 and P8: the --color pre-scan and the environment rules.
 

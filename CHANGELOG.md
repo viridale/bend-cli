@@ -14,6 +14,10 @@
   stderr text. `Cli.invoke` returns the `Cli.Ran` that `Run.planned` writes
   and exits with for an `argv`, so a law can state what the app prints. The
   quickstart, `examples/hello` and the pkg demo now use a plan (#41).
+- `Cli.program` reads a `<COMMAND>...` positional with `Cli.rest()` as a
+  `Cli.Program{name, args}`, a program and its arguments in one slot, as
+  `timeout` and `env` take them; `Cli.program_opt` reads `[COMMAND]...`
+  (#43).
 
 ### Changed
 

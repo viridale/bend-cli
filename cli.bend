@@ -4364,6 +4364,7 @@ type Want is Data:
   WValue{stem: String, form: Form}
   WAny{}
   WChoose{opt: Bool, keys: List<&2, String>}
+  WProgram{opt: Bool}
 
 def kind_flag(kind: UsageKind) -> Bool:
   match kind:
@@ -4479,7 +4480,19 @@ def choose_fits(+kind: UsageKind, attrs: List<&2, Item>) -> Bool:
   Bool.and(kind_valued(kind), Bool.and(Bool.not(kind_many(kind)),
     Maybe.is_some(&2, List<&2, String>, find_one_of(attrs))))
 
-# The first Q-static message for an arg in scope: kind, absence, then keys.
+# A program and its arguments come from one variadic string positional.
+def program_fits(+kind: UsageKind, attrs: List<&2, Item>) -> Bool:
+  Bool.and(kind_pos(kind), value_fits("str", ReadMany{}, kind, attrs))
+
+def rest_verdict(rest: Bool, id: String) -> Maybe<&2, String>:
+  match rest:
+    case True{}: None{}
+    case False{}:
+      Some{String.concat(["'", id,
+        "' has no Cli.rest(); give it one or read it with Cli.strs"])}
+
+# The first Q-static message for an arg in scope: kind, absence, then keys,
+# or for a program, then rest().
 def want_verdict(want: Want, +id: String, +kind: UsageKind,
     +attrs: List<&2, Item>) -> Maybe<&2, String>:
   match want:
@@ -4501,6 +4514,13 @@ def want_verdict(want: Want, +id: String, +kind: UsageKind,
           absent_verdict(Bool.and(Bool.not(opt), may_absent(kind, attrs)),
             id, "choose"),
           keys_verdict(find_one_of(attrs), keys, id)))
+    case WProgram{opt}:
+      Maybe.or(&2, String,
+        kind_verdict(program_fits(kind, attrs), id, kind, attrs),
+        Maybe.or(&2, String,
+          absent_verdict(Bool.and(Bool.not(opt),
+            Bool.not(always_present(kind, attrs))), id, "program"),
+          rest_verdict(has_rest(attrs), id)))
 
 def arg_verdict(found: Maybe<&2, ArgInfo>, id: String, name: String,
     path: List<&2, String>, want: Want) -> Maybe<&2, String>:
@@ -4647,6 +4667,37 @@ def bool_opt(m: Matches, id: String) -> Dec(Maybe<&2, Bool>):
 def bools(m: Matches, id: String) -> Dec(List<&2, Bool>):
   read_with(~List<&2, Bool>, ~(f => get_many(~Bool, ~env_bool_true, f)),
     WValue{"bool", ReadMany{}}, m, id)
+
+# A program and its arguments, as Cli.program reads them.
+type Program is Data:
+  Program{name: String, args: List<&2, String>}
+
+def program_of(values: List<&2, String>) -> Program:
+  match values:
+    case Nil{}: Program{"", []}
+    case head <> tail: Program{head, tail}
+
+def program_maybe(values: List<&2, String>) -> Maybe<&2, Program>:
+  match values:
+    case Nil{}: None{}
+    case head <> tail: Some{Program{head, tail}}
+
+def get_program(f: Field) -> Program:
+  match f:
+    case Field{id, values, source}: program_of(values)
+
+def get_program_opt(f: Field) -> Maybe<&2, Program>:
+  match f:
+    case Field{id, values, source}: program_maybe(values)
+
+# §6.5: a <COMMAND>... positional with Cli.rest() as a program and its
+# arguments, the first value and the rest, as timeout, nice and env take
+# them: every token after the program is one of its arguments.
+def program(m: Matches, id: String) -> Dec(Program):
+  read_with(~Program, ~get_program, WProgram{False{}}, m, id)
+
+def program_opt(m: Matches, id: String) -> Dec(Maybe<&2, Program>):
+  read_with(~Maybe<&2, Program>, ~get_program_opt, WProgram{True{}}, m, id)
 
 def field_src(f: Field) -> Src:
   match f:

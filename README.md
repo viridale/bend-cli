@@ -137,6 +137,18 @@ $ retry curl -v url                  # -v is retry's flag; args: url
 $ retry curl -- -v url               # args: -v, url
 ```
 
+For a program and its arguments in one slot, as `timeout`, `nice`, and `env`
+take them, declare `<COMMAND>...` with `Cli.rest()` and read it with
+`Cli.program(m, "command")`. It returns a `Cli.Program{name, args}`: the
+slot's first value, then every later token in order. So `retry curl --help`
+and `retry curl -v url` give curl `--help` and `-v url`, where the two slots
+above print retry's help and take `-v` as retry's flag. Read `[COMMAND]...`
+with `Cli.program_opt`, which gives `None{}` when the slot is empty.
+`Cli.check` reports `Cli.program` on a slot without `Cli.rest()`, which would
+still take the command's own options from among the program's arguments.
+Keep two slots when the command's options may follow the name, as in the pkg
+demo's `run <SCRIPT> [ARGS]...`.
+
 Add `Cli.global()` to propagate an option to descendant subcommands. A
 command's `Cli.exclusive` and `Cli.need_one` rules propagate as well when every
 argument the command places in the group is global; in a subcommand, they also
