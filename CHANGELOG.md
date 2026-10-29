@@ -8,6 +8,11 @@
   status `n`, from 1 to 255, instead of 2, for wrappers such as `timeout`
   that keep the low codes for their child; `Cli.usage_code(c)` returns the
   status. P10 and P11 now range over it (#45).
+- `Cli.Style` adds `Italic`, `Reverse`, the background colors `BgRed` to
+  `BgCyan`, the 256-color `Fg256{n}` and `Bg256{n}`, and the RGB
+  `FgRgb{r, g, b}` and `BgRgb{r, g, b}` for `Cli.paint` and `Cli.emit`; an
+  index or a color part above 255 is written as 255. P1 and P2 cover them,
+  and a `match` on `Cli.Style` needs their arms (#39).
 
 ### Changed
 

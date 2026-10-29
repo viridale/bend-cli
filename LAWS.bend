@@ -159,6 +159,36 @@ law g_text_paint:
     == "\u{1B}[1;31mx\u{1B}[0m" : String} &
   {Cli.paint(True{}, [], "x") == "x" : String}
 
+# G-TEXT: italic and reverse are SGR 3 and 7, and a background color is its
+# foreground's code plus 10. A 256-color index or an RGB color starts with
+# 38 for the foreground or 48 for the background, then 5 and the index, or
+# 2 and its red, green and blue, in that order.
+law g_text_paint_styles:
+  {Cli.paint(True{}, [Cli.Italic{}, Cli.Reverse{}], "x")
+    == "\u{1B}[3;7mx\u{1B}[0m" : String} &
+  {Cli.paint(True{}, [Cli.Red{}, Cli.BgRed{}, Cli.BgGreen{}, Cli.BgYellow{},
+    Cli.BgBlue{}, Cli.BgMagenta{}, Cli.BgCyan{}], "x")
+    == "\u{1B}[31;41;42;43;44;45;46mx\u{1B}[0m" : String} &
+  {Cli.paint(True{}, [Cli.Fg256{208}, Cli.Bg256{17}], "x")
+    == "\u{1B}[38;5;208;48;5;17mx\u{1B}[0m" : String} &
+  {Cli.paint(True{}, [Cli.FgRgb{255, 128, 0}, Cli.BgRgb{1, 2, 3}], "x")
+    == "\u{1B}[38;2;255;128;0;48;2;1;2;3mx\u{1B}[0m" : String}
+
+# G-TEXT: an index or a color part is written in decimal without leading
+# zeros, and one above 255 as 255.
+law g_text_color_numbers:
+  {Cli.style_code(Cli.Fg256{0}) == "38;5;0" : String} &
+  {Cli.style_code(Cli.Fg256{9}) == "38;5;9" : String} &
+  {Cli.style_code(Cli.Fg256{10}) == "38;5;10" : String} &
+  {Cli.style_code(Cli.Fg256{99}) == "38;5;99" : String} &
+  {Cli.style_code(Cli.Fg256{100}) == "38;5;100" : String} &
+  {Cli.style_code(Cli.Fg256{105}) == "38;5;105" : String} &
+  {Cli.style_code(Cli.Fg256{200}) == "38;5;200" : String} &
+  {Cli.style_code(Cli.Bg256{255}) == "48;5;255" : String} &
+  {Cli.style_code(Cli.Bg256{256}) == "48;5;255" : String} &
+  {Cli.style_code(Cli.Bg256{4294967295}) == "48;5;255" : String} &
+  {Cli.style_code(Cli.FgRgb{256, 0, 1000}) == "38;2;255;0;255" : String}
+
 # G-TEXT: strip removes SGR grammar matches and preserves an unmatched ESC.
 law g_text_strip:
   {Cli.strip("\u{1B}[0m\u{1B}[ma\u{1B}[1;31mb\u{1B}[Xm")

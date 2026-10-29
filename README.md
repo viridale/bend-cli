@@ -355,6 +355,18 @@ errors to stderr (exiting `Cli.usage_code(c)` or `70`). Otherwise it writes the 
 and stderr text and exits with the plan's status code (`0`–`255`); a code
 above `255` is reported to stderr as an internal bug and exits `70`.
 
+`Cli.paint(on, styles, text)` is `text` after one SGR escape sequence of
+`styles` and before a reset when `on` is true and `styles` is not empty, and
+`text` alone otherwise; pass it a stream's color flag from `Cli.Term`.
+`Cli.emit(on, segments)` joins `Cli.Segment{text, styles}` pieces painted the
+same way, and `Cli.strip(s)` removes SGR sequences. A `Cli.Style` is `Bold`,
+`Dim`, `Italic`, `Under` or `Reverse`; a foreground color, `Red`, `Green`,
+`Yellow`, `Blue`, `Magenta` or `Cyan`, or its background, `BgRed` to `BgCyan`;
+an index into the 256-color palette, `Fg256{n}` or `Bg256{n}`; or a 24-bit
+color, `FgRgb{r, g, b}` or `BgRgb{r, g, b}`. An index or a color part above
+255 is written as 255. P1 and P2 state that stripping painted text with no
+ESC in it gives the text back.
+
 A plan builds its whole output before anything is written. An action that
 reads files, or writes output as it goes, is instead an
 `act(term, value) -> IO(U32)` that prints for itself and returns the status

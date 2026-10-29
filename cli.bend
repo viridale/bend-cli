@@ -7,28 +7,81 @@ import Base
 type Style is Data:
   Bold{}
   Dim{}
+  Italic{}
   Under{}
+  Reverse{}
   Red{}
   Green{}
   Yellow{}
   Blue{}
   Magenta{}
   Cyan{}
+  BgRed{}
+  BgGreen{}
+  BgYellow{}
+  BgBlue{}
+  BgMagenta{}
+  BgCyan{}
+  Fg256{n: U32}
+  Bg256{n: U32}
+  FgRgb{r: U32, g: U32, b: U32}
+  BgRgb{r: U32, g: U32, b: U32}
 
 type Segment is Data:
   Segment{text: String, styles: List<&2, Style>}
+
+# The char at index d of digits, as a string, and "" past its end: a
+# lookup rather than a char code sum, so a proof sees each one's char.
+def digit_at(digits: String, +d: U32) -> String:
+  match digits:
+    case SNil{}: ""
+    case SCon{h, t}:
+      Bool.pick(String, U32.is_eq(d, 0), Char.show(h),
+        digit_at(t, U32.sub(d, 1)))
+
+def digit(d: U32) -> String:
+  digit_at("0123456789", d)
+
+# v in decimal without leading zeros, for v up to 999.
+def num_text(+v: U32) -> String:
+  String.append(
+    Bool.pick(String, U32.is_lt(v, 100), "", digit(U32.div(v, 100))),
+    String.append(
+      Bool.pick(String, U32.is_lt(v, 10), "",
+        digit(U32.mod(U32.div(v, 10), 10))),
+      digit(U32.mod(v, 10))))
+
+# A 256-color index or an RGB part: n in decimal, and 255 when above it.
+def color_num(+n: U32) -> String:
+  num_text(Bool.pick(U32, U32.is_lt(255, n), 255, n))
+
+def rgb_text(r: U32, g: U32, b: U32) -> String:
+  String.append(color_num(r), String.append(";",
+    String.append(color_num(g), String.append(";", color_num(b)))))
 
 def style_code(style: Style) -> String:
   match style:
     case Bold{}: "1"
     case Dim{}: "2"
+    case Italic{}: "3"
     case Under{}: "4"
+    case Reverse{}: "7"
     case Red{}: "31"
     case Green{}: "32"
     case Yellow{}: "33"
     case Blue{}: "34"
     case Magenta{}: "35"
     case Cyan{}: "36"
+    case BgRed{}: "41"
+    case BgGreen{}: "42"
+    case BgYellow{}: "43"
+    case BgBlue{}: "44"
+    case BgMagenta{}: "45"
+    case BgCyan{}: "46"
+    case Fg256{n}: String.append("38;5;", color_num(n))
+    case Bg256{n}: String.append("48;5;", color_num(n))
+    case FgRgb{r, g, b}: String.append("38;2;", rgb_text(r, g, b))
+    case BgRgb{r, g, b}: String.append("48;2;", rgb_text(r, g, b))
 
 def style_codes_tail(styles: List<&2, Style>) -> String:
   match styles:
@@ -50,7 +103,7 @@ def paint(on: Bool, styles: List<&2, Style>, text: String) -> String:
       text
     case True{} h <> t:
       String.append("\u{1B}[",
-        String.append(style_codes(h <> t),
+        String.append(String.append(style_code(h), style_codes_tail(t)),
           String.append("m", String.append(text, "\u{1B}[0m"))))
 
 def emit_go(segments: List<&2, Segment>, +on: Bool) -> String:

@@ -365,3 +365,17 @@
 #   10 5 12): usage_code, inlined at the summary's, a rejected command
 #   line's and a decoder Usage's arms, keeps the spec's three fields and
 #   takes its items to find the code. One of them runs once, on an error.
+#
+# Richer styles (#39), against main's build (2715cc0); the static total
+# 5731 -> 5735 (main.bend 5856 -> 5860), the same defs in both. No executed
+# count rises for a style main had:
+# FID_CLI_PAINT 0 1 2 -> 0 3 0: paint passes style_code(h) and
+#   style_codes_tail(t) on instead of rebuilding h <> t for style_codes, so
+#   the rebuilt cons cell's two seals go; style_code, inlined here, takes an
+#   FgRgb's or a BgRgb's three fields, only for those styles.
+# FID_CLI_STYLE_CODES_TAIL 0 1 0 -> 0 3 0: the same two takes, for a later
+#   RGB style. FID_CLI_STYLE_CODES 0 1 0 is gone: paint no longer calls it.
+# the new FID_CLI_DIGIT_AT 0 1 2, and FID_CLI_COLOR_NUM, FID_CLI_DIGIT,
+#   FID_CLI_RGB_TEXT and FID_CLI_STYLE_CODE 0 0 0: digit_at takes a cell of
+#   "0123456789" and seals a one-char string per digit it passes, only for a
+#   256-color or RGB style.

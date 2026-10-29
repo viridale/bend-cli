@@ -27,6 +27,13 @@ def Laws.g_text_wrap_emoji():
 def Laws.g_text_paint():
   ({==}, {==})
 
+def Laws.g_text_paint_styles():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_text_color_numbers():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    {==}))))))))))
+
 def Laws.g_text_strip():
   {==}
 
@@ -309,6 +316,206 @@ def reset_skip(suffix: String) ->
       == Cli.strip_go(suffix, Cli.StripPlain{}) : String}:
   {==}
 
+def false_true_absurd(e: {False{} == True{} : Bool}) -> Empty:
+  %e : bool_disc(Bool.not(_))
+  Unit{}
+
+def and_true(a: Bool, b: Bool,
+    ea: {a == True{} : Bool}, eb: {b == True{} : Bool}) ->
+    {Bool.and(a, b) == True{} : Bool}:
+  Equal.trans(Bool, Bool.and(a, b), Bool.and(True{}, b), True{},
+    Equal.cong(Bool, Bool, x => Bool.and(x, b), a, True{}, ea), eb)
+
+def and_left(a: Bool, b: Bool, e: {Bool.and(a, b) == True{} : Bool}) ->
+    {a == True{} : Bool}:
+  match a:
+    case True{}: {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, false_true_absurd(e))
+
+def and_right(a: Bool, b: Bool, e: {Bool.and(a, b) == True{} : Bool}) ->
+    {b == True{} : Bool}:
+  match a:
+    case True{}: e
+    case False{}:
+      Empty.absurd({b == True{} : Bool}, false_true_absurd(e))
+
+# A char strip keeps in an SGR body: not its final m, not an ESC, and a
+# digit or a ;.
+def char_ok(end: Bool, esc: Bool, ok: Bool) -> Bool:
+  match end esc ok:
+    case True{} _ _: False{}
+    case False{} True{} _: False{}
+    case False{} False{} False{}: False{}
+    case False{} False{} True{}: True{}
+
+# Whether strip_go reads each char of s into an SGR body, as P1 and P2
+# need of each style's code.
+def sgr_body(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{+head, tail}:
+      Bool.and(char_ok(Char.is_eq(head, 'm'), Char.is_eq(head, '\u{1B}'),
+        Cli.sgr_body_char(head)), sgr_body(tail))
+
+def body_append(a: String, +b: String,
+    +ea: {sgr_body(a) == True{} : Bool},
+    eb: {sgr_body(b) == True{} : Bool}) ->
+    {sgr_body(String.append(a, b)) == True{} : Bool}:
+  match a:
+    case SNil{}:
+      eb
+    case SCon{+head, +tail}:
+      +c = char_ok(Char.is_eq(head, 'm'), Char.is_eq(head, '\u{1B}'),
+        Cli.sgr_body_char(head))
+      and_true(c, sgr_body(String.append(tail, b)),
+        and_left(c, sgr_body(tail), ea),
+        body_append(tail, b, and_right(c, sgr_body(tail), ea), eb))
+
+def body_pick(c: Bool, x: String, y: String,
+    ex: {sgr_body(x) == True{} : Bool},
+    ey: {sgr_body(y) == True{} : Bool}) ->
+    {sgr_body(Bool.pick(String, c, x, y)) == True{} : Bool}:
+  match c:
+    case False{}: ey
+    case True{}: ex
+
+def digit_at_body(digits: String, +d: U32,
+    +e: {sgr_body(digits) == True{} : Bool}) ->
+    {sgr_body(Cli.digit_at(digits, d)) == True{} : Bool}:
+  match digits:
+    case SNil{}:
+      {==}
+    case SCon{+head, +tail}:
+      +c = char_ok(Char.is_eq(head, 'm'), Char.is_eq(head, '\u{1B}'),
+        Cli.sgr_body_char(head))
+      body_pick(U32.is_eq(d, 0), Char.show(head),
+        Cli.digit_at(tail, U32.sub(d, 1)),
+        and_true(c, True{}, and_left(c, sgr_body(tail), e), {==}),
+        digit_at_body(tail, U32.sub(d, 1), and_right(c, sgr_body(tail), e)))
+
+def digit_body(d: U32) -> {sgr_body(Cli.digit(d)) == True{} : Bool}:
+  digit_at_body("0123456789", d, {==})
+
+def num_body(+v: U32) -> {sgr_body(Cli.num_text(v)) == True{} : Bool}:
+  +high = Cli.digit(U32.div(v, 100))
+  +mid = Cli.digit(U32.mod(U32.div(v, 10), 10))
+  +low = Cli.digit(U32.mod(v, 10))
+  +tens = Bool.pick(String, U32.is_lt(v, 10), "", mid)
+  body_append(Bool.pick(String, U32.is_lt(v, 100), "", high),
+    String.append(tens, low),
+    body_pick(U32.is_lt(v, 100), "", high, {==},
+      digit_body(U32.div(v, 100))),
+    body_append(tens, low,
+      body_pick(U32.is_lt(v, 10), "", mid, {==},
+        digit_body(U32.mod(U32.div(v, 10), 10))),
+      digit_body(U32.mod(v, 10))))
+
+def color_body(+n: U32) -> {sgr_body(Cli.color_num(n)) == True{} : Bool}:
+  num_body(Bool.pick(U32, U32.is_lt(255, n), 255, n))
+
+def rgb_body(+r: U32, +g: U32, +b: U32) ->
+    {sgr_body(Cli.rgb_text(r, g, b)) == True{} : Bool}:
+  body_append(Cli.color_num(r), String.append(";",
+      String.append(Cli.color_num(g), String.append(";", Cli.color_num(b)))),
+    color_body(r),
+    body_append(Cli.color_num(g), String.append(";", Cli.color_num(b)),
+      color_body(g), color_body(b)))
+
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Fg256 --skip Bg256 --skip FgRgb --skip BgRgb cli.bend Style '$P' '{==}'
+def code_body(style: Cli.Style) ->
+    {sgr_body(Cli.style_code(style)) == True{} : Bool}:
+  match style:
+    case Cli.Bold{}: {==}
+    case Cli.Dim{}: {==}
+    case Cli.Italic{}: {==}
+    case Cli.Under{}: {==}
+    case Cli.Reverse{}: {==}
+    case Cli.Red{}: {==}
+    case Cli.Green{}: {==}
+    case Cli.Yellow{}: {==}
+    case Cli.Blue{}: {==}
+    case Cli.Magenta{}: {==}
+    case Cli.Cyan{}: {==}
+    case Cli.BgRed{}: {==}
+    case Cli.BgGreen{}: {==}
+    case Cli.BgYellow{}: {==}
+    case Cli.BgBlue{}: {==}
+    case Cli.BgMagenta{}: {==}
+    case Cli.BgCyan{}: {==}
+    case Cli.Fg256{n}: color_body(n)
+    case Cli.Bg256{n}: color_body(n)
+    case Cli.FgRgb{r, g, b}: rgb_body(r, g, b)
+    case Cli.BgRgb{r, g, b}: rgb_body(r, g, b)
+
+# strip_go's step on a char in an SGR body, its three tests as arguments.
+def body_out(+end: Bool, +esc: Bool, +ok: Bool, pending: String,
+    +grown: String, rest: String) -> String:
+  String.append(Bool.pick(String, end, "",
+      Bool.pick(String, esc, pending, Bool.pick(String, ok, "", grown))),
+    Cli.strip_go(rest, Bool.pick(Cli.StripState, end, Cli.StripPlain{},
+      Bool.pick(Cli.StripState, esc, Cli.StripEsc{},
+        Bool.pick(Cli.StripState, ok, Cli.StripBody{grown},
+          Cli.StripPlain{})))))
+
+def body_step(end: Bool, esc: Bool, ok: Bool, pending: String,
+    grown: String, rest: String, -goal: String,
+    e: {char_ok(end, esc, ok) == True{} : Bool},
+    w: {Cli.strip_go(rest, Cli.StripBody{grown}) == goal : String}) ->
+    {body_out(end, esc, ok, pending, grown, rest) == goal : String}:
+  match end esc ok:
+    case True{} _ _:
+      Empty.absurd({body_out(True{}, esc, ok, pending, grown, rest)
+        == goal : String}, false_true_absurd(e))
+    case False{} True{} _:
+      Empty.absurd({body_out(False{}, True{}, ok, pending, grown, rest)
+        == goal : String}, false_true_absurd(e))
+    case False{} False{} False{}:
+      Empty.absurd({body_out(False{}, False{}, False{}, pending, grown, rest)
+        == goal : String}, false_true_absurd(e))
+    case False{} False{} True{}:
+      w
+
+# strip_go reads such an s into the body, then goes on as k says.
+def body_walk(s: String, +rest: String, -goal: String, +pending: String,
+    +e: {sgr_body(s) == True{} : Bool},
+    k: @q: String ->
+      {Cli.strip_go(rest, Cli.StripBody{q}) == goal : String}) ->
+    {Cli.strip_go(String.append(s, rest), Cli.StripBody{pending})
+      == goal : String}:
+  match s:
+    case SNil{}:
+      k(pending)
+    case SCon{+head, +tail}:
+      +c = char_ok(Char.is_eq(head, 'm'), Char.is_eq(head, '\u{1B}'),
+        Cli.sgr_body_char(head))
+      +grown = String.append(pending, Char.show(head))
+      body_step(Char.is_eq(head, 'm'), Char.is_eq(head, '\u{1B}'),
+        Cli.sgr_body_char(head), pending, grown, String.append(tail, rest),
+        goal, and_left(c, sgr_body(tail), e),
+        body_walk(tail, rest, goal, grown,
+          and_right(c, sgr_body(tail), e), k))
+
+def code_walk(+code: String, +tail_codes: String, +suffix: String,
+    pending: String, e: {sgr_body(code) == True{} : Bool},
+    k: @q: String -> {Cli.strip_go(String.append(tail_codes,
+        String.append("m", suffix)), Cli.StripBody{q})
+      == Cli.strip_go(suffix, Cli.StripPlain{}) : String}) ->
+    {Cli.strip_go(String.append(String.append(code, tail_codes),
+        String.append("m", suffix)), Cli.StripBody{pending})
+      == Cli.strip_go(suffix, Cli.StripPlain{}) : String}:
+  %Equal.sym(String,
+      String.append(String.append(code, tail_codes),
+        String.append("m", suffix)),
+      String.append(code, String.append(tail_codes,
+        String.append("m", suffix))),
+      append_assoc(code, tail_codes, String.append("m", suffix))) :
+    {Cli.strip_go(_, Cli.StripBody{pending})
+      == Cli.strip_go(suffix, Cli.StripPlain{}) : String}
+  body_walk(code, String.append(tail_codes, String.append("m", suffix)),
+    Cli.strip_go(suffix, Cli.StripPlain{}), pending, e, k)
+
 def body_skip_tail(styles: List<&2, Cli.Style>, +suffix: String,
     pending: String) ->
     {Cli.strip_go(String.append(Cli.style_codes_tail(styles),
@@ -317,67 +524,19 @@ def body_skip_tail(styles: List<&2, Cli.Style>, +suffix: String,
   match styles:
     case Nil{}:
       {==}
-    case head <> tail:
-      match head:
-        case Cli.Bold{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(pending, ";"), "1"))
-        case Cli.Dim{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(pending, ";"), "2"))
-        case Cli.Under{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(pending, ";"), "4"))
-        case Cli.Red{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(String.append(pending, ";"), "3"), "1"))
-        case Cli.Green{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(String.append(pending, ";"), "3"), "2"))
-        case Cli.Yellow{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(String.append(pending, ";"), "3"), "3"))
-        case Cli.Blue{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(String.append(pending, ";"), "3"), "4"))
-        case Cli.Magenta{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(String.append(pending, ";"), "3"), "5"))
-        case Cli.Cyan{}:
-          body_skip_tail(tail, suffix,
-            String.append(String.append(String.append(pending, ";"), "3"), "6"))
+    case +head <> +tail:
+      code_walk(String.append(";", Cli.style_code(head)),
+        Cli.style_codes_tail(tail), suffix, pending, code_body(head),
+        q => body_skip_tail(tail, suffix, q))
 
-def body_skip_first(style: Cli.Style, tail: List<&2, Cli.Style>,
+def body_skip_first(+style: Cli.Style, +tail: List<&2, Cli.Style>,
     +suffix: String, pending: String) ->
     {Cli.strip_go(String.append(String.append(Cli.style_code(style),
         Cli.style_codes_tail(tail)), String.append("m", suffix)),
       Cli.StripBody{pending})
       == Cli.strip_go(suffix, Cli.StripPlain{}) : String}:
-  match style:
-    case Cli.Bold{}:
-      body_skip_tail(tail, suffix, String.append(pending, "1"))
-    case Cli.Dim{}:
-      body_skip_tail(tail, suffix, String.append(pending, "2"))
-    case Cli.Under{}:
-      body_skip_tail(tail, suffix, String.append(pending, "4"))
-    case Cli.Red{}:
-      body_skip_tail(tail, suffix,
-        String.append(String.append(pending, "3"), "1"))
-    case Cli.Green{}:
-      body_skip_tail(tail, suffix,
-        String.append(String.append(pending, "3"), "2"))
-    case Cli.Yellow{}:
-      body_skip_tail(tail, suffix,
-        String.append(String.append(pending, "3"), "3"))
-    case Cli.Blue{}:
-      body_skip_tail(tail, suffix,
-        String.append(String.append(pending, "3"), "4"))
-    case Cli.Magenta{}:
-      body_skip_tail(tail, suffix,
-        String.append(String.append(pending, "3"), "5"))
-    case Cli.Cyan{}:
-      body_skip_tail(tail, suffix,
-        String.append(String.append(pending, "3"), "6"))
+  code_walk(Cli.style_code(style), Cli.style_codes_tail(tail), suffix,
+    pending, code_body(style), q => body_skip_tail(tail, suffix, q))
 
 def paint_skip_colored(+style: Cli.Style, +styles: List<&2, Cli.Style>,
     +source: String, +suffix: String, free: EscFree(source)) ->
@@ -647,12 +806,6 @@ def LineGood(cols: Nat, +line: String) -> Bool:
     Nat.is_le(List.length(&2, String,
       List.filter(~String, ~(w => Bool.not(String.is_empty(w))),
         String.split(line, ' '))), 1n))
-
-def and_true(a: Bool, b: Bool,
-    ea: {a == True{} : Bool}, eb: {b == True{} : Bool}) ->
-    {Bool.and(a, b) == True{} : Bool}:
-  Equal.trans(Bool, Bool.and(a, b), Bool.and(True{}, b), True{},
-    Equal.cong(Bool, Bool, x => Bool.and(x, b), a, True{}, ea), eb)
 
 def NoSpace(s: String) -> Type:
   match s:
@@ -2182,10 +2335,6 @@ def p14_finish(+s: String, +cols: Nat) ->
 
 def Laws.p14(s, cols):
   p14_finish(s, cols)
-
-def false_true_absurd(e: {False{} == True{} : Bool}) -> Empty:
-  %e : bool_disc(Bool.not(_))
-  Unit{}
 
 def bool_cmp_refl(b: Bool) -> {EQ{} == Bool.cmp(b, b) : Cmp}:
   match b:
@@ -5932,20 +6081,6 @@ def ChoicesOk(found: Maybe<&2, List<&2, String>>,
     case None{}: Unit
     case Some{values}:
       {Cli.choice_bad(values, kind, None{}) == None{} : Maybe<&2, Cli.Bad>}
-
-def and_left(a: Bool, b: Bool, e: {Bool.and(a, b) == True{} : Bool}) ->
-    {a == True{} : Bool}:
-  match a:
-    case True{}: {==}
-    case False{}:
-      Empty.absurd({False{} == True{} : Bool}, false_true_absurd(e))
-
-def and_right(a: Bool, b: Bool, e: {Bool.and(a, b) == True{} : Bool}) ->
-    {b == True{} : Bool}:
-  match a:
-    case True{}: e
-    case False{}:
-      Empty.absurd({b == True{} : Bool}, false_true_absurd(e))
 
 def bad_none_disc(m: Maybe<&2, Cli.Bad>) -> Data:
   match m:
