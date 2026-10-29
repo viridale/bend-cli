@@ -68,7 +68,8 @@ stderr and exit with status `70`.
 
 See [`examples/hello`](examples/hello) for this quickstart with its laws and
 proofs, [`examples/grep`](examples/grep) for a multi-option command with
-environment fallbacks, ANSI color, and file I/O, and
+option headings, exclusive output modes, a negatable flag, environment
+fallbacks, colored output, and file I/O, and
 [`examples/argbench`](examples/argbench) for the benchmark CLI behind
 [Performance](#performance).
 

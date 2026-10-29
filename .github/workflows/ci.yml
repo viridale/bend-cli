@@ -195,6 +195,18 @@ jobs:
             want "$out" $'build/a.txt:one x\nbuild/b.txt:X three'
             want "$(cat build/err.txt)" 'grep: build/c.txt: No such file or directory'
             want "$status" 2
+            # -q prints nothing and stops at the first selected line, so it
+            # never opens a file after it; a file it could not open before
+            # that line still has its error, and the exit is 0.
+            out="$(app grep -q x build/a.txt build/c.txt 2>build/err.txt)" &&
+              status=0 || status=$?
+            want "$out$(cat build/err.txt)" ''
+            want "$status" 0
+            out="$(app grep -q x build/c.txt build/a.txt 2>build/err.txt)" &&
+              status=0 || status=$?
+            want "$out" ''
+            want "$(cat build/err.txt)" 'grep: build/c.txt: No such file or directory'
+            want "$status" 0
             # A native app gets argv's bytes, so grep opens the raw name and
             # prints it with U+FFFD for the byte; Bun has already turned the
             # byte into U+FFFD, so the js app opens the decoy (SPEC F18).

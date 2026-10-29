@@ -24,6 +24,9 @@
   each message once per path; P21 covers every state check tries (#64).
   A `{==}` proof of `Cli.check(...) == []` takes more of `--verdict`'s fuel:
   the pkg demo's now goes a path at a time.
+- `examples/grep` adds `-v`, `-n`, `-o`, `--[no-]filename`, and the output
+  modes `-c`, `-l` and `-q`, one at a time, under option headings and with
+  a closing paragraph on its exit status; its laws cover each.
 
 ## 0.2.0.0
 
