@@ -16,7 +16,7 @@ Create `app.bend` with the command definition, decoder, and plan:
 
 ```python
 import Base
-import cli@0.1.0.0/cli.bend as Cli
+import cli@0.2.0.0/cli.bend as Cli
 
 type Greeting is Data:
   Greeting{name: String}
@@ -47,7 +47,7 @@ probing, and standard streams:
 ```python
 import Base
 import ./app.bend as App
-import cli@0.1.0.0/run.bend as Run
+import cli@0.2.0.0/run.bend as Run
 
 def main() -> IO(Unit):
   Run.planned(~App.Greeting, ~App.decode, ~App.plan, App.cli())
@@ -280,7 +280,7 @@ a parsing law, and what the binary prints:
 ```python
 import Base
 import ./app.bend as App
-import cli@0.1.0.0/cli.bend as Cli
+import cli@0.2.0.0/cli.bend as Cli
 
 law cli_ok:
   {Cli.check(~App.Greeting, ~App.decode, App.cli()) == []
@@ -405,7 +405,7 @@ Python 3.14, and commander 15.0.0 and bend-cli's JS on Bun 1.2.23.
 
 ## Upgrading
 
-Package imports pin a four-part version such as `cli@0.1.0.0`. Update the
+Package imports pin a four-part version such as `cli@0.2.0.0`. Update the
 `cli.bend` and `run.bend` imports together. The first three components follow
 SemVer; the fourth increments when identical source is republished with a new
 package hash.

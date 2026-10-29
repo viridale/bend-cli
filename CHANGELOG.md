@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0.0
 
 ### Added
 
@@ -32,6 +32,9 @@
   instead of failing on `-f` (#42).
 - A `Cli.hyphen()` positional takes a long token that names no option, such
   as `--x=1`, as it takes `-x`.
+- A huge argv parses faster: argbench's `build` with 10,000 `-I` pairs and
+  as many inputs takes 42.8 ms in a native app, where 0.1.0.0 took 59.8
+  (median wall time on an Apple M3 Max; README, Performance).
 
 ### Output changes
 
