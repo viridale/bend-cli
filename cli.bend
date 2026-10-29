@@ -4959,6 +4959,98 @@ def sample_fields(c: Cmd, path: List<&2, String>) -> List<&2, Field>:
 def sample(+c: Cmd, +path: List<&2, String>) -> Matches:
   Matches{c, path, sample_fields(c, path), None{}}
 
+def more_typed(found: Maybe<&2, ValueType>) -> List<&2, String>:
+  match found:
+    case Some{TBool{}}: ["true"]
+    case _: Nil{}
+
+def more_choice(found: Maybe<&2, List<&2, String>>,
+    attrs: List<&2, Item>) -> List<&2, String>:
+  match found:
+    case Some{head <> tail}: tail
+    case Some{Nil{}}: Nil{}
+    case None{}: more_typed(find_as(attrs))
+
+# The values an arg is given after the sample's: its later one_of values,
+# else false for a negatable flag and true for an as_bool value.
+def more_values(kind: UsageKind, +attrs: List<&2, Item>) -> List<&2, String>:
+  match kind:
+    case FlagKind{}: Nil{}
+    case NegatableKind{}: ["false"]
+    case CountKind{}: Nil{}
+    case _: more_choice(find_one_of(attrs), attrs)
+
+# rest after the arg given each of values in turn.
+def given_samples(values: List<&2, String>, +id: String,
+    +rest: List<&2, Field>) -> List<&2, List<&2, Field>>:
+  match values:
+    case Nil{}: Nil{}
+    case value <> tail:
+      (Field{id, [value], Argv{}} <> rest) <> given_samples(tail, id, rest)
+
+def absent_sample(absent: Bool, id: String, rest: List<&2, Field>) ->
+    List<&2, List<&2, Field>>:
+  match absent:
+    case True{}: [Field{id, [], Absent{}} <> rest]
+    case False{}: Nil{}
+
+# rest after each other state of an arg (§6.6): left out unless it is
+# always present, then given each value after the sample's; with a
+# default, given the sample's value too.
+def default_states(found: Maybe<&2, String>, +id: String, +kind: UsageKind,
+    +attrs: List<&2, Item>, +rest: List<&2, Field>) ->
+    List<&2, List<&2, Field>>:
+  match found:
+    case Some{value}:
+      given_samples(sample_value(kind, attrs) <> more_values(kind, attrs), id,
+        rest)
+    case None{}:
+      List.append(&2, List<&2, Field>,
+        absent_sample(Bool.not(always_present(kind, attrs)), id, rest),
+        given_samples(more_values(kind, attrs), id, rest))
+
+def info_states(info: ArgInfo, +rest: List<&2, Field>) ->
+    List<&2, List<&2, Field>>:
+  match info:
+    case ArgInfo{id, usage, short, long, kind, +attrs}:
+      default_states(find_default(attrs), id, kind, attrs, rest)
+
+def after_fields(samples: List<&2, List<&2, Field>>,
+    +fields: List<&2, Field>) -> List<&2, List<&2, Field>>:
+  match samples:
+    case Nil{}: Nil{}
+    case sample <> tail:
+      List.append(&2, Field, fields, sample) <> after_fields(tail, fields)
+
+# The sample's fields with one arg in turn in each of its other states.
+def arg_states(items: List<&2, Item>) -> List<&2, List<&2, Field>>:
+  match items:
+    case Nil{}: Nil{}
+    case Arg{usage, help, attrs} <> +tail:
+      +info = arg_info(usage, attrs)
+      List.append(&2, List<&2, Field>,
+        info_states(info, sample_args(tail)),
+        after_fields(arg_states(tail),
+          sample_field(resolve_default(info_default(info), info), info)))
+    case head <> tail: arg_states(tail)
+
+def wrap_samples(samples: List<&2, List<&2, Field>>, +c: Cmd,
+    +path: List<&2, String>) -> List<&2, Matches>:
+  match samples:
+    case Nil{}: Nil{}
+    case fields <> tail:
+      Matches{c, path, fields, None{}} <> wrap_samples(tail, c, path)
+
+def state_fields(c: Cmd, path: List<&2, String>) ->
+    List<&2, List<&2, Field>>:
+  match c:
+    case Cmd{name, about, items}: arg_states(scope_args(path, items, []))
+
+# What check runs the decoder on at path: the sample, then each other state
+# of each arg in scope, the rest as in the sample.
+def samples(+c: Cmd, +path: List<&2, String>) -> List<&2, Matches>:
+  wrap_samples(sample_fields(c, path) <> state_fields(c, path), c, path)
+
 # The paths below prefix that can complete, in pre-order, without built-ins.
 def sub_paths(items: List<&2, Item>, +prefix: List<&2, String>) ->
     List<&2, List<&2, String>>:
@@ -4981,22 +5073,44 @@ def sample_paths(c: Cmd) -> List<&2, List<&2, String>>:
         Bool.pick(List<&2, List<&2, String>>, needs_sub(items), [], [[]]),
         sub_paths(items, []))
 
-def decode_bug(-A: Type, d: Dec(A), at: String) -> List<&2, Problem>:
+def bug_msg(-A: Type, d: Dec(A)) -> List<&2, String>:
   match d:
-    case Fail{Bug{msg}}: [DecodeBug{at, msg}]
+    case Fail{Bug{msg}}: [msg]
     case _: Nil{}
+
+def sample_msgs(~A: Type, ~decode: @+m: Matches -> Dec(A),
+    samples: List<&2, Matches>) -> List<&2, String>:
+  match samples:
+    case Nil{}: Nil{}
+    case m <> tail:
+      List.append(&2, String, bug_msg(A, decode(m)),
+        sample_msgs(~A, ~decode, tail))
+
+# kept, then each name not yet in it.
+def distinct(names: List<&2, String>, kept: List<&2, String>) ->
+    List<&2, String>:
+  match names:
+    case Nil{}: kept
+    case name <> tail: distinct(tail, append_unique(kept, name))
+
+def decode_bugs(msgs: List<&2, String>, +at: String) -> List<&2, Problem>:
+  match msgs:
+    case Nil{}: Nil{}
+    case msg <> tail: DecodeBug{at, msg} <> decode_bugs(tail, at)
 
 def cmd_name(c: Cmd) -> String:
   match c:
     case Cmd{name, about, items}: name
 
+# Each Bug the decoder raises on a path's samples, once per path.
 def sample_bugs(~A: Type, ~decode: @+m: Matches -> Dec(A),
     paths: List<&2, List<&2, String>>, +c: Cmd) -> List<&2, Problem>:
   match paths:
     case Nil{}: Nil{}
     case +path <> tail:
       List.append(&2, Problem,
-        decode_bug(A, decode(sample(c, path)), path_text(cmd_name(c), path)),
+        decode_bugs(distinct(sample_msgs(~A, ~decode, samples(c, path)), []),
+          path_text(cmd_name(c), path)),
         sample_bugs(~A, ~decode, tail, c))
 
 def check(~A: Type, ~decode: @+m: Matches -> Dec(A), +c: Cmd) ->
@@ -7827,13 +7941,6 @@ def env_names(items: List<&2, Item>) -> List<&2, String>:
     case Sub{name, about, children} <> tail:
       List.append(&2, String, env_names(children), env_names(tail))
     case head <> tail: env_names(tail)
-
-# kept, then each name not yet in it.
-def distinct(names: List<&2, String>, kept: List<&2, String>) ->
-    List<&2, String>:
-  match names:
-    case Nil{}: kept
-    case name <> tail: distinct(tail, append_unique(kept, name))
 
 def vars(c: Cmd) -> List<&2, String>:
   match c:

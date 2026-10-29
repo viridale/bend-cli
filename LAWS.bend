@@ -21,8 +21,11 @@
 # reaches, and P20 fixes which route keys name a command against cutting the
 # key into words, and route's whole answer against references that walk its
 # table. P21 fixes that a reader whose verdict passes reads only values the
-# parse or the sample validated, on any argv of a lint-clean command; which
-# values a type accepts is G-VAL's. P22 fixes that valid_nat and valid_u32
+# parse or the samples check runs validated, on any argv of a lint-clean
+# command; which values a type accepts is G-VAL's. G-CHECK fixes which
+# states of an arg the samples try; no law says a decoder's Bug on a parse
+# shows on some sample, since a read may need two args out of the sample's
+# state, or a value no state gives. P22 fixes that valid_nat and valid_u32
 # accept exactly what Nat.read and U32.read read, so those readers never
 # fall back to 0; F32.read does not reduce in the checker (K8), so the f32
 # end-to-end cases cover it. P22 also fixes that choose's verdict passes only
@@ -1786,7 +1789,7 @@ def tree() -> Cli.Cmd:
     Cli.man(),
   ])
 
-# G-CHECK: one sample per path that can complete, in pre-order, skipping the
+# G-CHECK: samples at each path that can complete, in pre-order, skipping the
 # completions() and man() built-ins; Usage faults are not problems.
 law g_check_samples:
   {Cli.check(~Bool, ~(+m => Cli.bug(Bool, "b")), tree()) == [
@@ -2262,8 +2265,7 @@ law p21:
   {Cli.problems(c) == [] : List<&2, Cli.Problem>} ->
   read_parsed(Cli.matches(c, Cli.parse(c, h, argv)), id, want)
 
-# P21: so does the sample at any path of a lint-clean command, which check
-# runs the decoder on.
+# P21: so does the sample at any path of a lint-clean command.
 law p21_sample:
   for +c: Cli.Cmd
   for +path: List<&2, String>
@@ -2273,6 +2275,27 @@ law p21_sample:
   {read_at(Cli.verdict(c, path, id, want), want,
     Cli.field_values(Cli.field_find(Cli.sample_fields(c, path), id)))
     == True{} : Bool}
+
+# Each of ms read as a decoder reads it, through its own command and path.
+def samples_read(ms: List<&2, Cli.Matches>, +id: String, +want: Cli.Want) ->
+    Bool:
+  match ms:
+    case Nil{}: True{}
+    case Cli.Matches{cmd, +path, fields, external} <> tail:
+      Bool.and(read_at(Cli.verdict(cmd, path, id, want), want,
+        Cli.field_values(Cli.field_find(fields, id))),
+        samples_read(tail, id, want))
+
+# P21: and so does every sample check runs the decoder on at any path of a
+# lint-clean command, each other state of an arg included: a state check
+# tries is one the readers whose verdict passes can read.
+law p21_samples:
+  for +c: Cli.Cmd
+  for +path: List<&2, String>
+  for +id: String
+  for +want: Cli.Want
+  {Cli.problems(c) == [] : List<&2, Cli.Problem>} ->
+  {samples_read(Cli.samples(c, path), id, want) == True{} : Bool}
 
 # P22: valid_nat, which parse, lint and check apply to a Nat value, accepts
 # exactly the strings Nat.read reads, so nat_of never falls back to 0 on a
@@ -2363,6 +2386,212 @@ law g_check_sample_values:
     True{}, False{}, "anon", Some{"fast"}, Some{0n}, Some{0}, Some{False{}},
     ["a", "b"], ["x"], Cli.Default{}, Cli.Argv{}, Cli.Argv{}}}
     : Cli.Dec(Sampled)}
+
+# sampled()'s sample at s, field by field.
+def s_base() -> List<&2, Cli.Field>:
+  [
+    Cli.Field{"verbose", ["1"], Cli.Argv{}},
+    Cli.Field{"flag", ["true"], Cli.Argv{}},
+    Cli.Field{"pos", ["true"], Cli.Argv{}},
+    Cli.Field{"neg", ["false"], Cli.Default{}},
+    Cli.Field{"name", ["anon"], Cli.Default{}},
+    Cli.Field{"mode", ["fast"], Cli.Argv{}},
+    Cli.Field{"num", ["0"], Cli.Argv{}},
+    Cli.Field{"uint", ["0"], Cli.Argv{}},
+    Cli.Field{"real", ["0.0"], Cli.Argv{}},
+    Cli.Field{"yes", ["false"], Cli.Argv{}},
+    Cli.Field{"tag", ["a", "b"], Cli.Default{}},
+    Cli.Field{"file", ["x"], Cli.Argv{}},
+  ]
+
+# fields with each field named id replaced by f.
+def swap(fields: List<&2, Cli.Field>, +id: String, +f: Cli.Field) ->
+    List<&2, Cli.Field>:
+  match fields:
+    case Nil{}: Nil{}
+    case Cli.Field{+key, values, source} <> tail:
+      Bool.pick(Cli.Field, String.eq(key, id), f,
+        Cli.Field{key, values, source}) <> swap(tail, id, f)
+
+# sampled()'s sample at s with id's field holding values from src.
+def s_with(+id: String, values: List<&2, String>, src: Cli.Src) ->
+    Cli.Matches:
+  Cli.Matches{sampled(), ["s"], swap(s_base(), id, Cli.Field{id, values, src}),
+    None{}}
+
+def key_tool() -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", [
+    Cli.arg("--key <K>", "Key", [Cli.required(), Cli.one_of(["a", "b", "c"])]),
+    Cli.arg("[ARG]...", "Args", []),
+  ])
+
+# G-CHECK: samples lists what check runs the decoder on at a path: the
+# sample, then for each arg in scope in turn each other state parse can give
+# it, with every other arg as in the sample. An arg's states are left out
+# (Absent, no values), unless it is required, a required positional or has
+# a default, then given each of its listed values: its one_of values, else
+# true and false for a negatable flag, false and true for an as_bool value,
+# else the sample's value by type. A state the sample already has is
+# skipped, and an arg with a default is given each listed value.
+law g_check_states:
+  {Cli.sample(sampled(), ["s"]) ==
+    Cli.Matches{sampled(), ["s"], s_base(), None{}} : Cli.Matches} &
+  {Cli.samples(sampled(), ["s"]) == [
+    Cli.Matches{sampled(), ["s"], s_base(), None{}},
+    s_with("verbose", [], Cli.Absent{}),
+    s_with("flag", [], Cli.Absent{}),
+    s_with("pos", [], Cli.Absent{}),
+    s_with("pos", ["false"], Cli.Argv{}),
+    s_with("neg", ["true"], Cli.Argv{}),
+    s_with("neg", ["false"], Cli.Argv{}),
+    s_with("name", ["x"], Cli.Argv{}),
+    s_with("mode", [], Cli.Absent{}),
+    s_with("mode", ["slow"], Cli.Argv{}),
+    s_with("num", [], Cli.Absent{}),
+    s_with("uint", [], Cli.Absent{}),
+    s_with("real", [], Cli.Absent{}),
+    s_with("yes", [], Cli.Absent{}),
+    s_with("yes", ["true"], Cli.Argv{}),
+    s_with("tag", ["x"], Cli.Argv{}),
+  ] : List<&2, Cli.Matches>} &
+  {Cli.samples(sampled(), []) == [
+    Cli.Matches{sampled(), [], [Cli.Field{"verbose", ["1"], Cli.Argv{}},
+      Cli.Field{"root", ["x"], Cli.Argv{}}], None{}},
+    Cli.Matches{sampled(), [], [Cli.Field{"verbose", [], Cli.Absent{}},
+      Cli.Field{"root", ["x"], Cli.Argv{}}], None{}},
+    Cli.Matches{sampled(), [], [Cli.Field{"verbose", ["1"], Cli.Argv{}},
+      Cli.Field{"root", [], Cli.Absent{}}], None{}},
+  ] : List<&2, Cli.Matches>} &
+  {Cli.samples(key_tool(), []) == [
+    Cli.Matches{key_tool(), [], [Cli.Field{"key", ["a"], Cli.Argv{}},
+      Cli.Field{"arg", ["x"], Cli.Argv{}}], None{}},
+    Cli.Matches{key_tool(), [], [Cli.Field{"key", ["b"], Cli.Argv{}},
+      Cli.Field{"arg", ["x"], Cli.Argv{}}], None{}},
+    Cli.Matches{key_tool(), [], [Cli.Field{"key", ["c"], Cli.Argv{}},
+      Cli.Field{"arg", ["x"], Cli.Argv{}}], None{}},
+    Cli.Matches{key_tool(), [], [Cli.Field{"key", ["a"], Cli.Argv{}},
+      Cli.Field{"arg", [], Cli.Absent{}}], None{}},
+  ] : List<&2, Cli.Matches>}
+
+# A Bug with msg when hit, else Done.
+def bug_if(hit: Bool, msg: String) -> Cli.Dec(Bool):
+  match hit:
+    case True{}: Cli.bug(Bool, msg)
+    case False{}: Done{False{}}
+
+# Reads "nope", which no command of sampled() has, when hit.
+def nope_if(hit: Bool, m: Cli.Matches) -> Cli.Dec(Bool):
+  match hit:
+    case True{}: Cli.flag(m, "nope")
+    case False{}: Done{False{}}
+
+def off_nope(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    on : Bool <- Cli.flag(m, "flag")
+    nope_if(Bool.not(on), m)
+
+def quiet(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    verbose : Nat <- Cli.count(m, "verbose")
+    bug_if(Nat.is_eq(verbose, 0n), "quiet")
+
+def no_pos(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    pos : Bool <- Cli.flag(m, "pos")
+    given : Bool <- Cli.given(m, "pos")
+    bug_if(Bool.and(Bool.not(pos), given), "no-pos")
+
+def neg_on(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    neg : Bool <- Cli.flag(m, "neg")
+    bug_if(neg, "neg")
+
+def named(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    given : Bool <- Cli.given(m, "name")
+    bug_if(given, "named")
+
+def renamed(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    +name : String <- Cli.str(m, "name")
+    bug_if(Bool.not(String.eq(name, "anon")), name)
+
+def bob(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    name : String <- Cli.str(m, "name")
+    bug_if(String.eq(name, "bob"), "bob")
+
+def yes_true(found: Maybe<&2, Bool>) -> Bool:
+  match found:
+    case Some{yes}: yes
+    case None{}: False{}
+
+def yes_on(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    yes : Maybe<&2, Bool> <- Cli.bool_opt(m, "yes")
+    bug_if(yes_true(yes), "yes")
+
+def tagged(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    tags : List<&2, String> <- Cli.strs(m, "tag")
+    bug_if(String.eq(String.join(tags, ","), "x"), "tag x")
+
+def mode_text(found: Maybe<&2, String>) -> String:
+  match found:
+    case Some{mode}: mode
+    case None{}: "none"
+
+def mode_bug(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    mode : Maybe<&2, String> <- Cli.str_opt(m, "mode")
+    Cli.bug(Bool, mode_text(mode))
+
+def mode_slow(found: Maybe<&2, String>) -> Bool:
+  match found:
+    case Some{mode}: String.eq(mode, "slow")
+    case None{}: False{}
+
+def both(+m: Cli.Matches) -> Cli.Dec(Bool):
+  do Cli.Dec<Bool>:
+    on : Bool <- Cli.flag(m, "flag")
+    mode : Maybe<&2, String> <- Cli.str_opt(m, "mode")
+    bug_if(Bool.and(Bool.not(on), mode_slow(mode)), "both")
+
+# G-CHECK: check runs the decoder on every sample samples lists, so a read
+# or Bug that only another state of one arg reaches is reported: a flag
+# left out, a global count left out, a negatable flag given false, a
+# defaulted one given true, a defaulted value given, or given another
+# value, an as_bool value given true, a list given one value, and an
+# optional value left out or given a later one_of value. Each Bug is listed
+# once per path, in the order its first sample comes; a Bug that needs two
+# args out of the sample's state, or a value no state gives, is not found.
+law g_check_branches:
+  {Cli.check(~Bool, ~off_nope, sampled()) == [
+    Cli.DecodeBug{"tool s", "'nope' is not an argument of 'tool s'"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~quiet, sampled()) ==
+    [Cli.DecodeBug{"tool s", "quiet"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~no_pos, sampled()) ==
+    [Cli.DecodeBug{"tool s", "no-pos"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~neg_on, sampled()) ==
+    [Cli.DecodeBug{"tool s", "neg"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~named, sampled()) ==
+    [Cli.DecodeBug{"tool s", "named"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~renamed, sampled()) ==
+    [Cli.DecodeBug{"tool s", "x"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~yes_on, sampled()) ==
+    [Cli.DecodeBug{"tool s", "yes"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~tagged, sampled()) ==
+    [Cli.DecodeBug{"tool s", "tag x"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~mode_bug, sampled()) == [
+    Cli.DecodeBug{"tool s", "fast"},
+    Cli.DecodeBug{"tool s", "none"},
+    Cli.DecodeBug{"tool s", "slow"},
+  ] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~(+m => Cli.bug(Bool, "b")), sampled()) ==
+    [Cli.DecodeBug{"tool s", "b"}] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~both, sampled()) == [] : List<&2, Cli.Problem>} &
+  {Cli.check(~Bool, ~bob, sampled()) == [] : List<&2, Cli.Problem>}
 
 # G-CHECK: the pkg demo's decoder raises no Bug on any sample.
 law g_check_pkg:

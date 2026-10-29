@@ -9,6 +9,17 @@
   that keep the low codes for their child; `Cli.usage_code(c)` returns the
   status. P10 and P11 now range over it (#45).
 
+### Changed
+
+- `Cli.check` also decodes each path's sample with one argument at a time in
+  each of its other states: left out unless it is required or has a default,
+  and given each of its `Cli.one_of` values, both states of a negatable flag
+  or a `Cli.as_bool()` value, or a value of its type in place of a default. A
+  decoder bug behind a branch on another argument's value is now reported,
+  each message once per path; P21 covers every state check tries (#64).
+  A `{==}` proof of `Cli.check(...) == []` takes more of `--verdict`'s fuel:
+  the pkg demo's now goes a path at a time.
+
 ## 0.2.0.0
 
 ### Added

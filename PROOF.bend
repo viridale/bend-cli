@@ -7832,6 +7832,708 @@ def final(want: Cli.Want, +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
       read_at_any(Cli.want_verdict(Cli.WProgram{opt}, id, kind, attrs),
         Cli.WProgram{opt}, vs, {==})
 
+# P21 samples: samples_read reads each field list check builds (reads): the
+# sample's, as P21 sample reads it (base_read), then each arg's other states
+# with the rest as in the sample (states_ok). field_find picks the state of
+# the arg find_arg_info picks, or skips a state of another arg to the
+# sample's field, which a missing field never hides since a state left out
+# is an explicit Absent field.
+
+def reads(xss: List<&2, List<&2, Cli.Field>>, +v: Maybe<&2, String>,
+    +id: String, +want: Cli.Want) -> Bool:
+  match xss:
+    case Nil{}: True{}
+    case fields <> tail:
+      Bool.and(Laws.read_at(v, want,
+        Cli.field_values(Cli.field_find(fields, id))), reads(tail, v, id, want))
+
+def reads_vals(values: List<&2, String>, +v: Maybe<&2, String>,
+    +want: Cli.Want) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case value <> tail:
+      Bool.and(Laws.read_at(v, want, [value]), reads_vals(tail, v, want))
+
+def wrap_reads(xss: List<&2, List<&2, Cli.Field>>, +c: Cli.Cmd,
+    +path: List<&2, String>, +id: String, +want: Cli.Want,
+    +e: {reads(xss, Cli.verdict(c, path, id, want), id, want) == True{}
+      : Bool}) ->
+    {Laws.samples_read(Cli.wrap_samples(xss, c, path), id, want) == True{}
+      : Bool}:
+  match xss:
+    case Nil{}: {==}
+    case +fields <> +tail:
+      and_true(Laws.read_at(Cli.verdict(c, path, id, want), want,
+        Cli.field_values(Cli.field_find(fields, id))),
+        Laws.samples_read(Cli.wrap_samples(tail, c, path), id, want),
+        and_left(Laws.read_at(Cli.verdict(c, path, id, want), want,
+          Cli.field_values(Cli.field_find(fields, id))),
+          reads(tail, Cli.verdict(c, path, id, want), id, want), e),
+        wrap_reads(tail, c, path, id, want,
+          and_right(Laws.read_at(Cli.verdict(c, path, id, want), want,
+            Cli.field_values(Cli.field_find(fields, id))),
+            reads(tail, Cli.verdict(c, path, id, want), id, want), e)))
+
+def reads_app(xs: List<&2, List<&2, Cli.Field>>,
+    +ys: List<&2, List<&2, Cli.Field>>, +v: Maybe<&2, String>, +id: String,
+    +want: Cli.Want, +ex: {reads(xs, v, id, want) == True{} : Bool},
+    ey: {reads(ys, v, id, want) == True{} : Bool}) ->
+    {reads(List.append(&2, List<&2, Cli.Field>, xs, ys), v, id, want)
+      == True{} : Bool}:
+  match xs:
+    case Nil{}: ey
+    case +fields <> +tail:
+      and_true(Laws.read_at(v, want,
+        Cli.field_values(Cli.field_find(fields, id))),
+        reads(List.append(&2, List<&2, Cli.Field>, tail, ys), v, id, want),
+        and_left(Laws.read_at(v, want,
+          Cli.field_values(Cli.field_find(fields, id))),
+          reads(tail, v, id, want), ex),
+        reads_app(tail, ys, v, id, want,
+          and_right(Laws.read_at(v, want,
+            Cli.field_values(Cli.field_find(fields, id))),
+            reads(tail, v, id, want), ex), ey))
+
+# field_find skips a field of another key, and stops at one of its own.
+def seek_skip(+key: String, -vals: List<&2, String>, -src: Cli.Src,
+    rest: List<&2, Cli.Field>, +id: String, -v: Maybe<&2, String>,
+    -want: Cli.Want, ek: {Cli.same_text(key, id) == False{} : Bool},
+    er: {Laws.read_at(v, want, Cli.field_values(Cli.field_find(rest, id)))
+      == True{} : Bool}) ->
+    {Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+      Cli.Field{key, vals, src} <> rest, id))) == True{} : Bool}:
+  %Equal.sym(Bool, Cli.same_text(key, id), False{}, ek) :
+    {Laws.read_at(v, want, Cli.field_values(Cli.field_seek(rest, id,
+      Bool.pick(Maybe<&2, Cli.Field>, _, Some{Cli.Field{key, vals, src}},
+        None{})))) == True{} : Bool}
+  er
+
+def seek_hit(+key: String, +vals: List<&2, String>, +src: Cli.Src,
+    +rest: List<&2, Cli.Field>, +id: String, -v: Maybe<&2, String>,
+    -want: Cli.Want, ek: {Cli.same_text(key, id) == True{} : Bool},
+    eg: {Laws.read_at(v, want, vals) == True{} : Bool}) ->
+    {Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+      Cli.Field{key, vals, src} <> rest, id))) == True{} : Bool}:
+  %Equal.sym(Bool, Cli.same_text(key, id), True{}, ek) :
+    {Laws.read_at(v, want, Cli.field_values(Cli.field_seek(rest, id,
+      Bool.pick(Maybe<&2, Cli.Field>, _, Some{Cli.Field{key, vals, src}},
+        None{})))) == True{} : Bool}
+  %field_seek_some(rest, id, Cli.Field{key, vals, src}) :
+    {Laws.read_at(v, want, Cli.field_values(_)) == True{} : Bool}
+  eg
+
+def given_skip(values: List<&2, String>, +key: String,
+    +rest: List<&2, Cli.Field>, +v: Maybe<&2, String>, +id: String,
+    +want: Cli.Want, +ek: {Cli.same_text(key, id) == False{} : Bool},
+    +er: {Laws.read_at(v, want, Cli.field_values(Cli.field_find(rest, id)))
+      == True{} : Bool}) ->
+    {reads(Cli.given_samples(values, key, rest), v, id, want) == True{}
+      : Bool}:
+  match values:
+    case Nil{}: {==}
+    case +value <> +tail:
+      and_true(Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+        Cli.Field{key, [value], Cli.Argv{}} <> rest, id))),
+        reads(Cli.given_samples(tail, key, rest), v, id, want),
+        seek_skip(key, [value], Cli.Argv{}, rest, id, v, want, ek, er),
+        given_skip(tail, key, rest, v, id, want, ek, er))
+
+def given_hit(values: List<&2, String>, +key: String,
+    +rest: List<&2, Cli.Field>, +v: Maybe<&2, String>, +id: String,
+    +want: Cli.Want, +ek: {Cli.same_text(key, id) == True{} : Bool},
+    +ev: {reads_vals(values, v, want) == True{} : Bool}) ->
+    {reads(Cli.given_samples(values, key, rest), v, id, want) == True{}
+      : Bool}:
+  match values:
+    case Nil{}: {==}
+    case +value <> +tail:
+      and_true(Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+        Cli.Field{key, [value], Cli.Argv{}} <> rest, id))),
+        reads(Cli.given_samples(tail, key, rest), v, id, want),
+        seek_hit(key, [value], Cli.Argv{}, rest, id, v, want, ek,
+          and_left(Laws.read_at(v, want, [value]), reads_vals(tail, v, want),
+            ev)),
+        given_hit(tail, key, rest, v, id, want, ek,
+          and_right(Laws.read_at(v, want, [value]),
+            reads_vals(tail, v, want), ev)))
+
+def absent_skip(b: Bool, +key: String, +rest: List<&2, Cli.Field>,
+    +v: Maybe<&2, String>, +id: String, +want: Cli.Want,
+    ek: {Cli.same_text(key, id) == False{} : Bool},
+    er: {Laws.read_at(v, want, Cli.field_values(Cli.field_find(rest, id)))
+      == True{} : Bool}) ->
+    {reads(Cli.absent_sample(b, key, rest), v, id, want) == True{} : Bool}:
+  match b:
+    case True{}:
+      and_true(Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+        Cli.Field{key, [], Cli.Absent{}} <> rest, id))), True{},
+        seek_skip(key, [], Cli.Absent{}, rest, id, v, want, ek, er), {==})
+    case False{}: {==}
+
+def absent_hit(b: Bool, +key: String, +rest: List<&2, Cli.Field>,
+    +v: Maybe<&2, String>, +id: String, +want: Cli.Want,
+    ek: {Cli.same_text(key, id) == True{} : Bool},
+    g: {b == True{} : Bool} ->
+      {Laws.read_at(v, want, Nil{}) == True{} : Bool}) ->
+    {reads(Cli.absent_sample(b, key, rest), v, id, want) == True{} : Bool}:
+  match b:
+    case True{}:
+      and_true(Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+        Cli.Field{key, [], Cli.Absent{}} <> rest, id))), True{},
+        seek_hit(key, [], Cli.Absent{}, rest, id, v, want, ek, g({==})), {==})
+    case False{}: {==}
+
+def default_skip(found: Maybe<&2, String>, +key: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +rest: List<&2, Cli.Field>, +v: Maybe<&2, String>, +id: String,
+    +want: Cli.Want, +ek: {Cli.same_text(key, id) == False{} : Bool},
+    +er: {Laws.read_at(v, want, Cli.field_values(Cli.field_find(rest, id)))
+      == True{} : Bool}) ->
+    {reads(Cli.default_states(found, key, kind, attrs, rest), v, id, want)
+      == True{} : Bool}:
+  match found:
+    case Some{value}:
+      given_skip(Cli.sample_value(kind, attrs) <> Cli.more_values(kind, attrs),
+        key, rest, v, id, want, ek, er)
+    case None{}:
+      reads_app(Cli.absent_sample(Bool.not(Cli.always_present(kind, attrs)),
+        key, rest), Cli.given_samples(Cli.more_values(kind, attrs), key, rest),
+        v, id, want,
+        absent_skip(Bool.not(Cli.always_present(kind, attrs)), key, rest, v,
+          id, want, ek, er),
+        given_skip(Cli.more_values(kind, attrs), key, rest, v, id, want, ek,
+          er))
+
+# P21 samples states: an arg's other states read well under its verdict.
+
+def nil_ok(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>) ->
+    {vs_ok(kind, attrs, Nil{}) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: {==}
+    case Cli.CountKind{}: {==}
+    case Cli.NegatableKind{}: {==}
+    case Cli.OptionKind{many}: or_true_right(many)
+    case Cli.BareOptionKind{}: {==}
+    case Cli.PosKind{required, many}: or_true_right(many)
+
+def gap_nil(ap: Bool, km: Bool, e: {Bool.not(ap) == True{} : Bool}) ->
+    {Bool.and(True{}, Bool.and(Bool.not(km), ap)) == False{} : Bool}:
+  match ap:
+    case True{}:
+      Empty.absurd({Bool.and(True{}, Bool.and(Bool.not(km), True{}))
+        == False{} : Bool}, false_true_absurd(e))
+    case False{}:
+      match km:
+        case True{}: {==}
+        case False{}: {==}
+
+# An arg that is not always present reads well left out.
+def absent_ok(want: Cli.Want, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String,
+    e: {Bool.not(Cli.always_present(kind, attrs)) == True{} : Bool}) ->
+    {Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want, Nil{})
+      == True{} : Bool}:
+  final(want, kind, attrs, id, Nil{}, nil_ok(kind, attrs),
+    gap_nil(Cli.always_present(kind, attrs), Cli.kind_many(kind), e))
+
+# The sample value, which an arg with a default is also given, reads as
+# the sample of one without it does.
+def core_none(want: Cli.Want, +kind: Cli.UsageKind,
+    +attrs: List<&2, Cli.Item>, +id: String,
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    okc: ChoicesOk(Cli.find_one_of(attrs), Cli.find_as(attrs))) ->
+    Core(want, id, kind, attrs, None{}):
+  match want:
+    case Cli.WFlag{}: flag_core(None{}, kind, attrs, id)
+    case Cli.WCount{}: count_core(None{}, kind, attrs, id, Unit{})
+    case Cli.WValue{stem, form}:
+      value_core(None{}, kind, stem, form, attrs, id, Unit{}, okl, okc)
+    case Cli.WAny{}: {==}
+    case Cli.WChoose{opt, keys}:
+      choose_core(None{}, kind, opt, keys, attrs, id, Unit{}, okl)
+    case Cli.WProgram{opt}:
+      read_at_any(Cli.want_verdict(Cli.WProgram{opt}, id, kind, attrs),
+        Cli.WProgram{opt}, default_vals(None{}, kind, attrs), {==})
+
+def no_why(m: Maybe<&2, String>) -> Bool:
+  match m:
+    case None{}: True{}
+    case Some{why}: False{}
+
+# Each value, which its type and the one_of values accept.
+def all_fine(values: List<&2, String>, +found: Maybe<&2, List<&2, String>>,
+    +t: Maybe<&2, Cli.ValueType>) -> Bool:
+  match values:
+    case Nil{}: True{}
+    case +value <> +tail:
+      Bool.and(no_why(Cli.first_reason(Cli.reason_from_type(t, value),
+        Cli.choice_reason(found, value))), all_fine(tail, found, t))
+
+def why_bad(r: Maybe<&2, String>, -v: String,
+    e: {no_why(r) == True{} : Bool}) ->
+    {no_bad(Maybe.or(&2, Cli.Bad, Cli.bad_value(r, v), None{})) == True{}
+      : Bool}:
+  match r:
+    case None{}: {==}
+    case Some{why}:
+      Empty.absurd({no_bad(Maybe.or(&2, Cli.Bad, Cli.bad_value(Some{why}, v),
+        None{})) == True{} : Bool}, false_true_absurd(e))
+
+def valued_kind(kind: Cli.UsageKind) -> Bool:
+  match kind:
+    case Cli.FlagKind{}: False{}
+    case Cli.CountKind{}: False{}
+    case Cli.NegatableKind{}: False{}
+    case Cli.OptionKind{many}: True{}
+    case Cli.BareOptionKind{}: True{}
+    case Cli.PosKind{required, many}: True{}
+
+# A value kind's lone value its type and one_of accept.
+def one_ok(kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +v: String,
+    e: {no_why(Cli.value_reason(attrs, v)) == True{} : Bool},
+    ek: {valued_kind(kind) == True{} : Bool}) ->
+    {vs_ok(kind, attrs, [v]) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}:
+      Empty.absurd({vs_ok(Cli.FlagKind{}, attrs, [v]) == True{} : Bool},
+        false_true_absurd(ek))
+    case Cli.CountKind{}:
+      Empty.absurd({vs_ok(Cli.CountKind{}, attrs, [v]) == True{} : Bool},
+        false_true_absurd(ek))
+    case Cli.NegatableKind{}:
+      Empty.absurd({vs_ok(Cli.NegatableKind{}, attrs, [v]) == True{} : Bool},
+        false_true_absurd(ek))
+    case Cli.OptionKind{+many}:
+      and_true(no_bad(Cli.first_bad([v], attrs)), Bool.or(many, True{}),
+        why_bad(Cli.value_reason(attrs, v), v, e), or_true_right(many))
+    case Cli.BareOptionKind{}:
+      and_true(no_bad(Cli.first_bad([v], attrs)), True{},
+        why_bad(Cli.value_reason(attrs, v), v, e), {==})
+    case Cli.PosKind{required, +many}:
+      and_true(no_bad(Cli.first_bad([v], attrs)), Bool.or(many, True{}),
+        why_bad(Cli.value_reason(attrs, v), v, e), or_true_right(many))
+
+def fine_reads(values: List<&2, String>, +want: Cli.Want,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>, +id: String,
+    +ef: {all_fine(values, Cli.find_one_of(attrs), Cli.find_as(attrs))
+      == True{} : Bool},
+    +ek: {valued_kind(kind) == True{} : Bool}) ->
+    {reads_vals(values, Cli.want_verdict(want, id, kind, attrs), want)
+      == True{} : Bool}:
+  match values:
+    case Nil{}: {==}
+    case +value <> +tail:
+      and_true(Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want,
+        [value]), reads_vals(tail, Cli.want_verdict(want, id, kind, attrs),
+          want),
+        final(want, kind, attrs, id, [value],
+          one_ok(kind, attrs, value,
+            and_left(no_why(Cli.value_reason(attrs, value)),
+              all_fine(tail, Cli.find_one_of(attrs), Cli.find_as(attrs)), ef),
+            ek), {==}),
+        fine_reads(tail, want, kind, attrs, id,
+          and_right(no_why(Cli.value_reason(attrs, value)),
+            all_fine(tail, Cli.find_one_of(attrs), Cli.find_as(attrs)), ef),
+          ek))
+
+def cons_contains(+head: String, +ys: List<&2, String>, +x: String,
+    e: {List.contains(~String, ~String.eq, ys, x) == True{} : Bool}) ->
+    {List.contains(~String, ~String.eq, head <> ys, x) == True{} : Bool}:
+  %contains_cons(head, ys, x) : {_ == True{} : Bool}
+  %Equal.sym(Bool, List.contains(~String, ~String.eq, ys, x), True{}, e) :
+    {Bool.or(String.eq(head, x), _) == True{} : Bool}
+  or_true_right(String.eq(head, x))
+
+def head_contains(+x: String, +rest: List<&2, String>) ->
+    {List.contains(~String, ~String.eq, x <> rest, x) == True{} : Bool}:
+  %contains_cons(x, rest, x) : {_ == True{} : Bool}
+  %Equal.sym(Bool, String.eq(x, x), True{}, string_eq_refl(x)) :
+    {Bool.or(_, List.contains(~String, ~String.eq, rest, x)) == True{}
+      : Bool}
+  {==}
+
+def all_in_cons(xs: List<&2, String>, +head: String, +ys: List<&2, String>,
+    +e: {Cli.all_in(xs, ys) == True{} : Bool}) ->
+    {Cli.all_in(xs, head <> ys) == True{} : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case +x <> +rest:
+      and_true(List.contains(~String, ~String.eq, head <> ys, x),
+        Cli.all_in(rest, head <> ys),
+        cons_contains(head, ys, x,
+          and_left(List.contains(~String, ~String.eq, ys, x),
+            Cli.all_in(rest, ys), e)),
+        all_in_cons(rest, head, ys,
+          and_right(List.contains(~String, ~String.eq, ys, x),
+            Cli.all_in(rest, ys), e)))
+
+def all_in_refl(xs: List<&2, String>) ->
+    {Cli.all_in(xs, xs) == True{} : Bool}:
+  match xs:
+    case Nil{}: {==}
+    case +x <> +rest:
+      and_true(List.contains(~String, ~String.eq, x <> rest, x),
+        Cli.all_in(rest, x <> rest), head_contains(x, rest),
+        all_in_cons(rest, x, rest, all_in_refl(rest)))
+
+def choice_bad_none(values: List<&2, String>, +t: Maybe<&2, Cli.ValueType>,
+    acc: Maybe<&2, Cli.Bad>,
+    e: {Cli.choice_bad(values, t, acc) == None{} : Maybe<&2, Cli.Bad>}) ->
+    {Cli.choice_bad(values, t, None{}) == None{} : Maybe<&2, Cli.Bad>}:
+  match values acc:
+    case Nil{} hit: {==}
+    case value <> tail None{}: e
+    case value <> tail Some{hit}:
+      Empty.absurd({Cli.choice_bad(value <> tail, t, None{}) == None{}
+        : Maybe<&2, Cli.Bad>}, bad_some_absurd(hit, e))
+
+def fine_one(r: Maybe<&2, String>, c: Bool, -why: String,
+    er: {r == None{} : Maybe<&2, String>}, ec: {c == True{} : Bool}) ->
+    {no_why(Cli.first_reason(r, Bool.pick(Maybe<&2, String>, c, None{},
+      Some{why}))) == True{} : Bool}:
+  match r:
+    case None{}:
+      match c:
+        case True{}: {==}
+        case False{}:
+          Empty.absurd({no_why(Cli.first_reason(None{},
+            Bool.pick(Maybe<&2, String>, False{}, None{}, Some{why})))
+            == True{} : Bool}, false_true_absurd(ec))
+    case Some{w}:
+      Empty.absurd({no_why(Cli.first_reason(Some{w},
+        Bool.pick(Maybe<&2, String>, c, None{}, Some{why}))) == True{}
+        : Bool}, why_some_absurd(w, er))
+
+# Each of ws, all one_of values the type accepts, is fine.
+def tail_fine(ws: List<&2, String>, +values: List<&2, String>,
+    +t: Maybe<&2, Cli.ValueType>,
+    +sub: {Cli.all_in(ws, values) == True{} : Bool},
+    +ct: {Cli.choice_bad(ws, t, None{}) == None{} : Maybe<&2, Cli.Bad>}) ->
+    {all_fine(ws, Some{values}, t) == True{} : Bool}:
+  match ws:
+    case Nil{}: {==}
+    case +w <> +rest:
+      and_true(no_why(Cli.first_reason(Cli.reason_from_type(t, w),
+        Cli.choice_reason(Some{values}, w))), all_fine(rest, Some{values}, t),
+        fine_one(Cli.reason_from_type(t, w),
+          List.contains(~String, ~String.eq, values, w),
+          Cli.choices_reason(values),
+          bad_value_none(Cli.reason_from_type(t, w), w,
+            choice_bad_acc(rest, t,
+              Cli.bad_value(Cli.reason_from_type(t, w), w), ct)),
+          and_left(List.contains(~String, ~String.eq, values, w),
+            Cli.all_in(rest, values), sub)),
+        tail_fine(rest, values, t,
+          and_right(List.contains(~String, ~String.eq, values, w),
+            Cli.all_in(rest, values), sub),
+          choice_bad_none(rest, t,
+            Cli.bad_value(Cli.reason_from_type(t, w), w), ct)))
+
+def typed_fine(t: Maybe<&2, Cli.ValueType>) ->
+    {all_fine(Cli.more_typed(t), None{}, t) == True{} : Bool}:
+  match t:
+    case None{}: {==}
+    case Some{x}:
+      match x:
+        case Cli.TNat{}: {==}
+        case Cli.TU32{}: {==}
+        case Cli.TF32{}: {==}
+        case Cli.TBool{}: {==}
+        case Cli.TFile{}: {==}
+        case Cli.TDir{}: {==}
+
+# The later one_of values, or true for an as_bool value without them.
+def more_fine(found: Maybe<&2, List<&2, String>>, +attrs: List<&2, Cli.Item>,
+    ok: ChoicesOk(found, Cli.find_as(attrs))) ->
+    {all_fine(Cli.more_choice(found, attrs), found, Cli.find_as(attrs))
+      == True{} : Bool}:
+  match found:
+    case None{}: typed_fine(Cli.find_as(attrs))
+    case Some{values}:
+      match values:
+        case Nil{}: {==}
+        case +head <> +tail:
+          tail_fine(tail, head <> tail, Cli.find_as(attrs),
+            all_in_cons(tail, head, tail, all_in_refl(tail)),
+            choice_bad_none(tail, Cli.find_as(attrs),
+              Cli.bad_value(Cli.reason_from_type(Cli.find_as(attrs), head),
+                head), ok))
+
+def more_reads(kind: Cli.UsageKind, +want: Cli.Want,
+    +attrs: List<&2, Cli.Item>, +id: String,
+    okc: ChoicesOk(Cli.find_one_of(attrs), Cli.find_as(attrs))) ->
+    {reads_vals(Cli.more_values(kind, attrs),
+      Cli.want_verdict(want, id, kind, attrs), want) == True{} : Bool}:
+  match kind:
+    case Cli.FlagKind{}: {==}
+    case Cli.CountKind{}: {==}
+    case Cli.NegatableKind{}:
+      and_true(Laws.read_at(Cli.want_verdict(want, id, Cli.NegatableKind{},
+        attrs), want, ["false"]), True{},
+        final(want, Cli.NegatableKind{}, attrs, id, ["false"], {==}, {==}),
+        {==})
+    case Cli.OptionKind{+many}:
+      fine_reads(Cli.more_choice(Cli.find_one_of(attrs), attrs), want,
+        Cli.OptionKind{many}, attrs, id,
+        more_fine(Cli.find_one_of(attrs), attrs, okc), {==})
+    case Cli.BareOptionKind{}:
+      fine_reads(Cli.more_choice(Cli.find_one_of(attrs), attrs), want,
+        Cli.BareOptionKind{}, attrs, id,
+        more_fine(Cli.find_one_of(attrs), attrs, okc), {==})
+    case Cli.PosKind{+required, +many}:
+      fine_reads(Cli.more_choice(Cli.find_one_of(attrs), attrs), want,
+        Cli.PosKind{required, many}, attrs, id,
+        more_fine(Cli.find_one_of(attrs), attrs, okc), {==})
+
+def default_hit(found: Maybe<&2, String>, +key: String,
+    +kind: Cli.UsageKind, +attrs: List<&2, Cli.Item>,
+    +rest: List<&2, Cli.Field>, +id: String, +want: Cli.Want,
+    +ek: {Cli.same_text(key, id) == True{} : Bool},
+    okl: DelimOk(Cli.find_delim(attrs), kind),
+    okc: ChoicesOk(Cli.find_one_of(attrs), Cli.find_as(attrs))) ->
+    {reads(Cli.default_states(found, key, kind, attrs, rest),
+      Cli.want_verdict(want, id, kind, attrs), id, want) == True{} : Bool}:
+  match found:
+    case Some{value}:
+      dup_choices({reads(Cli.given_samples(Cli.sample_value(kind, attrs) <>
+        Cli.more_values(kind, attrs), key, rest),
+        Cli.want_verdict(want, id, kind, attrs), id, want) == True{} : Bool},
+        Cli.find_one_of(attrs), Cli.find_as(attrs), okc,
+        c1 => c2 => given_hit(Cli.sample_value(kind, attrs) <>
+          Cli.more_values(kind, attrs), key, rest,
+          Cli.want_verdict(want, id, kind, attrs), id, want, ek,
+          and_true(Laws.read_at(Cli.want_verdict(want, id, kind, attrs), want,
+            [Cli.sample_value(kind, attrs)]),
+            reads_vals(Cli.more_values(kind, attrs),
+              Cli.want_verdict(want, id, kind, attrs), want),
+            core_none(want, kind, attrs, id, okl, c1),
+            more_reads(kind, want, attrs, id, c2))))
+    case None{}:
+      reads_app(Cli.absent_sample(Bool.not(Cli.always_present(kind, attrs)),
+        key, rest), Cli.given_samples(Cli.more_values(kind, attrs), key, rest),
+        Cli.want_verdict(want, id, kind, attrs), id, want,
+        absent_hit(Bool.not(Cli.always_present(kind, attrs)), key, rest,
+          Cli.want_verdict(want, id, kind, attrs), id, want, ek,
+          e => absent_ok(want, kind, attrs, id, e)),
+        given_hit(Cli.more_values(kind, attrs), key, rest,
+          Cli.want_verdict(want, id, kind, attrs), id, want, ek,
+          more_reads(kind, want, attrs, id, okc)))
+
+def info_hit(info: Cli.ArgInfo, +id: String, -name: String,
+    -path: List<&2, String>, +want: Cli.Want, +rest: List<&2, Cli.Field>,
+    ek: {Cli.same_text(Cli.info_id(info), id) == True{} : Bool},
+    ic: InfoClean(info)) ->
+    {reads(Cli.info_states(info, rest), Cli.arg_verdict(Some{info}, id, name,
+      path, want), id, want) == True{} : Bool}:
+  match info:
+    case Cli.ArgInfo{+key, usage, short, long, +kind, +attrs}:
+      (okd, r) = ic
+      (okl, okc) = r
+      default_hit(Cli.find_default(attrs), key, kind, attrs, rest, id, want,
+        ek, okl, okc)
+
+def info_skip(info: Cli.ArgInfo, +id: String, +rest: List<&2, Cli.Field>,
+    +v: Maybe<&2, String>, +want: Cli.Want,
+    ek: {Cli.same_text(Cli.info_id(info), id) == False{} : Bool},
+    er: {Laws.read_at(v, want, Cli.field_values(Cli.field_find(rest, id)))
+      == True{} : Bool}) ->
+    {reads(Cli.info_states(info, rest), v, id, want) == True{} : Bool}:
+  match info:
+    case Cli.ArgInfo{+key, usage, short, long, +kind, +attrs}:
+      default_skip(Cli.find_default(attrs), key, kind, attrs, rest, v, id,
+        want, ek, er)
+
+def after_skip(xss: List<&2, List<&2, Cli.Field>>, +key: String,
+    +vals: List<&2, String>, +src: Cli.Src, +id: String,
+    +v: Maybe<&2, String>, +want: Cli.Want,
+    +ek: {Cli.same_text(key, id) == False{} : Bool},
+    +e: {reads(xss, v, id, want) == True{} : Bool}) ->
+    {reads(Cli.after_fields(xss, [Cli.Field{key, vals, src}]), v, id, want)
+      == True{} : Bool}:
+  match xss:
+    case Nil{}: {==}
+    case +sample <> +tail:
+      and_true(Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+        Cli.Field{key, vals, src} <> sample, id))),
+        reads(Cli.after_fields(tail, [Cli.Field{key, vals, src}]), v, id,
+          want),
+        seek_skip(key, vals, src, sample, id, v, want, ek,
+          and_left(Laws.read_at(v, want,
+            Cli.field_values(Cli.field_find(sample, id))),
+            reads(tail, v, id, want), e)),
+        after_skip(tail, key, vals, src, id, v, want, ek,
+          and_right(Laws.read_at(v, want,
+            Cli.field_values(Cli.field_find(sample, id))),
+            reads(tail, v, id, want), e)))
+
+def after_hit(xss: List<&2, List<&2, Cli.Field>>, +key: String,
+    +vals: List<&2, String>, +src: Cli.Src, +id: String,
+    +v: Maybe<&2, String>, +want: Cli.Want,
+    +ek: {Cli.same_text(key, id) == True{} : Bool},
+    +eg: {Laws.read_at(v, want, vals) == True{} : Bool}) ->
+    {reads(Cli.after_fields(xss, [Cli.Field{key, vals, src}]), v, id, want)
+      == True{} : Bool}:
+  match xss:
+    case Nil{}: {==}
+    case +sample <> +tail:
+      and_true(Laws.read_at(v, want, Cli.field_values(Cli.field_find(
+        Cli.Field{key, vals, src} <> sample, id))),
+        reads(Cli.after_fields(tail, [Cli.Field{key, vals, src}]), v, id,
+          want),
+        seek_hit(key, vals, src, sample, id, v, want, ek, eg),
+        after_hit(tail, key, vals, src, id, v, want, ek, eg))
+
+# The sample's field for id reads well (P21 sample).
+def base_read(+items: List<&2, Cli.Item>, +id: String, -name: String,
+    -path: List<&2, String>, +want: Cli.Want, d: DeepClean(items)) ->
+    {Laws.read_at(Cli.arg_verdict(Cli.find_arg_go(items, id, None{}), id,
+      name, path, want), want,
+      Cli.field_values(Cli.field_find(Cli.sample_args(items), id)))
+      == True{} : Bool}:
+  %aln(items, id) :
+    {Laws.read_at(Cli.arg_verdict(Cli.find_arg_go(items, id, None{}), id,
+      name, path, want), want, _) == True{} : Bool}
+  fin(Cli.find_arg_go(items, id, None{}), id, name, path, want,
+    find_clean(items, None{}, id, d, Unit{}))
+
+def arg_step(hit: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.Item>,
+    +id: String, +name: String, +path: List<&2, String>, +want: Cli.Want,
+    +eh: {Cli.same_text(Cli.info_id(info), id) == hit : Bool},
+    ic: InfoClean(info), dt: DeepClean(tail),
+    ih: DeepClean(tail) -> {reads(Cli.arg_states(tail),
+      Cli.arg_verdict(Cli.find_arg_go(tail, id, None{}), id, name, path,
+        want), id, want) == True{} : Bool}) ->
+    {reads(List.append(&2, List<&2, Cli.Field>,
+      Cli.info_states(info, Cli.sample_args(tail)),
+      Cli.after_fields(Cli.arg_states(tail),
+        Cli.sample_field(Cli.resolve_default(Cli.info_default(info), info),
+          info))),
+      Cli.arg_verdict(Cli.find_arg_go(tail, id,
+        Bool.pick(Maybe<&2, Cli.ArgInfo>, hit, Some{info}, None{})), id, name,
+        path, want), id, want) == True{} : Bool}:
+  match hit:
+    case True{}:
+      %arg_go_some(tail, id, info) :
+        {reads(List.append(&2, List<&2, Cli.Field>,
+          Cli.info_states(info, Cli.sample_args(tail)),
+          Cli.after_fields(Cli.arg_states(tail),
+            Cli.sample_field(Cli.resolve_default(Cli.info_default(info), info),
+              info))),
+          Cli.arg_verdict(_, id, name, path, want), id, want) == True{}
+          : Bool}
+      %sample_one(info) :
+        {reads(List.append(&2, List<&2, Cli.Field>,
+          Cli.info_states(info, Cli.sample_args(tail)),
+          Cli.after_fields(Cli.arg_states(tail), _)),
+          Cli.arg_verdict(Some{info}, id, name, path, want), id, want)
+          == True{} : Bool}
+      dup_info({reads(List.append(&2, List<&2, Cli.Field>,
+        Cli.info_states(info, Cli.sample_args(tail)),
+        Cli.after_fields(Cli.arg_states(tail),
+          [Cli.Field{Cli.info_id(info), info_vals(info), info_src(info)}])),
+        Cli.arg_verdict(Some{info}, id, name, path, want), id, want)
+        == True{} : Bool}, info, ic,
+        i1 => i2 => reads_app(Cli.info_states(info, Cli.sample_args(tail)),
+          Cli.after_fields(Cli.arg_states(tail),
+            [Cli.Field{Cli.info_id(info), info_vals(info), info_src(info)}]),
+          Cli.arg_verdict(Some{info}, id, name, path, want), id, want,
+          info_hit(info, id, name, path, want, Cli.sample_args(tail), eh, i1),
+          after_hit(Cli.arg_states(tail), Cli.info_id(info), info_vals(info),
+            info_src(info), id, Cli.arg_verdict(Some{info}, id, name, path,
+              want), want, eh, fin_info(info, id, name, path, want, i2))))
+    case False{}:
+      %sample_one(info) :
+        {reads(List.append(&2, List<&2, Cli.Field>,
+          Cli.info_states(info, Cli.sample_args(tail)),
+          Cli.after_fields(Cli.arg_states(tail), _)),
+          Cli.arg_verdict(Cli.find_arg_go(tail, id, None{}), id, name, path,
+            want), id, want) == True{} : Bool}
+      dup_deep({reads(List.append(&2, List<&2, Cli.Field>,
+        Cli.info_states(info, Cli.sample_args(tail)),
+        Cli.after_fields(Cli.arg_states(tail),
+          [Cli.Field{Cli.info_id(info), info_vals(info), info_src(info)}])),
+        Cli.arg_verdict(Cli.find_arg_go(tail, id, None{}), id, name, path,
+          want), id, want) == True{} : Bool}, tail, dt,
+        d1 => d2 => reads_app(Cli.info_states(info, Cli.sample_args(tail)),
+          Cli.after_fields(Cli.arg_states(tail),
+            [Cli.Field{Cli.info_id(info), info_vals(info), info_src(info)}]),
+          Cli.arg_verdict(Cli.find_arg_go(tail, id, None{}), id, name, path,
+            want), id, want,
+          info_skip(info, id, Cli.sample_args(tail),
+            Cli.arg_verdict(Cli.find_arg_go(tail, id, None{}), id, name, path,
+              want), want, eh, base_read(tail, id, name, path, want, d1)),
+          after_skip(Cli.arg_states(tail), Cli.info_id(info), info_vals(info),
+            info_src(info), id, Cli.arg_verdict(Cli.find_arg_go(tail, id,
+              None{}), id, name, path, want), want, eh, ih(d2))))
+
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg --skip Sub cli.bend Item '$P <> tail' 'states_ok(tail, id, name, path, want, di)'
+def states_ok(items: List<&2, Cli.Item>, +id: String, +name: String,
+    +path: List<&2, String>, +want: Cli.Want, di: DeepClean(items)) ->
+    {reads(Cli.arg_states(items), Cli.arg_verdict(Cli.find_arg_go(items, id,
+      None{}), id, name, path, want), id, want) == True{} : Bool}:
+  match items:
+    case Nil{}: {==}
+    case Cli.Arg{+usage, help, +attrs} <> +tail:
+      (ic, dt) = di
+      arg_step(Cli.same_text(Cli.info_id(Cli.arg_info(usage, attrs)), id),
+        Cli.arg_info(usage, attrs), tail, id, name, path, want, {==}, ic, dt,
+        d => states_ok(tail, id, name, path, want, d))
+    case Cli.Sub{x0, x1, x2} <> tail:
+      (dc, dt) = di
+      states_ok(tail, id, name, path, want, dt)
+    case Cli.Version{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Alias{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Hidden{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Example{x0, x1} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.After{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.SubOptional{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.External{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Exclusive{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.NeedOne{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Id{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Required{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.AttrDefault{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.AttrEnv{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Global{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Heading{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.As{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.OneOf{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Delim{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Hyphen{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Rest{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Bare{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Conflicts{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Requires{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Group{x0} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.Builtin{} <> tail: states_ok(tail, id, name, path, want, di)
+    case Cli.UsageStatus{x0} <> tail: states_ok(tail, id, name, path, want, di)
+
+def samples_ok(+name: String, +about: String, +items: List<&2, Cli.Item>,
+    +path: List<&2, String>, +id: String, +want: Cli.Want,
+    +e: {Cli.problems(Cli.Cmd{name, about, items}) == Nil{}
+      : List<&2, Cli.Problem>}) ->
+    {Laws.samples_read(Cli.samples(Cli.Cmd{name, about, items}, path), id,
+      want) == True{} : Bool}:
+  wrap_reads(Cli.sample_fields(Cli.Cmd{name, about, items}, path) <>
+    Cli.state_fields(Cli.Cmd{name, about, items}, path),
+    Cli.Cmd{name, about, items}, path, id, want,
+    and_true(Laws.read_at(Cli.verdict(Cli.Cmd{name, about, items}, path, id,
+      want), want, Cli.field_values(Cli.field_find(Cli.sample_args(
+        Cli.scope_args(path, items, Nil{})), id))),
+      reads(Cli.arg_states(Cli.scope_args(path, items, Nil{})),
+        Cli.verdict(Cli.Cmd{name, about, items}, path, id, want), id, want),
+      base_read(Cli.scope_args(path, items, Nil{}), id, name, path, want,
+        deep_scope(path, items, Nil{}, lint_clean(name, about, items, e),
+          Unit{})),
+      states_ok(Cli.scope_args(path, items, Nil{}), id, name, path, want,
+        deep_scope(path, items, Nil{}, lint_clean(name, about, items, e),
+          Unit{}))))
+
+def Laws.p21_samples(c, path, id, want, e):
+  match c:
+    case Cli.Cmd{+name, +about, +items}:
+      samples_ok(name, about, items, path, id, want, e)
+
 # P21 field values: what env, a default and the argv give an arg satisfy
 # (fgood), which gap and final then read.
 
@@ -14518,8 +15220,54 @@ def Laws.p22_choose(opt, keys, id, kind, attrs, e):
 def Laws.g_check_sample_values():
   {==}
 
+def Laws.g_check_states():
+  ({==}, ({==}, ({==}, {==})))
+
+def Laws.g_check_branches():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    {==})))))))))))
+
+# G-CHECK pkg, a path at a time: --verdict's kernel gives each conversion
+# its own fuel, and the samples of all four paths take more than one has.
+def check_nil(-c: Cli.Cmd,
+    ep: {Cli.problems(c) == [] : List<&2, Cli.Problem>},
+    eb: {Cli.sample_bugs(~Demo.Action, ~Demo.decode, Cli.sample_paths(c), c)
+      == [] : List<&2, Cli.Problem>}) ->
+    {Cli.check(~Demo.Action, ~Demo.decode, c) == [] : List<&2, Cli.Problem>}:
+  %Equal.sym(List<&2, Cli.Problem>, Cli.problems(c), [], ep) :
+    {List.append(&2, Cli.Problem, _, Cli.sample_bugs(~Demo.Action,
+      ~Demo.decode, Cli.sample_paths(c), c)) == [] : List<&2, Cli.Problem>}
+  eb
+
+def bugs_nil(-p: List<&2, String>, -ps: List<&2, List<&2, String>>,
+    -c: Cli.Cmd,
+    ea: {Cli.decode_bugs(Cli.distinct(Cli.sample_msgs(~Demo.Action,
+      ~Demo.decode, Cli.samples(c, p)), []), Cli.path_text(Cli.cmd_name(c), p))
+      == [] : List<&2, Cli.Problem>},
+    eb: {Cli.sample_bugs(~Demo.Action, ~Demo.decode, ps, c)
+      == [] : List<&2, Cli.Problem>}) ->
+    {Cli.sample_bugs(~Demo.Action, ~Demo.decode, p <> ps, c)
+      == [] : List<&2, Cli.Problem>}:
+  %Equal.sym(List<&2, Cli.Problem>, Cli.decode_bugs(Cli.distinct(
+    Cli.sample_msgs(~Demo.Action, ~Demo.decode, Cli.samples(c, p)), []),
+    Cli.path_text(Cli.cmd_name(c), p)), [], ea) :
+    {List.append(&2, Cli.Problem, _, Cli.sample_bugs(~Demo.Action,
+      ~Demo.decode, ps, c)) == [] : List<&2, Cli.Problem>}
+  eb
+
+def pkg_bugs() -> {Cli.sample_bugs(~Demo.Action, ~Demo.decode,
+    Cli.sample_paths(Demo.cli()), Demo.cli()) == [] : List<&2, Cli.Problem>}:
+  %Equal.sym(List<&2, List<&2, String>>, Cli.sample_paths(Demo.cli()),
+    [["add"], ["remove"], ["list"], ["run"]], {==}) :
+    {Cli.sample_bugs(~Demo.Action, ~Demo.decode, _, Demo.cli())
+      == [] : List<&2, Cli.Problem>}
+  bugs_nil(["add"], [["remove"], ["list"], ["run"]], Demo.cli(), {==},
+    bugs_nil(["remove"], [["list"], ["run"]], Demo.cli(), {==},
+      bugs_nil(["list"], [["run"]], Demo.cli(), {==},
+        bugs_nil(["run"], [], Demo.cli(), {==}, {==}))))
+
 def Laws.g_check_pkg():
-  {==}
+  check_nil(Demo.cli(), {==}, pkg_bugs())
 
 def Laws.g_lint_decode_bug():
   {==}

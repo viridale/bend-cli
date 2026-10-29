@@ -265,10 +265,20 @@ the program name), and returns either `Go{value, term}` or
 `Quit{code, out, err}`. Testing parsing or exact rendered output requires no
 process I/O.
 
-`Cli.check` validates the command definition and runs the decoder against one
-synthesized sample per completable command path to catch mismatched argument
-IDs, types, and kinds statically. Because `Cli.check` evaluates one sample per
-path, decoders should read all arguments before branching on their values.
+`Cli.check` validates the command definition and runs the decoder at each
+completable command path to catch mismatched argument IDs, types, and kinds
+statically. At each path it decodes a synthesized sample, which gives each
+argument its default, else its first `Cli.one_of` value or a value of its type,
+then the sample with one argument at a time in each of its other states. An
+argument is left out unless it is required or has a default, then given each of
+its values in turn: its `Cli.one_of` values, else `true` then `false` for a
+negatable flag, `false` then `true` for a `Cli.as_bool()` value, else the one
+value of its type. The first is skipped when the sample already has it, that is,
+unless the argument has a default. A read behind a branch on one argument's
+value is thus checked, and each `Cli.bug` message is reported once per path. A
+read that only two arguments out of their sample state reach together, or only a
+value no state gives, can still escape, so decoders should read all arguments
+before branching on their values.
 
 `Cli.eval` lints the command definition on every call. To evaluate multiple
 `argv` lists against the same command, lint it once with `Cli.linted(c)`, which
