@@ -62,8 +62,8 @@ bend main.bend -o hello
 ```
 
 `-h` prints compact help (the first paragraph of each description); `--help`
-prints every paragraph. Usage errors write to stderr and exit with status `2`.
-Invalid command definitions and decoder bugs write a `bug:` diagnostic to
+prints every paragraph. Usage errors write to stderr and exit with status `2`,
+or the root's `Cli.usage_status`. Invalid command definitions and decoder bugs write a `bug:` diagnostic to
 stderr and exit with status `70`.
 
 See [`examples/hello`](examples/hello) for this quickstart with its laws and
@@ -165,10 +165,12 @@ at the name, and `Cli.external_args(m)` returns `Some{(name, args)}` with the
 tokens after it unchanged. Such a command needs no subcommand, so with none (an
 empty `argv` or options alone) its decoder runs at the command's own path with
 `Cli.external_args(m)` equal to `None{}`. Handle that case with `Cli.fail` and a
-usage message, which exits `2`, or by decoding a default; `Cli.bug` there exits
-`70`, and `Cli.check` reports it. Keep `Cli.path(m)` with the name, and when
-no plugin answers to it, write `Cli.unknown_text(cli(), path, name, t)` to
-stderr and exit `2`, as a plan's `Cli.Ran{2, "", text}`: it is the error
+usage message, which exits `Cli.usage_code(cli())`, or by decoding a default;
+`Cli.bug` there exits `70`, and `Cli.check` reports it. Keep `Cli.path(m)`
+with the name, and when no plugin answers to it, write
+`Cli.unknown_text(cli(), path, name, t)` to stderr and exit
+`Cli.usage_code(cli())`, as a plan's
+`Cli.Ran{Cli.usage_code(cli()), "", text}`: it is the error
 `Cli.eval` gives an unknown subcommand, in stderr's colors, with similar
 names as tips and the command's usage, so `git comit` still suggests
 `commit`.
@@ -241,6 +243,15 @@ Add `Cli.version("1.0.0")` for `-V` and `--version`, `Cli.color()` for
 `Cli.man()` for a hidden `man [COMMAND]...` subcommand that prints `roff` man
 pages. `Cli.eval` handles help, version, completions, and man pages before
 invoking the application decoder.
+
+Add `Cli.usage_status(125)` to the root command to end every usage error with
+status `125` instead of `2`, as GNU `timeout`, `env` and `nice` do: a wrapper
+that passes on its child's status keeps the low codes for the child. It
+covers a rejected command line, the summary of a command that needs a
+subcommand, and a decoder's `Cli.fail`; help and version still exit `0`, and
+definition errors and `Cli.bug` `70`. `Cli.usage_code(c)` is the status `c`'s
+usage errors exit with. Lint rejects a code outside `1`–`255` and a
+`usage_status` anywhere but the root.
 
 To install generated completions, run `source <(pkg completions bash)` in
 bash 4 or newer, save `pkg completions zsh` as `_pkg` in a directory on
@@ -330,7 +341,7 @@ and man pages never include ANSI escape sequences.
 `Cli.Term{out_color, err_color, width}` passes the resolved stream color flags
 and terminal width to `plan(term, value)`. `Run.planned` writes help, version,
 completion, and man-page output to stdout (exiting `0`) and usage or definition
-errors to stderr (exiting `2` or `70`). Otherwise it writes the plan's stdout
+errors to stderr (exiting `Cli.usage_code(c)` or `70`). Otherwise it writes the plan's stdout
 and stderr text and exits with the plan's status code (`0`–`255`); a code
 above `255` is reported to stderr as an internal bug and exits `70`.
 

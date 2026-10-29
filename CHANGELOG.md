@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Cli.usage_status(n)` on the root command ends its usage errors with exit
+  status `n`, from 1 to 255, instead of 2, for wrappers such as `timeout`
+  that keep the low codes for their child; `Cli.usage_code(c)` returns the
+  status. P10 and P11 now range over it (#45).
+
 ## 0.2.0.0
 
 ### Added

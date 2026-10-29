@@ -1096,6 +1096,7 @@ type Item is Data:
   Requires{id: String}
   Group{name: String}
   Builtin{}
+  UsageStatus{code: U32}
 
 type Cmd is Data:
   Cmd{name: String, about: String, items: List<&2, Item>}
@@ -1114,6 +1115,7 @@ type Problem is Data:
   BadChoices{at: String, id: String}
   BadChoice{at: String, id: String, value: String}
   NeedBare{at: String, id: String}
+  BadStatus{at: String, code: U32}
   DecodeBug{at: String, msg: String}
 
 def cmd(name: String, about: String, items: List<&2, Item>) -> Cmd:
@@ -1127,6 +1129,10 @@ def arg(usage: String, help: String, items: List<&2, Item>) -> Item:
 
 def version(value: String) -> Item:
   Version{value}
+
+# A root's exit status for its usage errors in place of 2 (§8.7).
+def usage_status(code: U32) -> Item:
+  UsageStatus{code}
 
 def alias(name: String) -> Item:
   Alias{name}
@@ -1512,6 +1518,7 @@ def misplaced_attr_name(attr: Item, +kind: UsageKind) ->
     case External{}: Some{"external"}
     case Exclusive{group}: Some{"exclusive"}
     case NeedOne{group}: Some{"need_one"}
+    case UsageStatus{code}: Some{"usage_status"}
     case _: None{}
 
 def maybe_misplaced(found: Maybe<&2, String>, at: String) ->
@@ -1577,6 +1584,7 @@ def command_attr_name(attr: Item, root: Bool) -> Maybe<&2, String>:
     case Requires{id}: Some{"requires"}
     case Group{name}: Some{"group"}
     case Builtin{}: None{}
+    case UsageStatus{code}: bad_attr(Bool.not(root), "usage_status")
 
 def has_rest(items: List<&2, Item>) -> Bool:
   match items:
@@ -2345,6 +2353,20 @@ def lint(items: List<&2, LintItem>, +at: String, +ids: List<&2, String>,
         lint(tail, at, ids, seen, inherited, optional, variadic,
           version, root))
 
+# A usage_status code that is an exit status, from 1 to 255.
+def status_fits(+code: U32) -> Bool:
+  Bool.and(U32.is_le(1, code), U32.is_le(code, 255))
+
+# Each usage_status among a root's items whose code does not fit.
+def status_issues(items: List<&2, Item>, +at: String) -> List<&2, Problem>:
+  match items:
+    case Nil{}: Nil{}
+    case UsageStatus{+code} <> tail:
+      List.append(&2, Problem,
+        when_problem(Bool.not(status_fits(code)), BadStatus{at, code}),
+        status_issues(tail, at))
+    case head <> tail: status_issues(tail, at)
+
 def problems(c: Cmd) -> List<&2, Problem>:
   match c:
     case Cmd{+name, about, +items}:
@@ -2352,6 +2374,7 @@ def problems(c: Cmd) -> List<&2, Problem>:
       List.concat(&2, Problem, [
         when_problem(Bool.not(valid_command_name(name)), BadName{name, name}),
         command_body_issues(name, name, about, items, has_pos_item(linted)),
+        status_issues(items, name),
         lint(linted, name, scope_ids(linted), Nil{}, global_entries(linted),
           False{}, False{}, has_version_item(items), True{}),
       ])
@@ -6075,8 +6098,8 @@ def fault_err(t: Term, fault: ScanFault, +c: Cmd, +path: List<&2, String>,
 
 # The E02 page eval prints for an unknown subcommand name at path, with its
 # similar names and the scope's usage, in t's stderr colors and width. An app
-# with external() prints it, and exits 2 as eval does, when no plugin answers
-# to name.
+# with external() prints it, and exits usage_code(c) as eval does, when no
+# plugin answers to name.
 def unknown_text(c: Cmd, path: List<&2, String>, name: String,
     t: Term) -> String:
   fault_err(t, E02{name}, c, path, [])
@@ -6122,6 +6145,9 @@ def problem_line(p: Problem) -> String:
     case NeedBare{at, id}:
       String.concat(["  ", at, ": '", id,
         "' needs [=<V>] and bare() together, with no short"])
+    case BadStatus{at, code}:
+      String.concat(["  ", at, ": usage_status(", U32.show(code),
+        ") is not an exit status from 1 to 255"])
     case DecodeBug{at, msg}:
       String.concat(["  ", at, ": decoder bug: ", msg])
 
@@ -7626,6 +7652,18 @@ def script(c: Cmd, s: Shell) -> String:
 
 # ---- Outcome (§8.7, V1-V6) ----
 
+# The code of the first usage_status among items when it fits, else 2.
+def status_code(items: List<&2, Item>) -> U32:
+  match items:
+    case Nil{}: 2
+    case UsageStatus{+code} <> tail: Bool.pick(U32, status_fits(code), code, 2)
+    case head <> tail: status_code(tail)
+
+# The exit status of c's usage errors: its root's usage_status, else 2.
+def usage_code(c: Cmd) -> U32:
+  match c:
+    case Cmd{name, about, items}: status_code(items)
+
 type Outcome is Data:
   Shown{code: U32, out: String, err: String}
   Matched{m: Matches}
@@ -7682,9 +7720,10 @@ def outcome_parse(result: ParseResult, +c: Cmd, h: Host,
       Shown{0, String.concat([cmd_name(c), " ", find_version(cmd_items(c)),
         "\n"]), ""}
     case SummaryRequired{}:
-      Shown{2, "", summary_err(term(c, h, argv), view_of(c, []))}
+      Shown{usage_code(c), "", summary_err(term(c, h, argv), view_of(c, []))}
     case Rejected{path, fault}:
-      Shown{2, "", fault_err(term(c, h, argv), fault, c, path, argv)}
+      Shown{usage_code(c), "", fault_err(term(c, h, argv), fault, c, path,
+        argv)}
 
 def outcome_lint(found: List<&2, Problem>, +c: Cmd, +h: Host,
     +argv: List<&2, String>) -> Outcome:
@@ -7738,9 +7777,10 @@ def faulted(-A: Type, f: Fault, +cmd: Cmd, path: List<&2, String>, h: Host,
   match f:
     case Bug{msg}: Quit{70, "", String.concat(["bug: ", msg, "\n"])}
     case Usage{msg}:
-      Quit{2, "", usage_err(term(cmd, h, argv), msg, view_of(cmd, path))}
+      Quit{usage_code(cmd), "", usage_err(term(cmd, h, argv), msg,
+        view_of(cmd, path))}
 
-# V7: Done is Go with term's decisions; a fault exits 70 or 2.
+# V7: Done is Go with term's decisions; a fault exits 70 or usage_code.
 def decoded(-A: Type, d: Dec(A), cmd: Cmd, path: List<&2, String>, h: Host,
     argv: List<&2, String>) -> Step<A>:
   match d:

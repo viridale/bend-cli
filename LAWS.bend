@@ -8,8 +8,10 @@
 # what route's selected callback returns. P7 and P8 fix term's colors;
 # G-HELP, G-ERR, G-TIP and G-COLOR fix outcome's bytes for V1-V5. P10 and
 # P11 fix eval's codes and streams for every decoder through eval_with,
-# which eval calls (eval_bridge); the M5 goldens fix eval's bytes and Go
-# values for chosen cases. P16 makes eval_linted on the Linted that linted
+# which eval calls (eval_bridge), with usage errors at the spec's
+# usage_code; P24 makes that code 1 to 255, and 2 unless the root sets
+# usage_status. The M5 goldens fix eval's bytes and Go values for chosen
+# cases. P16 makes eval_linted on the Linted that linted
 # returns answer as eval does, P17 fixes its success and failure answers, and
 # p10_linted and p11_linted carry P10 and P11 to eval_linted on every
 # Linted (eval_linted_bridge). P18 fixes the first-match lookups (field_find,
@@ -3449,6 +3451,35 @@ law g_lint_lines:
     "'nope' is not an argument of 'tool'"})
     == "  tool: decoder bug: 'nope' is not an argument of 'tool'" : String}
 
+# G-LINT BadStatus: usage_status takes an exit status from 1 to 255, and
+# lint checks each one at the root, in item order. On a subcommand or an arg
+# it is Misplaced, whatever its code. Two at the root pass lint; the first
+# sets usage_code (G-ERR).
+law g_lint_status:
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.usage_status(1),
+    Cli.usage_status(255),
+  ])) == [] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [Cli.usage_status(0)]))
+    == [Cli.BadStatus{"tool", 0}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [Cli.usage_status(256)]))
+    == [Cli.BadStatus{"tool", 256}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("-v", "Verbose", []),
+    Cli.usage_status(0),
+    Cli.arg("-v", "Verbose again", []),
+  ])) == [Cli.BadStatus{"tool", 0}, Cli.Dup{"tool", "-v"}]
+    : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.sub("run", "Run", [Cli.usage_status(0)]),
+  ])) == [Cli.Misplaced{"tool run", "usage_status"}] : List<&2, Cli.Problem>} &
+  {Cli.problems(Cli.cmd("tool", "Tool", [
+    Cli.arg("--ok", "Accept", [Cli.usage_status(125)]),
+  ])) == [Cli.Misplaced{"tool", "usage_status"}] : List<&2, Cli.Problem>} &
+  {Cli.problem_line(Cli.BadStatus{"tool", 256})
+    == "  tool: usage_status(256) is not an exit status from 1 to 255"
+    : String}
+
 # G-LINT: a default on a flag or count is Misplaced, and also a BadDefault
 # when its value is not a bool or a nat.
 law g_lint_flag_default:
@@ -3473,39 +3504,63 @@ law g_lint_flag_default:
 # eval(~A, ~decode, c, h, argv) = eval_with(A, decode, c, h, argv), so P10
 # and P11, proved of eval_with, carry to every eval; eval_bridge checks it.
 
-# P10: for every decoder, eval_with answers Go, or Quit with code 0, 2 or 70.
-def p10_code(-A: Type, s: Cli.Step<A>) -> Bool:
+# P24: usage_code is an exit status from 1 to 255: 2, or the code of a
+# usage_status among the root's items. P10 and P11 range over it, so a spec
+# whose root sets none ends a usage error with 2.
+def status_named(items: List<&2, Cli.Item>, +code: U32) -> Bool:
+  match items:
+    case Nil{}: False{}
+    case Cli.UsageStatus{n} <> tail:
+      Bool.or(U32.is_eq(n, code), status_named(tail, code))
+    case head <> tail: status_named(tail, code)
+
+def p24_code(+code: U32, items: List<&2, Cli.Item>) -> Bool:
+  Bool.and(Bool.and(U32.is_le(1, code), U32.is_le(code, 255)),
+    Bool.or(U32.is_eq(code, 2), status_named(items, code)))
+
+law p24:
+  for name: String
+  for about: String
+  for +items: List<&2, Cli.Item>
+  {p24_code(Cli.usage_code(Cli.cmd(name, about, items)), items) == True{}
+    : Bool}
+
+# P10: for every decoder, eval_with answers Go, or Quit with code 0, 70 or
+# the spec's usage_code.
+def p10_code(-A: Type, s: Cli.Step<A>, usage: U32) -> Bool:
   match s:
     case Cli.Go{value, term}: True{}
     case Cli.Quit{+code, out, err}:
       Bool.or(U32.is_eq(code, 0),
-        Bool.or(U32.is_eq(code, 2), U32.is_eq(code, 70)))
+        Bool.or(U32.is_eq(code, usage), U32.is_eq(code, 70)))
 
 law p10:
   for -A: Type
   for decode: @+m: Cli.Matches -> Cli.Dec(A)
-  for c: Cli.Cmd
+  for +c: Cli.Cmd
   for h: Cli.Host
   for argv: List<&2, String>
-  {p10_code(A, Cli.eval_with(A, decode, c, h, argv)) == True{} : Bool}
+  {p10_code(A, Cli.eval_with(A, decode, c, h, argv), Cli.usage_code(c))
+    == True{} : Bool}
 
 # P11: for every decoder, eval_with's exit 0 leaves stderr empty, and its
-# exits 2 and 70 leave stdout empty.
-def p11_streams(-A: Type, s: Cli.Step<A>) -> Bool:
+# exits 70 and the spec's usage_code leave stdout empty.
+def p11_streams(-A: Type, s: Cli.Step<A>, usage: U32) -> Bool:
   match s:
     case Cli.Go{value, term}: True{}
     case Cli.Quit{+code, out, err}:
       Bool.and(Bool.or(Bool.not(U32.is_eq(code, 0)), String.is_empty(err)),
-        Bool.or(Bool.not(Bool.or(U32.is_eq(code, 2), U32.is_eq(code, 70))),
-          String.is_empty(out)))
+        Bool.or(Bool.not(Bool.or(U32.is_eq(code, usage),
+          U32.is_eq(code, 70))), String.is_empty(out)))
 
 law p11:
   for -A: Type
   for decode: @+m: Cli.Matches -> Cli.Dec(A)
-  for c: Cli.Cmd
+  for +c: Cli.Cmd
   for h: Cli.Host
   for argv: List<&2, String>
-  {p11_streams(A, Cli.eval_with(A, decode, c, h, argv)) == True{} : Bool}
+  {p11_streams(A, Cli.eval_with(A, decode, c, h, argv), Cli.usage_code(c))
+    == True{} : Bool}
 
 # eval is eval_with with its template arguments as values: with keep for
 # every spec, and with pkg's decoder.
@@ -3579,23 +3634,28 @@ law p17:
     : List<&2, Cli.Problem>}
 
 # P10 and P11 hold of eval_linted_with for every Linted, including one
-# built from a spec that lint rejects.
+# built from a spec that lint rejects, against its spec's usage_code.
+def linted_usage(l: Cli.Linted) -> U32:
+  match l:
+    case Cli.Linted{c}: Cli.usage_code(c)
+
 law p10_linted:
   for -A: Type
   for decode: @+m: Cli.Matches -> Cli.Dec(A)
-  for l: Cli.Linted
+  for +l: Cli.Linted
   for h: Cli.Host
   for argv: List<&2, String>
-  {p10_code(A, Cli.eval_linted_with(A, decode, l, h, argv)) == True{} : Bool}
+  {p10_code(A, Cli.eval_linted_with(A, decode, l, h, argv), linted_usage(l))
+    == True{} : Bool}
 
 law p11_linted:
   for -A: Type
   for decode: @+m: Cli.Matches -> Cli.Dec(A)
-  for l: Cli.Linted
+  for +l: Cli.Linted
   for h: Cli.Host
   for argv: List<&2, String>
-  {p11_streams(A, Cli.eval_linted_with(A, decode, l, h, argv))
-    == True{} : Bool}
+  {p11_streams(A, Cli.eval_linted_with(A, decode, l, h, argv),
+    linted_usage(l)) == True{} : Bool}
 
 # eval_linted is eval_linted_with with its template arguments as values:
 # with keep, and with pkg's decoder, for every Linted.
@@ -4460,6 +4520,80 @@ law g_err_decode:
   ])} : Cli.Step<String>} &
   {newline_run(["--bug"]) ==
     Cli.Quit{70, "", "bug: --bug was given\n\n"} : Cli.Step<String>}
+
+# G-ERR: a root's usage_status(n) ends each of eval's usage errors with n,
+# with the text it has without one: a scan error at the root or in a
+# subcommand, the summary of a root that needs a subcommand, and a decoder's
+# Usage fault. Help still exits 0, and a decoder's Bug and a lint failure
+# 70. usage_code is the root's first usage_status when its code is from 1
+# to 255, else 2; one on a subcommand or an arg is not the root's.
+def coded(items: List<&2, Cli.Item>) -> Cli.Cmd:
+  Cli.cmd("tool", "Tool", List.append(&2, Cli.Item, items, [
+    Cli.arg("--ok", "Accept", [Cli.global()]),
+    Cli.arg("--bug", "Fail as a defect", [Cli.global()]),
+    Cli.sub("deep", "Deep", []),
+  ]))
+
+def coded_run(items: List<&2, Cli.Item>,
+    argv: List<&2, String>) -> Cli.Step<String>:
+  Cli.eval(~String, ~strict_decode, coded(items), host(), argv)
+
+law g_err_status:
+  {Cli.usage_code(coded([])) == 2 : U32} &
+  {Cli.usage_code(coded([Cli.usage_status(125)])) == 125 : U32} &
+  {Cli.usage_code(coded([Cli.usage_status(1), Cli.usage_status(125)])) == 1
+    : U32} &
+  {Cli.usage_code(coded([Cli.usage_status(255)])) == 255 : U32} &
+  {Cli.usage_code(coded([Cli.usage_status(0)])) == 2 : U32} &
+  {Cli.usage_code(coded([Cli.usage_status(256), Cli.usage_status(125)]))
+    == 2 : U32} &
+  {Cli.usage_code(Cli.cmd("tool", "Tool", [
+    Cli.sub("deep", "Deep", [Cli.usage_status(125)]),
+  ])) == 2 : U32} &
+  {Cli.usage_code(Cli.cmd("tool", "Tool", [
+    Cli.arg("--ok", "Accept", [Cli.usage_status(125)]),
+  ])) == 2 : U32} &
+  {coded_run([Cli.usage_status(125)], []) == Cli.Quit{125, "", page([
+    "Tool",
+    "",
+    "Usage: tool [OPTIONS] <COMMAND>",
+    "",
+    "Commands:",
+    "  deep        Deep",
+    "  help        Print this message or the help of the given subcommand(s)",
+    "",
+    "Options:",
+    "      --ok    Accept",
+    "      --bug   Fail as a defect",
+    "  -h, --help  Print help",
+  ])} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(125)], ["--bogus"]) ==
+    Cli.Quit{125, "", error_text("unexpected argument '--bogus' found", [],
+      "tool [OPTIONS] <COMMAND>")} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(125)], ["deep", "--bogus"]) ==
+    Cli.Quit{125, "", error_text("unexpected argument '--bogus' found", [],
+      "tool deep [OPTIONS]")} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(125)], ["deep"]) ==
+    Cli.Quit{125, "", error_text("pass --ok to accept", [],
+      "tool deep [OPTIONS]")} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(125)], ["deep", "--bug"]) ==
+    Cli.Quit{70, "", "bug: --bug was given\n"} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(125)], ["deep", "--ok"]) ==
+    Cli.Go{"accepted", Cli.Term{False{}, False{}, 80n}} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(125)], ["deep", "-h"]) == Cli.Quit{0, page([
+    "Deep",
+    "",
+    "Usage: tool deep [OPTIONS]",
+    "",
+    "Options:",
+    "      --ok    Accept",
+    "      --bug   Fail as a defect",
+    "  -h, --help  Print help",
+  ]), ""} : Cli.Step<String>} &
+  {coded_run([Cli.usage_status(0)], ["--bogus"]) == Cli.Quit{70, "", page([
+    "bug: invalid command-line definition",
+    "  tool: usage_status(0) is not an exit status from 1 to 255",
+  ])} : Cli.Step<String>}
 
 # G-LINT: lint comes before every rule, so a bad spec exits 70 even for
 # --help, --version or empty argv; the text is never colored.

@@ -3402,6 +3402,7 @@ def alias_go(items: List<&2, Cli.Item>, +q: String, found: Bool) ->
     case Cli.Requires{x0} <> tail True{}: {==}
     case Cli.Group{x0} <> tail True{}: {==}
     case Cli.Builtin{} <> tail True{}: {==}
+    case Cli.UsageStatus{x0} <> tail True{}: {==}
     case Cli.Alias{+name} <> tail False{}:
       %alias_go(tail, q, Cli.same_text(name, q)) :
         {Bool.or(String.eq(name, q), Laws.aliases_name(tail, q)) == _
@@ -3437,6 +3438,7 @@ def alias_go(items: List<&2, Cli.Item>, +q: String, found: Bool) ->
     case Cli.Requires{x0} <> tail False{}: alias_go(tail, q, False{})
     case Cli.Group{x0} <> tail False{}: alias_go(tail, q, False{})
     case Cli.Builtin{} <> tail False{}: alias_go(tail, q, False{})
+    case Cli.UsageStatus{x0} <> tail False{}: alias_go(tail, q, False{})
 
 def alias_pick(b: Bool, -name: String, -children: List<&2, Cli.Item>,
     -rest: Maybe<&2, Cli.SubFound>) ->
@@ -3517,6 +3519,7 @@ def sub_go(items: List<&2, Cli.Item>, +q: String,
     case Cli.Requires{x0} <> tail None{}: sub_go(tail, q, None{})
     case Cli.Group{x0} <> tail None{}: sub_go(tail, q, None{})
     case Cli.Builtin{} <> tail None{}: sub_go(tail, q, None{})
+    case Cli.UsageStatus{x0} <> tail None{}: sub_go(tail, q, None{})
 
 def Laws.p18_sub(items, query):
   %sub_go(items, query, None{}) :
@@ -3586,6 +3589,7 @@ def arg_go(items: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0} <> tail None{}: arg_go(tail, id, None{})
     case Cli.Group{x0} <> tail None{}: arg_go(tail, id, None{})
     case Cli.Builtin{} <> tail None{}: arg_go(tail, id, None{})
+    case Cli.UsageStatus{x0} <> tail None{}: arg_go(tail, id, None{})
 
 def Laws.p18_arg(items, id):
   %arg_go(items, id, None{}) :
@@ -3627,6 +3631,7 @@ def spec_some(items: List<&2, Cli.Item>, +id: String, -h: Cli.ArgInfo) ->
     case Cli.Requires{x0} <> tail: {==}
     case Cli.Group{x0} <> tail: {==}
     case Cli.Builtin{} <> tail: {==}
+    case Cli.UsageStatus{x0} <> tail: {==}
 
 # Arms: python3 tools/ctorarms.py --prefix Cli. --skip Sub cli.bend Item '$P <> tail Some{h}' '{==}'
 # Arms: python3 tools/ctorarms.py --prefix Cli. --skip Arg cli.bend Item '$P <> tail None{}' 'spec_go(tail, id, None{})'
@@ -3664,6 +3669,7 @@ def spec_go(items: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0} <> tail Some{h}: {==}
     case Cli.Group{x0} <> tail Some{h}: {==}
     case Cli.Builtin{} <> tail Some{h}: {==}
+    case Cli.UsageStatus{x0} <> tail Some{h}: {==}
     case Cli.Arg{+usage, help, +attrs} <> tail None{}:
       spec_go(tail, id, Bool.pick(Maybe<&2, Cli.ArgInfo>,
         Cli.same_text(Cli.info_id(Cli.arg_info(usage, attrs)), id),
@@ -3694,6 +3700,7 @@ def spec_go(items: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0} <> tail None{}: spec_go(tail, id, None{})
     case Cli.Group{x0} <> tail None{}: spec_go(tail, id, None{})
     case Cli.Builtin{} <> tail None{}: spec_go(tail, id, None{})
+    case Cli.UsageStatus{x0} <> tail None{}: spec_go(tail, id, None{})
 
 def Laws.p19_arg(items, id):
   spec_go(items, id, None{})
@@ -3813,6 +3820,7 @@ def global_comm_go(items: List<&2, Cli.Item>, +all: List<&2, Cli.Item>) ->
     case Cli.Requires{x0} <> tail: global_comm_go(tail, all)
     case Cli.Group{x0} <> tail: global_comm_go(tail, all)
     case Cli.Builtin{} <> tail: global_comm_go(tail, all)
+    case Cli.UsageStatus{x0} <> tail: global_comm_go(tail, all)
 
 def global_comm(+items: List<&2, Cli.Item>) ->
     {Cli.spec_items(Cli.global_items(items))
@@ -4011,6 +4019,13 @@ def spec_append(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>) ->
             Cli.spec_items(ys))
           == Cli.SpecOther{Cli.Builtin{}} <> _ : List<&2, Cli.SpecItem>}
       {==}
+    case Cli.UsageStatus{x0} <> tail:
+      %spec_append(tail, ys) :
+        {Cli.SpecOther{Cli.UsageStatus{x0}}
+          <> List.append(&2, Cli.SpecItem, Cli.spec_items(tail),
+            Cli.spec_items(ys))
+          == Cli.SpecOther{Cli.UsageStatus{x0}} <> _ : List<&2, Cli.SpecItem>}
+      {==}
 
 def Laws.p19_inherit(items, globals):
   %global_comm(items) :
@@ -4061,6 +4076,7 @@ def contains_aliases(items: List<&2, Cli.Item>, +q: String) ->
     case Cli.Requires{x0} <> tail: contains_aliases(tail, q)
     case Cli.Group{x0} <> tail: contains_aliases(tail, q)
     case Cli.Builtin{} <> tail: contains_aliases(tail, q)
+    case Cli.UsageStatus{x0} <> tail: contains_aliases(tail, q)
 
 def sub_go_some(items: List<&2, Cli.Item>, +q: String, -h: Cli.SubFound) ->
     {Some{h} == Cli.find_sub_go(items, q, Some{h})
@@ -4102,6 +4118,7 @@ def subkey_some(items: List<&2, Cli.Item>, +q: String, -k: Cli.SubKey) ->
     case Cli.Requires{x0} <> tail: subkey_some(tail, q, k)
     case Cli.Group{x0} <> tail: subkey_some(tail, q, k)
     case Cli.Builtin{} <> tail: subkey_some(tail, q, k)
+    case Cli.UsageStatus{x0} <> tail: subkey_some(tail, q, k)
 
 def subkey_hit(-name: String, -children: List<&2, Cli.Item>,
     +tail: List<&2, Cli.Item>, +q: String) ->
@@ -4195,6 +4212,7 @@ def subkey_go(items: List<&2, Cli.Item>, +q: String) ->
     case Cli.Requires{x0} <> tail: subkey_go(tail, q)
     case Cli.Group{x0} <> tail: subkey_go(tail, q)
     case Cli.Builtin{} <> tail: subkey_go(tail, q)
+    case Cli.UsageStatus{x0} <> tail: subkey_go(tail, q)
 
 def Laws.p19_sub(items, globals, path, query):
   subkey_go(items, query)
@@ -4739,6 +4757,7 @@ def option_go(items: List<&2, Cli.Item>, +q: String) ->
     case Cli.Requires{x0} <> tail: option_go(tail, q)
     case Cli.Group{x0} <> tail: option_go(tail, q)
     case Cli.Builtin{} <> tail: option_go(tail, q)
+    case Cli.UsageStatus{x0} <> tail: option_go(tail, q)
 
 def Laws.p19_option(items, globals, path, query):
   %find_lookup(List.append(&2, Cli.OptKey,
@@ -5499,6 +5518,11 @@ def route_go(items: List<&2, Cli.Item>, +text: String) ->
         {Cli.key_go(tail, text, Cli.key_step(tail, text))
           == Laws.command_words(_, Some{Cli.Builtin{} <> tail}) : Bool}
       split_tail(text, tail, route_go(tail, text))
+    case Cli.UsageStatus{x0} <> +tail:
+      %split_cut(text) :
+        {Cli.key_go(tail, text, Cli.key_step(tail, text))
+          == Laws.command_words(_, Some{Cli.UsageStatus{x0} <> tail}) : Bool}
+      split_tail(text, tail, route_go(tail, text))
 
 def Laws.p20(key, items):
   match key:
@@ -5877,6 +5901,7 @@ def aln(items: List<&2, Cli.Item>, +id: String) ->
     case Cli.Requires{x0} <> tail: aln(tail, id)
     case Cli.Group{x0} <> tail: aln(tail, id)
     case Cli.Builtin{} <> tail: aln(tail, id)
+    case Cli.UsageStatus{x0} <> tail: aln(tail, id)
 
 # The sample field field_find picks holds the values the sample gives the
 # arg find_arg_info picks, or none when there is no such arg.
@@ -6727,6 +6752,7 @@ def def_place(attrs: List<&2, Cli.Item>, +kind: Cli.UsageKind, +at: String,
     case Cli.Requires{x0} <> +tail: def_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Requires{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
     case Cli.Group{x0} <> +tail: def_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Group{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
     case Cli.Builtin{} <> +tail: def_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Builtin{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.UsageStatus{x0} <> +tail: def_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.UsageStatus{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
 
 def delim_place(attrs: List<&2, Cli.Item>, +kind: Cli.UsageKind, +at: String,
     e: {Cli.placement_issues(attrs, kind, at) == Nil{}
@@ -6765,6 +6791,7 @@ def delim_place(attrs: List<&2, Cli.Item>, +kind: Cli.UsageKind, +at: String,
     case Cli.Requires{x0} <> +tail: delim_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Requires{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
     case Cli.Group{x0} <> +tail: delim_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Group{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
     case Cli.Builtin{} <> +tail: delim_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Builtin{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.UsageStatus{x0} <> +tail: delim_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.UsageStatus{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
 
 def issue_none(required: Bool, issue: Maybe<&2, Cli.Bad>, -value: String,
     -id: String, -at: String,
@@ -6990,6 +7017,7 @@ def deep(items: List<&2, Cli.Item>, +at: String, +ids: List<&2, String>,
     case Cli.Requires{x0} <> +tail: deep(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Requires{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
     case Cli.Group{x0} <> +tail: deep(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Group{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
     case Cli.Builtin{} <> +tail: deep(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Builtin{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.UsageStatus{x0} <> +tail: deep(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.UsageStatus{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
 
 # problems' list, as written there.
 def top_list(+name: String, about: String, +items: List<&2, Cli.Item>) ->
@@ -7000,6 +7028,7 @@ def top_list(+name: String, about: String, +items: List<&2, Cli.Item>) ->
       Cli.BadName{name, name}),
     Cli.command_body_issues(name, name, about, items,
       Cli.has_pos_item(linted)),
+    Cli.status_issues(items, name),
     Cli.lint(linted, name, Cli.scope_ids(linted), Nil{},
       Cli.global_entries(linted), False{}, False{},
       Cli.has_version_item(items), True{}),
@@ -7010,9 +7039,10 @@ def top_take(+name: String, +about: String, +items: List<&2, Cli.Item>,
   (p1, r1) = parts
   (p2, r2) = r1
   (p3, r3) = r2
+  (p4, r4) = r3
   deep(items, name, Cli.scope_ids(Cli.lint_items(items)), Nil{},
     Cli.global_entries(Cli.lint_items(items)), False{}, False{},
-    Cli.has_version_item(items), True{}, p3)
+    Cli.has_version_item(items), True{}, p4)
 
 def lint_clean(+name: String, +about: String, +items: List<&2, Cli.Item>,
     e: {Cli.problems(Cli.Cmd{name, about, items}) == Nil{}
@@ -7057,6 +7087,7 @@ def deep_append(a: List<&2, Cli.Item>, +b: List<&2, Cli.Item>,
     case Cli.Requires{x0} <> +tail: deep_append(tail, b, da, db)
     case Cli.Group{x0} <> +tail: deep_append(tail, b, da, db)
     case Cli.Builtin{} <> +tail: deep_append(tail, b, da, db)
+    case Cli.UsageStatus{x0} <> +tail: deep_append(tail, b, da, db)
 
 # A rule global_go may keep adds no arg.
 def deep_rule_pick(c: Bool, -r: Cli.Item, -rest: List<&2, Cli.Item>,
@@ -7115,6 +7146,7 @@ def deep_globals_go(items: List<&2, Cli.Item>, +all: List<&2, Cli.Item>,
     case Cli.Requires{x0} <> +tail: deep_globals_go(tail, all, di)
     case Cli.Group{x0} <> +tail: deep_globals_go(tail, all, di)
     case Cli.Builtin{} <> +tail: deep_globals_go(tail, all, di)
+    case Cli.UsageStatus{x0} <> +tail: deep_globals_go(tail, all, di)
 
 def deep_globals(+items: List<&2, Cli.Item>, di: DeepClean(items)) ->
     DeepClean(Cli.global_items(items)):
@@ -7177,6 +7209,7 @@ def scope_sub_step(item: Cli.Item, +tail: List<&2, Cli.Item>, +query: String,
     case Cli.Requires{x0}: ih(None{}, Unit{}, di)
     case Cli.Group{x0}: ih(None{}, Unit{}, di)
     case Cli.Builtin{}: ih(None{}, Unit{}, di)
+    case Cli.UsageStatus{x0}: ih(None{}, Unit{}, di)
 
 def deep_sub_go(items: List<&2, Cli.Item>, found: Maybe<&2, Cli.SubFound>,
     +query: String, di: DeepClean(items), df: SubClean(found)) ->
@@ -7292,6 +7325,7 @@ def dup_deep(-C: Type, items: List<&2, Cli.Item>, d: DeepClean(items),
     case Cli.Requires{x0} <> +tail: dup_deep(C, tail, d, k)
     case Cli.Group{x0} <> +tail: dup_deep(C, tail, d, k)
     case Cli.Builtin{} <> +tail: dup_deep(C, tail, d, k)
+    case Cli.UsageStatus{x0} <> +tail: dup_deep(C, tail, d, k)
 
 def deep_scope(path: List<&2, String>, +items: List<&2, Cli.Item>,
     +globals: List<&2, Cli.Item>, di: DeepClean(items),
@@ -7361,6 +7395,7 @@ def find_step(item: Cli.Item, +tail: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0}: ih(None{}, Unit{}, di)
     case Cli.Group{x0}: ih(None{}, Unit{}, di)
     case Cli.Builtin{}: ih(None{}, Unit{}, di)
+    case Cli.UsageStatus{x0}: ih(None{}, Unit{}, di)
 
 def find_clean(items: List<&2, Cli.Item>, found: Maybe<&2, Cli.ArgInfo>,
     +id: String, di: DeepClean(items), df: FoundClean(found)) ->
@@ -8824,6 +8859,7 @@ def acc_off(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
     case Cli.Requires{x0} <> tail: acc_off(tail, e, id, eo)
     case Cli.Group{x0} <> tail: acc_off(tail, e, id, eo)
     case Cli.Builtin{} <> tail: acc_off(tail, e, id, eo)
+    case Cli.UsageStatus{x0} <> tail: acc_off(tail, e, id, eo)
 
 # A list with no arg of id accepts every event.
 def acc_none(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
@@ -8865,6 +8901,7 @@ def acc_none(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
     case Cli.Requires{x0} <> tail: acc_none(tail, e, id, en)
     case Cli.Group{x0} <> tail: acc_none(tail, e, id, en)
     case Cli.Builtin{} <> tail: acc_none(tail, e, id, en)
+    case Cli.UsageStatus{x0} <> tail: acc_none(tail, e, id, en)
 
 def has_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String) ->
     {has(List.append(&2, Cli.Item, xs, ys), id)
@@ -8912,6 +8949,7 @@ def has_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String) ->
     case Cli.Requires{x0} <> tail: has_app(tail, ys, id)
     case Cli.Group{x0} <> tail: has_app(tail, ys, id)
     case Cli.Builtin{} <> tail: has_app(tail, ys, id)
+    case Cli.UsageStatus{x0} <> tail: has_app(tail, ys, id)
 
 def has_app_f(+xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String,
     ex: {has(xs, id) == False{} : Bool}, ey: {has(ys, id) == False{} : Bool})
@@ -9024,6 +9062,7 @@ def am1_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
     case Cli.Group{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
     case Cli.Builtin{} <> tail: am1_app(tail, ys, id, ax, ay, d)
+    case Cli.UsageStatus{x0} <> tail: am1_app(tail, ys, id, ax, ay, d)
 
 def has_glob_pick(g: Bool, +usage: String, -help: String,
     +attrs: List<&2, Cli.Item>, +gt: List<&2, Cli.Item>, +id: String,
@@ -9085,6 +9124,7 @@ def has_glob_go(L: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0} <> tail: has_glob_go(tail, all, id, e)
     case Cli.Group{x0} <> tail: has_glob_go(tail, all, id, e)
     case Cli.Builtin{} <> tail: has_glob_go(tail, all, id, e)
+    case Cli.UsageStatus{x0} <> tail: has_glob_go(tail, all, id, e)
 
 def has_glob(+L: List<&2, Cli.Item>, +id: String,
     +e: {has(L, id) == False{} : Bool}) ->
@@ -9167,6 +9207,7 @@ def am1_glob_go(L: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +id: String,
     case Cli.Requires{x0} <> tail: am1_glob_go(tail, all, id, a)
     case Cli.Group{x0} <> tail: am1_glob_go(tail, all, id, a)
     case Cli.Builtin{} <> tail: am1_glob_go(tail, all, id, a)
+    case Cli.UsageStatus{x0} <> tail: am1_glob_go(tail, all, id, a)
 
 def am1_glob(+L: List<&2, Cli.Item>, +id: String,
     +a: {am1(L, id) == True{} : Bool}) ->
@@ -9211,6 +9252,7 @@ def nonpos_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>,
     case Cli.Requires{x0} <> tail: nonpos_app(tail, ys, nx, ny)
     case Cli.Group{x0} <> tail: nonpos_app(tail, ys, nx, ny)
     case Cli.Builtin{} <> tail: nonpos_app(tail, ys, nx, ny)
+    case Cli.UsageStatus{x0} <> tail: nonpos_app(tail, ys, nx, ny)
 
 def acc_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>,
     +e: Cli.ScanEvent, +id: String, +ax: {acc(xs, e, id) == True{} : Bool},
@@ -9251,6 +9293,7 @@ def acc_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>,
     case Cli.Requires{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
     case Cli.Group{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
     case Cli.Builtin{} <> tail: acc_app(tail, ys, e, id, ax, ay)
+    case Cli.UsageStatus{x0} <> tail: acc_app(tail, ys, e, id, ax, ay)
 
 def acc_glob_pick(g: Bool, +usage: String, -help: String,
     +attrs: List<&2, Cli.Item>, +gt: List<&2, Cli.Item>, +e: Cli.ScanEvent,
@@ -9310,6 +9353,7 @@ def acc_glob_go(L: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +e: Cli.ScanEve
     case Cli.Requires{x0} <> tail: acc_glob_go(tail, all, e, id, a)
     case Cli.Group{x0} <> tail: acc_glob_go(tail, all, e, id, a)
     case Cli.Builtin{} <> tail: acc_glob_go(tail, all, e, id, a)
+    case Cli.UsageStatus{x0} <> tail: acc_glob_go(tail, all, e, id, a)
 
 def acc_glob(+L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
     +a: {acc(L, e, id) == True{} : Bool}) ->
@@ -9464,6 +9508,7 @@ def ref_has(L: List<&2, Cli.Item>, +id: String) ->
     case Cli.Requires{x0} <> tail: ref_has(tail, id)
     case Cli.Group{x0} <> tail: ref_has(tail, id)
     case Cli.Builtin{} <> tail: ref_has(tail, id)
+    case Cli.UsageStatus{x0} <> tail: ref_has(tail, id)
 
 def ref_none_m(m: Maybe<&2, Cli.ArgInfo>, -h: Bool,
     e: {Maybe.is_some(&2, Cli.ArgInfo, m) == h : Bool},
@@ -9541,6 +9586,7 @@ def ref_app(xs: List<&2, Cli.Item>, +ys: List<&2, Cli.Item>, +id: String) ->
     case Cli.Requires{x0} <> tail: ref_app(tail, ys, id)
     case Cli.Group{x0} <> tail: ref_app(tail, ys, id)
     case Cli.Builtin{} <> tail: ref_app(tail, ys, id)
+    case Cli.UsageStatus{x0} <> tail: ref_app(tail, ys, id)
 
 def acc_ref_pick(c: Bool, +info: Cli.ArgInfo, -rest: Maybe<&2, Cli.ArgInfo>,
     +e: Cli.ScanEvent, +id: String, -r: Cli.ArgInfo,
@@ -9601,6 +9647,7 @@ def acc_ref(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
     case Cli.Requires{x0} <> tail: acc_ref(tail, e, id, r, a, er)
     case Cli.Group{x0} <> tail: acc_ref(tail, e, id, r, a, er)
     case Cli.Builtin{} <> tail: acc_ref(tail, e, id, r, a, er)
+    case Cli.UsageStatus{x0} <> tail: acc_ref(tail, e, id, r, a, er)
 
 def ev_ref(events: List<&2, Cli.ScanEvent>, +L: List<&2, Cli.Item>,
     +id: String, +r: Cli.ArgInfo,
@@ -9903,6 +9950,7 @@ def glob_place(attrs: List<&2, Cli.Item>, +kind: Cli.UsageKind, +at: String,
     case Cli.Requires{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Requires{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
     case Cli.Group{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Group{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
     case Cli.Builtin{} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.Builtin{}, kind), at), Cli.placement_issues(tail, kind, at), e))
+    case Cli.UsageStatus{x0} <> +tail: glob_place(tail, kind, at, app_nil_right(Cli.maybe_misplaced(Cli.misplaced_attr_name(Cli.UsageStatus{x0}, kind), at), Cli.placement_issues(tail, kind, at), e))
 
 def argq_take(+kind: Cli.UsageKind, +id: String, +short: String,
     +long: String, +usage: String, +help: String, +attrs: List<&2, Cli.Item>,
@@ -10045,6 +10093,7 @@ def qtree(items: List<&2, Cli.Item>, +at: String, +ids: List<&2, String>,
     case Cli.Requires{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Requires{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
     case Cli.Group{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Group{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
     case Cli.Builtin{} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.Builtin{}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
+    case Cli.UsageStatus{x0} <> +tail: qtree(tail, at, ids, seen, inherited, optional, variadic, version, root, app_nil_right(Cli.maybe_misplaced(Cli.command_attr_name(Cli.UsageStatus{x0}, root), at), Cli.lint(Cli.lint_items(tail), at, ids, seen, inherited, optional, variadic, version, root), e))
 
 # What qt gives: at most one arg of id in items, none if seen holds one
 # (qam); seen's globals cover the items' global args (gcov); no global is
@@ -10220,6 +10269,7 @@ def qam(I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
     case Cli.Requires{x0} <> tail: qam(tail, S, H, id, q)
     case Cli.Group{x0} <> tail: qam(tail, S, H, id, q)
     case Cli.Builtin{} <> tail: qam(tail, S, H, id, q)
+    case Cli.UsageStatus{x0} <> tail: qam(tail, S, H, id, q)
 
 def b3(e: Bool, h: Bool, s: Bool, sg: Bool,
     l1: {Bool.or(Bool.not(e), s) == True{} : Bool},
@@ -10352,6 +10402,7 @@ def gcov_go(I: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +S: List<&2, Cli.Se
     case Cli.Requires{x0} <> tail: gcov_go(tail, all, S, H, id, q)
     case Cli.Group{x0} <> tail: gcov_go(tail, all, S, H, id, q)
     case Cli.Builtin{} <> tail: gcov_go(tail, all, S, H, id, q)
+    case Cli.UsageStatus{x0} <> tail: gcov_go(tail, all, S, H, id, q)
 
 def gcov(+I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
     +H: List<&2, Cli.Seen>, +id: String,
@@ -10452,6 +10503,7 @@ def gnonpos_go(I: List<&2, Cli.Item>, +all: List<&2, Cli.Item>, +S: List<&2, Cli
     case Cli.Requires{x0} <> tail: gnonpos_go(tail, all, S, H, q)
     case Cli.Group{x0} <> tail: gnonpos_go(tail, all, S, H, q)
     case Cli.Builtin{} <> tail: gnonpos_go(tail, all, S, H, q)
+    case Cli.UsageStatus{x0} <> tail: gnonpos_go(tail, all, S, H, q)
 
 def gnonpos(+I: List<&2, Cli.Item>, +S: List<&2, Cli.Seen>,
     +H: List<&2, Cli.Seen>, +q: {qt(I, S, H) == True{} : Bool}) ->
@@ -10597,6 +10649,7 @@ def sc_alias(cm: List<&2, Cli.Item>, +R: List<&2, Cli.Seen>, +n: String,
     case Cli.Requires{x0} <> tail: sc_alias(tail, R, n, e)
     case Cli.Group{x0} <> tail: sc_alias(tail, R, n, e)
     case Cli.Builtin{} <> tail: sc_alias(tail, R, n, e)
+    case Cli.UsageStatus{x0} <> tail: sc_alias(tail, R, n, e)
 
 def miss_first(+m: String, +cm: List<&2, Cli.Item>, +t: List<&2, Cli.Item>,
     +S: List<&2, Cli.Seen>, +n: String, -ch: List<&2, Cli.Item>,
@@ -10752,6 +10805,7 @@ def canon(I: List<&2, Cli.Item>, +x: String, +S: List<&2, Cli.Seen>,
     case Cli.Requires{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
     case Cli.Group{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
     case Cli.Builtin{} <> tail: canon(tail, x, S, H, n, ch, q, ef)
+    case Cli.UsageStatus{x0} <> tail: canon(tail, x, S, H, n, ch, q, ef)
 
 # P21 hits: the arg a scope's option lookup finds is the one arg_ref finds
 # for its id, so every arg of that id accepts the hit it makes.
@@ -10892,6 +10946,7 @@ def fo_ref(L: List<&2, Cli.Item>, +q: String, -x: Cli.ArgInfo, -pol: Bool,
     case Cli.Requires{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
     case Cli.Group{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
     case Cli.Builtin{} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
+    case Cli.UsageStatus{x0} <> tail: fo_ref(tail, q, x, pol, id, ef, am, eid)
 
 def ok_conv(+e: Cli.ScanEvent, +id: String, -a: Cli.ArgInfo,
     -b: Cli.ArgInfo, eab: {a == b : Cli.ArgInfo},
@@ -10962,6 +11017,7 @@ def acc_one(L: List<&2, Cli.Item>, +e: Cli.ScanEvent, +id: String,
     case Cli.Requires{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
     case Cli.Group{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
     case Cli.Builtin{} <> tail: acc_one(tail, e, id, r, am, er, ok)
+    case Cli.UsageStatus{x0} <> tail: acc_one(tail, e, id, r, am, er, ok)
 
 # What a scope's ghost lists hold: the items' lint tree, the seen ids
 # covering the inherited globals, which hold one arg of id at most and no
@@ -13041,6 +13097,7 @@ def ref_key(L: List<&2, Cli.Item>, +id: String, -r: Cli.ArgInfo,
     case Cli.Requires{x0} <> tail: ref_key(tail, id, r, er)
     case Cli.Group{x0} <> tail: ref_key(tail, id, r, er)
     case Cli.Builtin{} <> tail: ref_key(tail, id, r, er)
+    case Cli.UsageStatus{x0} <> tail: ref_key(tail, id, r, er)
 
 def ref_np_pick(c: Bool, info: Cli.ArgInfo, -rest: Maybe<&2, Cli.ArgInfo>,
     -r: Cli.ArgInfo,
@@ -13099,6 +13156,7 @@ def ref_np(L: List<&2, Cli.Item>, +id: String, -r: Cli.ArgInfo,
     case Cli.Requires{x0} <> tail: ref_np(tail, id, r, er, np)
     case Cli.Group{x0} <> tail: ref_np(tail, id, r, er, np)
     case Cli.Builtin{} <> tail: ref_np(tail, id, r, er, np)
+    case Cli.UsageStatus{x0} <> tail: ref_np(tail, id, r, er, np)
 
 # The arg of id, when there is one, is positional (PM) or not (NPm).
 def PM(m: Maybe<&2, Cli.ArgInfo>) -> Type:
@@ -13211,6 +13269,7 @@ def on(X: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>, +h: Cli.Host,
     case Cli.Requires{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
     case Cli.Group{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
     case Cli.Builtin{} <> tail: on(tail, events, h, id, m, er, ep, am)
+    case Cli.UsageStatus{x0} <> tail: on(tail, events, h, id, m, er, ep, am)
 
 def oa_kp(kp: Bool, +info: Cli.ArgInfo, +events: List<&2, Cli.ScanEvent>,
     +h: Cli.Host, later: Cli.FieldBuild, +id: String, -kind: Cli.UsageKind,
@@ -13313,6 +13372,7 @@ def oa(X: List<&2, Cli.Item>, +events: List<&2, Cli.ScanEvent>, +h: Cli.Host,
     case Cli.Requires{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
     case Cli.Group{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
     case Cli.Builtin{} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
+    case Cli.UsageStatus{x0} <> tail: oa(tail, events, h, id, r, er, enp, pg, am)
 
 def pn_kp(kp: Bool, +info: Cli.ArgInfo, +tail: List<&2, Cli.ArgInfo>,
     +toks: List<&2, String>, +h: Cli.Host, +id: String,
@@ -13425,6 +13485,7 @@ def pn(I: List<&2, Cli.Item>, +toks: List<&2, String>, +h: Cli.Host,
     case Cli.Requires{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
     case Cli.Group{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
     case Cli.Builtin{} <> tail: pn(tail, toks, h, id, m, er, np, am)
+    case Cli.UsageStatus{x0} <> tail: pn(tail, toks, h, id, m, er, np, am)
 
 # What a positional r builds from any tokens it takes before after's.
 def PPG(r: Cli.ArgInfo, h: Cli.Host, id: String) -> Type:
@@ -13541,6 +13602,7 @@ def pi(I: List<&2, Cli.Item>, +toks: List<&2, String>, +h: Cli.Host,
     case Cli.Requires{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
     case Cli.Group{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
     case Cli.Builtin{} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
+    case Cli.UsageStatus{x0} <> tail: pi(tail, toks, h, id, r, er, ep, ppg, am)
 
 def slist_disc(l: List<&2, String>) -> Data:
   match l:
@@ -13649,6 +13711,7 @@ def mi_go(X: List<&2, Cli.Item>, +all: List<&2, Cli.SpecItem>,
     case Cli.Requires{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
     case Cli.Group{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
     case Cli.Builtin{} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
+    case Cli.UsageStatus{x0} <> tail: mi_go(tail, all, fields, done, id, r, er, em)
 
 def ap_off(m: Bool, hr: Bool, d: Bool, -kp: Bool,
     ehr: {hr == False{} : Bool}, ed: {d == False{} : Bool},
@@ -14170,9 +14233,10 @@ def q_take(+name: String, -about: String, +items: List<&2, Cli.Item>,
   (p1, r1) = parts
   (p2, r2) = r1
   (p3, r3) = r2
+  (p4, r4) = r3
   qtree(items, name, Cli.scope_ids(Cli.lint_items(items)), Nil{},
     Cli.global_entries(Cli.lint_items(items)), False{}, False{},
-    Cli.has_version_item(items), True{}, p3)
+    Cli.has_version_item(items), True{}, p4)
 
 def lint_qt(+name: String, +about: String, +items: List<&2, Cli.Item>,
     e: {Cli.problems(Cli.Cmd{name, about, items}) == Nil{}
@@ -14859,23 +14923,163 @@ def Laws.g_lint_lines():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
     ({==}, ({==}, ({==}, {==}))))))))))))
 
+def Laws.g_lint_status():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, {==}))))))
+
 def Laws.g_lint_flag_default():
   ({==}, ({==}, ({==}, {==})))
 
+# P24: usage_code walks the root's items to the first usage_status, which
+# it keeps when the code fits; that code is one status_named finds.
+def u32_refl(x: U32) -> {True{} == U32.is_eq(x, x) : Bool}:
+  match x:
+    case U32{w}:
+      %word_cmp_refl(32n, w) : {True{} == Cmp.is_eq(_) : Bool}
+      {==}
+
+def p24_head(+n: U32, tail: List<&2, Cli.Item>, b: Bool,
+    e: {b == Cli.status_fits(n) : Bool}) ->
+    {Laws.p24_code(Bool.pick(U32, b, n, 2), Cli.UsageStatus{n} <> tail)
+      == True{} : Bool}:
+  match b:
+    case False{}: {==}
+    case True{}:
+      %e : {Bool.and(_, Bool.or(U32.is_eq(n, 2),
+        Bool.or(U32.is_eq(n, n), Laws.status_named(tail, n)))) == True{}
+        : Bool}
+      %u32_refl(n) : {Bool.or(U32.is_eq(n, 2),
+        Bool.or(_, Laws.status_named(tail, n))) == True{} : Bool}
+      or_true_right(U32.is_eq(n, 2))
+
+# Arms: python3 tools/ctorarms.py --prefix Cli. --skip UsageStatus cli.bend Item '$P <> tail' 'p24_walk(tail)'
+def p24_walk(items: List<&2, Cli.Item>) ->
+    {Laws.p24_code(Cli.status_code(items), items) == True{} : Bool}:
+  match items:
+    case Nil{}: {==}
+    case Cli.UsageStatus{+n} <> tail:
+      p24_head(n, tail, Cli.status_fits(n), {==})
+    case Cli.Arg{x0, x1, x2} <> tail: p24_walk(tail)
+    case Cli.Sub{x0, x1, x2} <> tail: p24_walk(tail)
+    case Cli.Version{x0} <> tail: p24_walk(tail)
+    case Cli.Alias{x0} <> tail: p24_walk(tail)
+    case Cli.Hidden{} <> tail: p24_walk(tail)
+    case Cli.Example{x0, x1} <> tail: p24_walk(tail)
+    case Cli.After{x0} <> tail: p24_walk(tail)
+    case Cli.SubOptional{} <> tail: p24_walk(tail)
+    case Cli.External{} <> tail: p24_walk(tail)
+    case Cli.Exclusive{x0} <> tail: p24_walk(tail)
+    case Cli.NeedOne{x0} <> tail: p24_walk(tail)
+    case Cli.Id{x0} <> tail: p24_walk(tail)
+    case Cli.Required{} <> tail: p24_walk(tail)
+    case Cli.AttrDefault{x0} <> tail: p24_walk(tail)
+    case Cli.AttrEnv{x0} <> tail: p24_walk(tail)
+    case Cli.Global{} <> tail: p24_walk(tail)
+    case Cli.Heading{x0} <> tail: p24_walk(tail)
+    case Cli.As{x0} <> tail: p24_walk(tail)
+    case Cli.OneOf{x0} <> tail: p24_walk(tail)
+    case Cli.Delim{x0} <> tail: p24_walk(tail)
+    case Cli.Hyphen{} <> tail: p24_walk(tail)
+    case Cli.Rest{} <> tail: p24_walk(tail)
+    case Cli.Bare{x0} <> tail: p24_walk(tail)
+    case Cli.Conflicts{x0} <> tail: p24_walk(tail)
+    case Cli.Requires{x0} <> tail: p24_walk(tail)
+    case Cli.Group{x0} <> tail: p24_walk(tail)
+    case Cli.Builtin{} <> tail: p24_walk(tail)
+
+def Laws.p24(name, about, items):
+  p24_walk(items)
+
+# usage_code is not 0, either way round, since P24 makes it at least 1.
+def u32_reflect(x: U32, y: U32, e: {U32.is_eq(x, y) == True{} : Bool}) ->
+    {x == y : U32}:
+  match x y:
+    case U32{+a} U32{+b}:
+      %word_reflect(32n, a, b, is_eq_true(Word.cmp(32n, a, b), e)) :
+        {U32{a} == U32{_} : U32}
+      {==}
+
+def u32_flip(+x: U32, +y: U32, e: {x == y : U32}) -> {y == x : U32}:
+  %e : {_ == x : U32}
+  {==}
+
+def le1_zero(+n: U32, ez: {n == 0 : U32},
+    e: {U32.is_le(1, n) == True{} : Bool}) -> {False{} == True{} : Bool}:
+  %ez : {U32.is_le(1, _) == True{} : Bool}
+  e
+
+def nonzero_go(+n: U32, c: Bool, ec: {U32.is_eq(n, 0) == c : Bool},
+    e: {U32.is_le(1, n) == True{} : Bool}) -> {False{} == c : Bool}:
+  match c:
+    case False{}: {==}
+    case True{}: le1_zero(n, u32_reflect(n, 0, ec), e)
+
+def zero_nonzero_go(+n: U32, c: Bool, ec: {U32.is_eq(0, n) == c : Bool},
+    e: {U32.is_le(1, n) == True{} : Bool}) -> {False{} == c : Bool}:
+  match c:
+    case False{}: {==}
+    case True{}: le1_zero(n, u32_flip(0, n, u32_reflect(0, n, ec)), e)
+
+def usage_pos(c: Cli.Cmd) ->
+    {U32.is_le(1, Cli.usage_code(c)) == True{} : Bool}:
+  match c:
+    case Cli.Cmd{+name, +about, +items}:
+      and_left(U32.is_le(1, Cli.status_code(items)),
+        U32.is_le(Cli.status_code(items), 255),
+        and_left(Bool.and(U32.is_le(1, Cli.status_code(items)),
+          U32.is_le(Cli.status_code(items), 255)),
+          Bool.or(U32.is_eq(Cli.status_code(items), 2),
+            Laws.status_named(items, Cli.status_code(items))),
+          Laws.p24(name, about, items)))
+
+def usage_nonzero(+c: Cli.Cmd) ->
+    {False{} == U32.is_eq(Cli.usage_code(c), 0) : Bool}:
+  nonzero_go(Cli.usage_code(c), U32.is_eq(Cli.usage_code(c), 0), {==},
+    usage_pos(c))
+
+def zero_not_usage(+c: Cli.Cmd) ->
+    {False{} == U32.is_eq(0, Cli.usage_code(c)) : Bool}:
+  zero_nonzero_go(Cli.usage_code(c), U32.is_eq(0, Cli.usage_code(c)), {==},
+    usage_pos(c))
+
+# Each of eval's exits passes P10 and P11: 0 and 70 by value, and the
+# spec's usage code u, which P24 keeps apart from 0.
+def p10_usage(+u: U32) ->
+    {Bool.or(U32.is_eq(u, 0), Bool.or(U32.is_eq(u, u), U32.is_eq(u, 70)))
+      == True{} : Bool}:
+  %u32_refl(u) :
+    {Bool.or(U32.is_eq(u, 0), Bool.or(_, U32.is_eq(u, 70))) == True{}
+      : Bool}
+  or_true_right(U32.is_eq(u, 0))
+
+def p11_usage(-A: Type, +u: U32, err: String,
+    nz: {False{} == U32.is_eq(u, 0) : Bool}) ->
+    {Laws.p11_streams(A, Cli.Quit{u, "", err}, u) == True{} : Bool}:
+  %nz : {Bool.and(Bool.or(Bool.not(_), String.is_empty(err)),
+    Bool.or(Bool.not(Bool.or(U32.is_eq(u, u), U32.is_eq(u, 70))),
+      True{})) == True{} : Bool}
+  or_true_right(Bool.not(Bool.or(U32.is_eq(u, u), U32.is_eq(u, 70))))
+
+def p11_zero(-A: Type, +u: U32, out: String,
+    nz: {False{} == U32.is_eq(0, u) : Bool}) ->
+    {Laws.p11_streams(A, Cli.Quit{0, out, ""}, u) == True{} : Bool}:
+  %nz : {Bool.or(Bool.not(Bool.or(_, False{})), String.is_empty(out))
+    == True{} : Bool}
+  {==}
+
 # P10 and P11 follow eval_with's cases: lint, then the parse, then a
 # built-in's page or the decoder's answer at the matched scope.
-def p10_fault(-A: Type, f: Cli.Fault, cmd: Cli.Cmd,
+def p10_fault(-A: Type, f: Cli.Fault, +cmd: Cli.Cmd,
     path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
-    {Laws.p10_code(A, Cli.faulted(A, f, cmd, path, h, argv)) == True{}
-      : Bool}:
+    {Laws.p10_code(A, Cli.faulted(A, f, cmd, path, h, argv),
+      Cli.usage_code(cmd)) == True{} : Bool}:
   match f:
-    case Cli.Bug{msg}: {==}
-    case Cli.Usage{msg}: {==}
+    case Cli.Bug{msg}: or_true_right(U32.is_eq(70, Cli.usage_code(cmd)))
+    case Cli.Usage{msg}: p10_usage(Cli.usage_code(cmd))
 
 def p10_decoded(-A: Type, d: Cli.Dec(A), cmd: Cli.Cmd,
     path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
-    {Laws.p10_code(A, Cli.decoded(A, d, cmd, path, h, argv)) == True{}
-      : Bool}:
+    {Laws.p10_code(A, Cli.decoded(A, d, cmd, path, h, argv),
+      Cli.usage_code(cmd)) == True{} : Bool}:
   match d:
     case Done{a}: {==}
     case Fail{f}: p10_fault(A, f, cmd, path, h, argv)
@@ -14886,7 +15090,7 @@ def p10_accepted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     fields: List<&2, Cli.Field>, external: Maybe<&2, Cli.ExternalArgs>,
     h: Cli.Host, argv: List<&2, String>) ->
     {Laws.p10_code(A, Cli.eval_step(A, decode, Cli.outcome_accepted(builtin, c,
-      path, fields, external), h, argv)) == True{} : Bool}:
+      path, fields, external), h, argv), Cli.usage_code(c)) == True{} : Bool}:
   match builtin:
     case Some{name}: {==}
     case None{}:
@@ -14897,7 +15101,7 @@ def p10_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     r: Cli.ParseResult, +c: Cli.Cmd, +h: Cli.Host,
     +argv: List<&2, String>) ->
     {Laws.p10_code(A, Cli.eval_step(A, decode, Cli.outcome_parse(r, c, h,
-      argv), h, argv)) == True{} : Bool}:
+      argv), h, argv), Cli.usage_code(c)) == True{} : Bool}:
   match r:
     case Cli.Accepted{+path, fields, external}:
       p10_accepted(A, decode,
@@ -14905,39 +15109,43 @@ def p10_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
         fields, external, h, argv)
     case Cli.HelpRequested{path, long}: {==}
     case Cli.VersionRequested{}: {==}
-    case Cli.SummaryRequired{}: {==}
-    case Cli.Rejected{path, fault}: {==}
+    case Cli.SummaryRequired{}: p10_usage(Cli.usage_code(c))
+    case Cli.Rejected{path, fault}: p10_usage(Cli.usage_code(c))
 
 def p10_lint(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     found: List<&2, Cli.Problem>, +c: Cli.Cmd, +h: Cli.Host,
     +argv: List<&2, String>) ->
     {Laws.p10_code(A, Cli.eval_step(A, decode, Cli.outcome_lint(found, c, h,
-      argv), h, argv)) == True{} : Bool}:
+      argv), h, argv), Cli.usage_code(c)) == True{} : Bool}:
   match found:
     case Nil{}: p10_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
-    case p <> tail: {==}
+    case p <> tail: or_true_right(U32.is_eq(70, Cli.usage_code(c)))
 
 def p10_cmd(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A), +c: Cli.Cmd,
     h: Cli.Host, argv: List<&2, String>) ->
-    {Laws.p10_code(A, Cli.eval_with(A, decode, c, h, argv)) == True{}
-      : Bool}:
+    {Laws.p10_code(A, Cli.eval_with(A, decode, c, h, argv),
+      Cli.usage_code(c)) == True{} : Bool}:
   p10_lint(A, decode, Cli.problems(c), c, h, argv)
 
 def Laws.p10(A, decode, c, h, argv):
   p10_cmd(A, decode, c, h, argv)
 
-def p11_fault(-A: Type, f: Cli.Fault, cmd: Cli.Cmd,
-    path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
-    {Laws.p11_streams(A, Cli.faulted(A, f, cmd, path, h, argv)) == True{}
-      : Bool}:
+def p11_fault(-A: Type, f: Cli.Fault, +cmd: Cli.Cmd,
+    +path: List<&2, String>, +h: Cli.Host, +argv: List<&2, String>) ->
+    {Laws.p11_streams(A, Cli.faulted(A, f, cmd, path, h, argv),
+      Cli.usage_code(cmd)) == True{} : Bool}:
   match f:
-    case Cli.Bug{msg}: {==}
-    case Cli.Usage{msg}: {==}
+    case Cli.Bug{msg}:
+      or_true_right(Bool.not(Bool.or(U32.is_eq(70, Cli.usage_code(cmd)),
+        True{})))
+    case Cli.Usage{msg}:
+      p11_usage(A, Cli.usage_code(cmd), Cli.usage_err(Cli.term(cmd, h, argv),
+        msg, Cli.view_of(cmd, path)), usage_nonzero(cmd))
 
 def p11_decoded(-A: Type, d: Cli.Dec(A), cmd: Cli.Cmd,
     path: List<&2, String>, h: Cli.Host, argv: List<&2, String>) ->
-    {Laws.p11_streams(A, Cli.decoded(A, d, cmd, path, h, argv)) == True{}
-      : Bool}:
+    {Laws.p11_streams(A, Cli.decoded(A, d, cmd, path, h, argv),
+      Cli.usage_code(cmd)) == True{} : Bool}:
   match d:
     case Done{a}: {==}
     case Fail{f}: p11_fault(A, f, cmd, path, h, argv)
@@ -14948,9 +15156,11 @@ def p11_accepted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     fields: List<&2, Cli.Field>, external: Maybe<&2, Cli.ExternalArgs>,
     h: Cli.Host, argv: List<&2, String>) ->
     {Laws.p11_streams(A, Cli.eval_step(A, decode, Cli.outcome_accepted(builtin, c,
-      path, fields, external), h, argv)) == True{} : Bool}:
+      path, fields, external), h, argv), Cli.usage_code(c)) == True{} : Bool}:
   match builtin:
-    case Some{name}: {==}
+    case Some{name}:
+      p11_zero(A, Cli.usage_code(c), Cli.builtin_page(String.eq(name, "man"),
+        c, fields), zero_not_usage(c))
     case None{}:
       p11_decoded(A, decode(Cli.Matches{c, path, fields, external}), c,
         path, h, argv)
@@ -14959,30 +15169,40 @@ def p11_parse(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     r: Cli.ParseResult, +c: Cli.Cmd, +h: Cli.Host,
     +argv: List<&2, String>) ->
     {Laws.p11_streams(A, Cli.eval_step(A, decode, Cli.outcome_parse(r, c, h,
-      argv), h, argv)) == True{} : Bool}:
+      argv), h, argv), Cli.usage_code(c)) == True{} : Bool}:
   match r:
     case Cli.Accepted{+path, fields, external}:
       p11_accepted(A, decode,
         Cli.builtin_name(Cli.sub_at(path, Cli.cmd_items(c), None{})), c, path,
         fields, external, h, argv)
-    case Cli.HelpRequested{path, long}: {==}
-    case Cli.VersionRequested{}: {==}
-    case Cli.SummaryRequired{}: {==}
-    case Cli.Rejected{path, fault}: {==}
+    case Cli.HelpRequested{path, long}:
+      p11_zero(A, Cli.usage_code(c), Cli.help_out(Cli.term(c, h, argv),
+        Cli.view_of(c, path), long), zero_not_usage(c))
+    case Cli.VersionRequested{}:
+      p11_zero(A, Cli.usage_code(c), String.concat([Cli.cmd_name(c), " ",
+        Cli.find_version(Cli.cmd_items(c)), "\n"]), zero_not_usage(c))
+    case Cli.SummaryRequired{}:
+      p11_usage(A, Cli.usage_code(c), Cli.summary_err(Cli.term(c, h, argv),
+        Cli.view_of(c, [])), usage_nonzero(c))
+    case Cli.Rejected{+path, fault}:
+      p11_usage(A, Cli.usage_code(c), Cli.fault_err(Cli.term(c, h, argv),
+        fault, c, path, argv), usage_nonzero(c))
 
 def p11_lint(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     found: List<&2, Cli.Problem>, +c: Cli.Cmd, +h: Cli.Host,
     +argv: List<&2, String>) ->
     {Laws.p11_streams(A, Cli.eval_step(A, decode, Cli.outcome_lint(found, c, h,
-      argv), h, argv)) == True{} : Bool}:
+      argv), h, argv), Cli.usage_code(c)) == True{} : Bool}:
   match found:
     case Nil{}: p11_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
-    case p <> tail: {==}
+    case p <> tail:
+      or_true_right(Bool.not(Bool.or(U32.is_eq(70, Cli.usage_code(c)),
+        True{})))
 
 def p11_cmd(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A), +c: Cli.Cmd,
     h: Cli.Host, argv: List<&2, String>) ->
-    {Laws.p11_streams(A, Cli.eval_with(A, decode, c, h, argv)) == True{}
-      : Bool}:
+    {Laws.p11_streams(A, Cli.eval_with(A, decode, c, h, argv),
+      Cli.usage_code(c)) == True{} : Bool}:
   p11_lint(A, decode, Cli.problems(c), c, h, argv)
 
 def Laws.p11(A, decode, c, h, argv):
@@ -15028,8 +15248,8 @@ def Laws.p17(c):
 
 def p10_on_linted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     l: Cli.Linted, +h: Cli.Host, +argv: List<&2, String>) ->
-    {Laws.p10_code(A, Cli.eval_linted_with(A, decode, l, h, argv))
-      == True{} : Bool}:
+    {Laws.p10_code(A, Cli.eval_linted_with(A, decode, l, h, argv),
+      Laws.linted_usage(l)) == True{} : Bool}:
   match l:
     case Cli.Linted{+c}:
       p10_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
@@ -15039,8 +15259,8 @@ def Laws.p10_linted(A, decode, l, h, argv):
 
 def p11_on_linted(-A: Type, decode: @+m: Cli.Matches -> Cli.Dec(A),
     l: Cli.Linted, +h: Cli.Host, +argv: List<&2, String>) ->
-    {Laws.p11_streams(A, Cli.eval_linted_with(A, decode, l, h, argv))
-      == True{} : Bool}:
+    {Laws.p11_streams(A, Cli.eval_linted_with(A, decode, l, h, argv),
+      Laws.linted_usage(l)) == True{} : Bool}:
   match l:
     case Cli.Linted{+c}:
       p11_parse(A, decode, Cli.parse(c, h, argv), c, h, argv)
@@ -15177,6 +15397,10 @@ def Laws.g_rel_global_groups_eval():
 def Laws.g_err_decode():
   ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
     {==})))))))))
+
+def Laws.g_err_status():
+  ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==}, ({==},
+    ({==}, ({==}, ({==}, ({==}, ({==}, {==})))))))))))))))
 
 def Laws.g_lint_exit():
   ({==}, ({==}, ({==}, {==})))

@@ -340,3 +340,28 @@
 #   program or program_opt read.
 # the new FID_CLI_REST_VERDICT 0 0 4: the seals build the four-cell list
 #   String.concat joins into the message, only for a slot without rest().
+#
+# usage_status (#45), against main's build (c738b36); the static total
+# 5639 -> 5731 (main.bend 5767 -> 5856). On a spec without usage_status no
+# executed count rises but problems' keep and its concat cell, once a run:
+# when_problem, inlined at each call site, rebuilds the flattened Problem
+#   with an arm per constructor, so BadStatus adds an arm of two seals at
+#   every site: FID_CLI_ARG_ALIAS_ISSUE 7 6 41 -> 7 6 43, FID_CLI_ARG_ISSUES
+#   20 6 117 -> 20 6 123, FID_CLI_ARG_PROBLEMS 8 2 43 -> 8 2 45,
+#   FID_CLI_COMMAND_BODY_ISSUES 9 0 76 -> 9 0 80, FID_CLI_MISSING_REFS
+#   3 1 33 -> 3 1 35, FID_CLI_POSITIONAL_ISSUE 6 0 48 -> 6 0 50,
+#   FID_CLI_SUB_ALIAS_ISSUE 6 3 41 -> 6 3 43, FID_CLI_SUB_NAME_ISSUES
+#   6 3 70 -> 6 3 74 and, in bench/main.bend, FID_CLI_LINTED 3 15 33 ->
+#   3 16 35. Only a BadStatus runs the arm.
+# FID_CLI_PROBLEM_LINE 0 0 124 -> 0 0 132 and FID_CLI_PROBLEM_LINES 0 15 6
+#   -> 0 16 6: BadStatus's line, run only to print it.
+# FID_CLI_PROBLEMS 9 0 39 -> 10 0 43 and the new FID_CLI_STATUS_ISSUES
+#   1 0 35: problems keeps items for status_issues and conses its part onto
+#   the concat list; status_issues walks the root's items once a lint,
+#   keeping at only for a usage_status, and its seals are when_problem's.
+# FID_CLI_OUTCOME 26 22 39 -> 32 25 41 and FID_CLI_EVAL_0 51 15 132 ->
+#   54 16 132 (bench/main.bend: FID_CLI_OUTCOME_PARSE 18 7 6 -> 24 9 6,
+#   FID_CLI_OUTCOME 8 15 33 -> 8 16 35, FID_CLI_EVAL_STEP 7 4 12 ->
+#   10 5 12): usage_code, inlined at the summary's, a rejected command
+#   line's and a decoder Usage's arms, keeps the spec's three fields and
+#   takes its items to find the code. One of them runs once, on an error.
